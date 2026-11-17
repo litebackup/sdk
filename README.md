@@ -10,7 +10,7 @@ import Database from "better-sqlite3";
 import { backup } from "@litebackup/sdk";
 
 const db = new Database("/var/lib/app/main.sqlite");
-backup(db);
+backup(db); // Start continuous backups in the background.
 ```
 
 Or add backups to an existing app with the CLI:
