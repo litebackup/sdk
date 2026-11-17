@@ -1,0 +1,16 @@
+{
+  "name": "@litebackup/bin-darwin-arm64",
+  "version": "0.3.30",
+  "description": "The litebackup binary for darwin arm64, installed by @litebackup/sdk",
+  "license": "UNLICENSED",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/litebackup"
+  ],
+  "preferUnplugged": true
+}

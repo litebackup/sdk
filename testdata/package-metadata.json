@@ -1,0 +1,65 @@
+{
+  "packages": [
+    {
+      "installation_available": true,
+      "type": "cli",
+      "install_scope": "system",
+      "executable": "litebackup",
+      "slug": "cli",
+      "name": "litebackup command",
+      "description": "The litebackup command for Linux and macOS: protects databases on the machine it runs on and manages your instance.",
+      "releases": [
+        {
+          "version": "0.3.30",
+          "artifacts": [
+            {
+              "name": "litebackup-linux-amd64",
+              "filename": "litebackup-linux-amd64",
+              "url": "https://litebackup-cdn.com/litebackup/0.3.30/litebackup-linux-amd64",
+              "sha256": "3338a925ace256760fe48c1fb660c6ffdcc9be570fef5af7f40f8d34ae9391d7",
+              "size": 47322128,
+              "os": "linux",
+              "architecture": "amd64"
+            },
+            {
+              "name": "litebackup-linux-arm64",
+              "filename": "litebackup-linux-arm64",
+              "url": "https://litebackup-cdn.com/litebackup/0.3.30/litebackup-linux-arm64",
+              "sha256": "b366fc4824a08d46beb8bd20837caa84d6e043ca73f4e639c2cd365edf29319c",
+              "size": 43427232,
+              "os": "linux",
+              "architecture": "arm64"
+            },
+            {
+              "name": "litebackup-darwin-amd64",
+              "filename": "litebackup-darwin-amd64",
+              "url": "https://litebackup-cdn.com/litebackup/0.3.30/litebackup-darwin-amd64",
+              "sha256": "1e67e517af310a2d530ec9430f69ca1f2c3480f372cd46d67764036e9047f67d",
+              "size": 47332521,
+              "os": "darwin",
+              "architecture": "amd64"
+            },
+            {
+              "name": "litebackup-darwin-arm64",
+              "filename": "litebackup-darwin-arm64",
+              "url": "https://litebackup-cdn.com/litebackup/0.3.30/litebackup-darwin-arm64",
+              "sha256": "e3dac09a836f86707879a13cb14b30b424b8c6a0b80b0d2e474a08983867b9fd",
+              "size": 43914962,
+              "os": "darwin",
+              "architecture": "arm64"
+            }
+          ],
+          "channels": [
+            "stable"
+          ],
+          "signature": {
+            "key_id": "01a1ead6-4b94-79ca-81f4-3a67c112bc0b",
+            "document": "eyJ2ZXJzaW9uIjoiMC4zLjMwIiwiYXJ0aWZhY3RzIjpbeyJuYW1lIjoibGl0ZWJhY2t1cC1saW51eC1hbWQ2NCIsImZpbGVuYW1lIjoibGl0ZWJhY2t1cC1saW51eC1hbWQ2NCIsInVybCI6Imh0dHBzOi8vbGl0ZWJhY2t1cC1jZG4uY29tL2xpdGViYWNrdXAvMC4zLjMwL2xpdGViYWNrdXAtbGludXgtYW1kNjQiLCJzaGEyNTYiOiIzMzM4YTkyNWFjZTI1Njc2MGZlNDhjMWZiNjYwYzZmZmRjYzliZTU3MGZlZjVhZjdmNDBmOGQzNGFlOTM5MWQ3Iiwic2l6ZSI6NDczMjIxMjgsIm9zIjoibGludXgiLCJhcmNoaXRlY3R1cmUiOiJhbWQ2NCJ9LHsibmFtZSI6ImxpdGViYWNrdXAtbGludXgtYXJtNjQiLCJmaWxlbmFtZSI6ImxpdGViYWNrdXAtbGludXgtYXJtNjQiLCJ1cmwiOiJodHRwczovL2xpdGViYWNrdXAtY2RuLmNvbS9saXRlYmFja3VwLzAuMy4zMC9saXRlYmFja3VwLWxpbnV4LWFybTY0Iiwic2hhMjU2IjoiYjM2NmZjNDgyNGEwOGQ0NmJlYjhiZDIwODM3Y2FhODRkNmUwNDNjYTczZjRlNjM5YzJjZDM2NWVkZjI5MzE5YyIsInNpemUiOjQzNDI3MjMyLCJvcyI6ImxpbnV4IiwiYXJjaGl0ZWN0dXJlIjoiYXJtNjQifSx7Im5hbWUiOiJsaXRlYmFja3VwLWRhcndpbi1hbWQ2NCIsImZpbGVuYW1lIjoibGl0ZWJhY2t1cC1kYXJ3aW4tYW1kNjQiLCJ1cmwiOiJodHRwczovL2xpdGViYWNrdXAtY2RuLmNvbS9saXRlYmFja3VwLzAuMy4zMC9saXRlYmFja3VwLWRhcndpbi1hbWQ2NCIsInNoYTI1NiI6IjFlNjdlNTE3YWYzMTBhMmQ1MzBlYzk0MzBmNjljYTFmMmMzNDgwZjM3MmNkNDZkNjc3NjQwMzZlOTA0N2Y2N2QiLCJzaXplIjo0NzMzMjUyMSwib3MiOiJkYXJ3aW4iLCJhcmNoaXRlY3R1cmUiOiJhbWQ2NCJ9LHsibmFtZSI6ImxpdGViYWNrdXAtZGFyd2luLWFybTY0IiwiZmlsZW5hbWUiOiJsaXRlYmFja3VwLWRhcndpbi1hcm02NCIsInVybCI6Imh0dHBzOi8vbGl0ZWJhY2t1cC1jZG4uY29tL2xpdGViYWNrdXAvMC4zLjMwL2xpdGViYWNrdXAtZGFyd2luLWFybTY0Iiwic2hhMjU2IjoiZTNkYWMwOWE4MzZmODY3MDc4NzlhMTNjYjE0YjMwYjQyNGI4YzZhMGI4MGIwZDJlNDc0YTA4OTgzODY3YjlmZCIsInNpemUiOjQzOTE0OTYyLCJvcyI6ImRhcndpbiIsImFyY2hpdGVjdHVyZSI6ImFybTY0In1dfQ",
+            "signature": "OH8zqB8vaImr_623CHQ5dEEb0ED03O-ccLa9u1rs12Yf0sP2W4nc5DyoJ30ECAAS9iWTwAKs_XVIkpwNWZ8LBw"
+          }
+        }
+      ]
+    }
+  ],
+  "count": 1
+}

@@ -1,0 +1,35 @@
+#!/usr/bin/env node
+// Pack the SDK and this platform's binary package, install both into a scratch project, and check the binary resolves and runs.
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const platform = `${process.platform}-${process.arch}`;
+const scratch = mkdtempSync(join(tmpdir(), "litebackup-pack-"));
+try {
+  const pack = (directory) => execFileSync("npm", ["pack", "--silent", "--pack-destination", scratch], { cwd: directory, encoding: "utf8" }).trim().split("\n").pop();
+  const sdkTarball = pack(root);
+  const binaryTarball = pack(join(root, "npm", platform));
+  writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "pack-check", private: true, type: "module" }));
+  execFileSync("npm", ["install", "--silent", "--no-audit", "--no-fund", "--omit=optional", join(scratch, binaryTarball), join(scratch, sdkTarball)], { cwd: scratch, stdio: "inherit" });
+  writeFileSync(
+    join(scratch, "check.mjs"),
+    [
+      'import { execFileSync } from "node:child_process";',
+      'import { backup, failover, litebackupBinary, replicate, replicatePrefix, restore, versions, Litebackup } from "@litebackup/sdk";',
+      'for (const [name, value] of Object.entries({ backup, failover, replicate, replicatePrefix, restore, versions, connect: Litebackup.connect })) {',
+      '  if (typeof value !== "function") throw new Error(`the package does not export ${name}`);',
+      '}',
+      "const binary = litebackupBinary({});",
+      'if (!binary.includes("node_modules")) throw new Error(`resolved ${binary} instead of the platform package`);',
+      'console.log(binary, execFileSync(binary, ["--version"], { encoding: "utf8" }).trim());',
+    ].join("\n"),
+  );
+  execFileSync("node", ["check.mjs"], { cwd: scratch, stdio: "inherit" });
+  console.log(`pack check passed for ${platform}: ${sdkTarball}, ${binaryTarball}`);
+} finally {
+  rmSync(scratch, { recursive: true, force: true });
+}

@@ -1,0 +1,46 @@
+#!/usr/bin/env node
+// Copy litebackup binaries from scripts/build archives into the npm platform packages.
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, copyFileSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const distribution = process.argv[2];
+if (!distribution || !existsSync(distribution)) {
+  console.error("usage: scripts/stage-platforms <litebackup dist directory>");
+  process.exit(1);
+}
+const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+// npm names architectures x64 and arm64; Go names them amd64 and arm64.
+const platforms = [
+  ["linux", "x64", "amd64"],
+  ["linux", "arm64", "arm64"],
+  ["darwin", "x64", "amd64"],
+  ["darwin", "arm64", "arm64"],
+];
+let staged = 0;
+for (const [system, npmArchitecture, goArchitecture] of platforms) {
+  const archive = join(distribution, `litebackup-${version}-${system}-${goArchitecture}.tar.zst`);
+  const target = join(root, "npm", `${system}-${npmArchitecture}`, "bin");
+  if (!existsSync(archive)) {
+    console.warn(`skipping ${system}-${npmArchitecture}: ${archive} is missing`);
+    continue;
+  }
+  const extracted = mkdtempSync(join(tmpdir(), "litebackup-stage-"));
+  try {
+    execFileSync("tar", ["--zstd", "--extract", "--file", archive, "--directory", extracted]);
+    mkdirSync(target, { recursive: true });
+    copyFileSync(join(extracted, "litebackup"), join(target, "litebackup"));
+    chmodSync(join(target, "litebackup"), 0o755);
+    staged++;
+    console.log(`staged ${system}-${npmArchitecture}`);
+  } finally {
+    rmSync(extracted, { recursive: true, force: true });
+  }
+}
+if (staged === 0) {
+  console.error("no platform archives found");
+  process.exit(1);
+}

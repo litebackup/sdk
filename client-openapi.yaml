@@ -1,0 +1,1374 @@
+openapi: 3.0.3
+info:
+  title: Litebackup socket API
+  version: 0.3.18
+  description: The Litebackup client's unix-socket API for SDKs and the litebackup CLI. Every call carries X-Litebackup-SDK-Version; responses carry X-Litebackup-Client-Version and X-Litebackup-Minimum-SDK-Version, and an SDK older than the minimum is refused with 426 sdk_unsupported.
+paths:
+  /v1/status/show:
+    get:
+      operationId: showStatus
+      description: Session, server, and every database on this machine with its role and state.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '500':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/databases/list:
+    get:
+      operationId: listDatabases
+      description: Every database on this machine with its role and state.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseStatusList'
+        '500':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/databases/status:
+    get:
+      operationId: showDatabaseStatus
+      description: 'One database: its role, state, and the versions the server and the bucket hold.'
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseStatus'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+  /v1/databases/versions:
+    get:
+      operationId: listVersions
+      description: The versions of a database the server can restore, oldest first, from server history and kept bucket objects.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionList'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: last version of the previous page
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+  /v1/databases/restore:
+    post:
+      operationId: restoreDatabase
+      description: Write a version of a database to a new file and run quick_check. The path must be absolute, its directory must exist, and an existing file is never overwritten (409 exists). The file belongs to the user the daemon runs as.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreResult'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreRequest'
+  /v1/databases/sync:
+    post:
+      operationId: syncDatabase
+      description: Sync a database now and wait for the server acknowledgement.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseStatus'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NameRequest'
+  /v1/databases/acquire:
+    post:
+      operationId: acquireDatabase
+      description: Take the write lock on a database and make the local file the server head, for worker pools that move databases between machines. An existing file becomes the first version when the server has none, is adopted when its hashes match the head, and is fast-forwarded when it is a clean but stale copy. An empty file, as an app leaves after opening a new database without writing, counts as no copy; it becomes a new database when the server has none and is replaced by the head otherwise. Any other existing file is a conflict and is left untouched. A copy this machine wrote that diverged is saved as the conflict copy <path>.conflict-<time>.sqlite and the head is written in its place. Without a path, the path this machine already uses is taken, which brings an offloaded database back.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcquireResult'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '423':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcquireRequest'
+  /v1/databases/release:
+    post:
+      operationId: releaseDatabase
+      description: Sync an acquired database a final time, run its maintenance, and release its write lock.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseResult'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseRequest'
+  /v1/databases/offload:
+    post:
+      operationId: offloadDatabase
+      description: Remove the local file of a released database once the server reports its last version is in the bucket. acquire brings it back.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseStatus'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NameRequest'
+  /v1/databases/writer:
+    get:
+      operationId: showWriter
+      description: Which machine writes a database, when its lease runs out, and whether it ran out.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Writer'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+  /v1/backups/start:
+    post:
+      operationId: startBackup
+      description: Back up a database, or every database matching a glob, and keep syncing it. The name is the file name, lowercased with other characters turned into -, after an optional prefix; name sets it outright. When another machine already writes that name the call fails with 409 name_in_use, and nothing is overwritten. With wait, the call returns once the server or the bucket holds the first version.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Backup'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackupRequest'
+  /v1/backups/list:
+    get:
+      operationId: listBackups
+      description: Every backup and failover on this machine with how many databases each syncs.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupList'
+        '500':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/backups/stop:
+    post:
+      operationId: stopBackup
+      description: Stop a backup or failover (failovers stop here too), named by its ID, its database name, or its path, and release its write locks. The files stay.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empty'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopBackupRequest'
+  /v1/failovers/start:
+    post:
+      operationId: startFailover
+      description: Run a database on several identical machines. The machine that holds the write lock is the origin and backs the file up; the others keep live readonly replicas at the same path. Each replica asks for the lock about once a second, so one of them takes over once the origin's lease runs out.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Failover'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FailoverRequest'
+  /v1/replicas/start:
+    post:
+      operationId: startReplica
+      description: Keep a live readonly replica of a database, or of every database under a prefix, that streams from the server. A single replica returns once its first version is local.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplicaResult'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplicaRequest'
+  /v1/replicas/list:
+    get:
+      operationId: listReplicas
+      description: Prefix replicas and every replica with its version.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplicaList'
+        '500':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/replicas/stop:
+    post:
+      operationId: stopReplica
+      description: Stop a replica, or a prefix and its replicas. The files stay, unlocked, at their last version.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empty'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopReplicaRequest'
+  /v1/conflicts/list:
+    get:
+      operationId: listConflicts
+      description: Conflict copies, the local copies saved because they diverged from the server.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictList'
+        '500':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/conflicts/delete:
+    post:
+      operationId: deleteConflict
+      description: Delete a conflict copy and its -wal and -shm files.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empty'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IDRequest'
+  /v1/events/list:
+    get:
+      operationId: listEvents
+      description: Events after an event ID, oldest first. With wait_millis, the call waits up to that long for the first new event. Failovers report role_changed and conflict_saved here.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventList'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: return events with IDs greater than this one; -1 returns no events and, as next, the newest event's ID, to follow events from now on
+        - name: wait_millis
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+  /v1/session/shutdown:
+    post:
+      operationId: shutdownSession
+      description: Final-sync every database, release every write lock, end the session, and stop the daemon.
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShutdownResult'
+        '400':
+          description: error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShutdownRequest'
+components:
+  schemas:
+    SyncedState:
+      type: object
+      properties:
+        version:
+          type: integer
+          format: int64
+        time:
+          type: string
+          format: date-time
+      required:
+        - version
+      description: A version the server acknowledged. Clients decide what durability is enough.
+    DatabaseStatus:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        role:
+          type: string
+          enum:
+            - origin
+            - replica
+          description: origin when this machine writes the database and backs it up; replica for a live readonly copy
+        state:
+          type: string
+          enum:
+            - syncing
+            - synced
+            - waiting
+            - offloaded
+            - stopped
+            - conflicted
+            - error
+          description: syncing while changes stream; synced once a released database's last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the bucket holds it; stopped for a stopped replica; conflicted when another machine wrote while this copy had changes; error with last_error
+        acquired:
+          type: boolean
+          description: the database is acquired and released by a worker rather than backed up continuously
+        failover:
+          type: boolean
+          description: the database belongs to a failover and changes role when the origin does
+        local_changed:
+          type: boolean
+        synced_server:
+          $ref: '#/components/schemas/SyncedState'
+        synced_cloud:
+          $ref: '#/components/schemas/SyncedState'
+        journal_mode:
+          type: string
+        page_count:
+          type: integer
+          format: int64
+        sync_count:
+          type: integer
+          format: int64
+        hint_misses:
+          type: integer
+          format: int64
+        last_full_scan_reason:
+          type: string
+        writer:
+          type: string
+          description: the machine label of the last writer this machine saw
+        last_error:
+          type: string
+        last_error_time:
+          type: string
+          format: date-time
+        machine_label:
+          type: string
+          description: what other machines see as the writer while this machine writes
+        maintenance:
+          type: boolean
+        offload:
+          type: string
+          enum:
+            - never
+            - released
+      required:
+        - name
+        - path
+        - role
+        - state
+        - acquired
+        - failover
+        - local_changed
+        - synced_server
+        - synced_cloud
+        - journal_mode
+        - page_count
+        - sync_count
+        - hint_misses
+    Status:
+      type: object
+      properties:
+        session:
+          type: string
+        server:
+          type: string
+        client_version:
+          type: string
+        session_id:
+          type: string
+        lease_expires:
+          type: string
+          format: date-time
+        watch:
+          type: string
+        databases:
+          type: array
+          items:
+            $ref: '#/components/schemas/DatabaseStatus'
+      required:
+        - session
+        - server
+        - client_version
+        - session_id
+        - watch
+        - databases
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          description: such as name_in_use (another machine backs up that name), exists (a restore target exists), in_use (another machine writes the database), not_found, still_open, invalid_argument, timeout
+        message:
+          type: string
+      required:
+        - code
+        - message
+    DatabaseStatusList:
+      type: object
+      properties:
+        databases:
+          type: array
+          items:
+            $ref: '#/components/schemas/DatabaseStatus'
+      required:
+        - databases
+    RestorableVersion:
+      type: object
+      properties:
+        version:
+          type: integer
+          format: int64
+        state_digest:
+          type: string
+        time:
+          type: string
+          format: date-time
+          description: when the version was synced
+      required:
+        - version
+        - state_digest
+        - time
+    VersionList:
+      type: object
+      properties:
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/RestorableVersion'
+        next:
+          type: integer
+          format: int64
+          description: pass as after to read the next page
+      required:
+        - versions
+    RestoreRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+          description: absolute path of a new file in an existing directory
+        version:
+          type: integer
+          format: int64
+          description: the version to restore; the head when neither version nor time is set
+        time:
+          type: string
+          format: date-time
+          description: restore the newest version at or before this time
+      required:
+        - name
+        - path
+    RestoreResult:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        version:
+          type: integer
+          format: int64
+        page_count:
+          type: integer
+          format: int64
+        page_size:
+          type: integer
+          format: int64
+        state_digest:
+          type: string
+      required:
+        - name
+        - path
+        - version
+        - page_count
+        - page_size
+        - state_digest
+    NameRequest:
+      type: object
+      properties:
+        name:
+          type: string
+      required:
+        - name
+    AcquireRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+          description: absolute path of the local file; defaults to the path this machine uses
+        maintenance:
+          type: boolean
+          description: checkpoint and, past the freelist threshold, VACUUM on release
+        offload:
+          type: string
+          enum:
+            - never
+            - released
+          description: released lets Litebackup delete the released copy once the bucket holds it
+        machine_label:
+          type: string
+          description: what other machines see as the writer
+        on_lost:
+          type: string
+          enum:
+            - conflict
+            - block
+          description: on a lost write lock, keep the copy as conflicted or block local writes until the lock is back
+        timeout_millis:
+          type: integer
+          format: int64
+          description: bound on downloading the head
+      required:
+        - name
+    Conflict:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        conflict_path:
+          type: string
+        synced_version:
+          type: integer
+          format: int64
+        server_version:
+          type: integer
+          format: int64
+        reason:
+          type: string
+        created:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - path
+        - conflict_path
+        - synced_version
+        - server_version
+        - reason
+        - created
+    AcquireResult:
+      type: object
+      properties:
+        database:
+          $ref: '#/components/schemas/DatabaseStatus'
+        outcome:
+          type: string
+          enum:
+            - created
+            - adopted
+            - resumed
+            - downloaded
+            - fast_forwarded
+            - healed
+        conflict:
+          $ref: '#/components/schemas/Conflict'
+      required:
+        - database
+        - outcome
+    ReleaseRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        wait:
+          type: string
+          enum:
+            - server
+            - cloud
+          description: server returns once the final sync is acknowledged; cloud waits for the bucket too
+        offload:
+          type: boolean
+          description: remove the local file once the bucket holds the released version
+        timeout_millis:
+          type: integer
+          format: int64
+          description: how long to wait for the database to close and for the chosen durability
+      required:
+        - name
+    ReleaseResult:
+      type: object
+      properties:
+        database:
+          $ref: '#/components/schemas/DatabaseStatus'
+        checkpointed:
+          type: boolean
+        vacuumed:
+          type: boolean
+        offloaded:
+          type: boolean
+      required:
+        - database
+        - checkpointed
+        - vacuumed
+        - offloaded
+    Writer:
+      type: object
+      properties:
+        name:
+          type: string
+        active:
+          type: boolean
+          description: whether some machine holds the write lock and its lease still runs
+        this_machine:
+          type: boolean
+          description: whether this machine's session holds the write lock
+        machine:
+          type: string
+          description: the machine label of the writer, or empty when nobody holds the lock
+        acquired:
+          type: string
+          format: date-time
+        lease_expires:
+          type: string
+          format: date-time
+          description: on the server's clock
+        lease_remaining_millis:
+          type: integer
+          format: int64
+          description: how long the lease still runs, negative once it ran out
+        lapsed:
+          type: boolean
+          description: the writer's lease ran out, so another machine may take over
+      required:
+        - name
+        - active
+        - this_machine
+        - machine
+        - lapsed
+    BackupRequest:
+      type: object
+      properties:
+        path:
+          type: string
+          description: absolute path, or a glob in the last path segment
+        name:
+          type: string
+          description: the database name for a single path; must already be a valid name
+        prefix:
+          type: string
+          description: name prefix such as app/ (a trailing / is added when missing); names are the prefix plus the normalized file name
+        watch:
+          type: string
+          enum:
+            - inotify
+            - poll
+        maximum_local_databases:
+          type: integer
+          format: int64
+          description: when positive, offload the least recently changed idle databases past this count once the bucket holds them
+        wait:
+          type: string
+          enum:
+            - none
+            - server
+            - cloud
+          description: return once the server, or the bucket, holds the first version of every matching database
+        timeout_millis:
+          type: integer
+          format: int64
+          description: bound on wait
+      required:
+        - path
+    Backup:
+      type: object
+      properties:
+        id:
+          type: string
+        path:
+          type: string
+          description: the path or glob
+        name:
+          type: string
+          description: the name set for a single path, or empty
+        prefix:
+          type: string
+        watch:
+          type: string
+        maximum_local_databases:
+          type: integer
+          format: int64
+        failover:
+          type: boolean
+        databases:
+          type: array
+          items:
+            $ref: '#/components/schemas/DatabaseStatus'
+      required:
+        - id
+        - path
+        - name
+        - prefix
+        - watch
+        - maximum_local_databases
+        - failover
+        - databases
+    BackupList:
+      type: object
+      properties:
+        backups:
+          type: array
+          items:
+            $ref: '#/components/schemas/Backup'
+      required:
+        - backups
+    StopBackupRequest:
+      type: object
+      description: One of id, name, or path.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          description: the name of a database the backup syncs
+        path:
+          type: string
+          description: the path or glob the backup was started with, or a file it syncs
+    Empty:
+      type: object
+      properties: {}
+      required: []
+    FailoverRequest:
+      type: object
+      properties:
+        path:
+          type: string
+          description: absolute path of the database, the same on every machine
+        name:
+          type: string
+          description: the database name; defaults to the normalized file name
+        timeout_millis:
+          type: integer
+          format: int64
+          description: bound on the first download of a replica
+      required:
+        - path
+    Failover:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        role:
+          type: string
+          enum:
+            - origin
+            - replica
+        database:
+          $ref: '#/components/schemas/DatabaseStatus'
+        writer:
+          $ref: '#/components/schemas/Writer'
+      required:
+        - name
+        - path
+        - role
+        - database
+        - writer
+    ReplicaRequest:
+      type: object
+      description: Either name, for one database, or prefix, for every database under it.
+      properties:
+        name:
+          type: string
+        prefix:
+          type: string
+          description: name prefix such as app; replicates every database under it
+        to:
+          type: string
+          description: for name, the replica file, defaulting to the path this machine uses; for prefix, the directory that receives <to>/<name relative to the prefix>
+        write_protection:
+          type: string
+          enum:
+            - lock
+            - detect
+            - none
+          description: lock (default) holds the SQLite write lock so app writes get SQLITE_BUSY while readers carry on; detect rebases after a local write; none trusts apps to open with mode=ro
+        timeout_millis:
+          type: integer
+          format: int64
+          description: bound on downloading the first version of a single replica
+    PrefixReplica:
+      type: object
+      properties:
+        id:
+          type: string
+        prefix:
+          type: string
+        to:
+          type: string
+        write_protection:
+          type: string
+        databases:
+          type: integer
+          format: int64
+      required:
+        - id
+        - prefix
+        - to
+        - write_protection
+        - databases
+    ReplicaResult:
+      type: object
+      description: The replica for a name, or the prefix replica for a prefix.
+      properties:
+        database:
+          $ref: '#/components/schemas/DatabaseStatus'
+        prefix:
+          $ref: '#/components/schemas/PrefixReplica'
+    ReplicaList:
+      type: object
+      properties:
+        prefixes:
+          type: array
+          items:
+            $ref: '#/components/schemas/PrefixReplica'
+        replicas:
+          type: array
+          items:
+            $ref: '#/components/schemas/DatabaseStatus'
+      required:
+        - prefixes
+        - replicas
+    StopReplicaRequest:
+      type: object
+      description: Either name for one replica, or prefix and to for a prefix.
+      properties:
+        name:
+          type: string
+        prefix:
+          type: string
+        to:
+          type: string
+    ConflictList:
+      type: object
+      properties:
+        conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conflict'
+      required:
+        - conflicts
+    IDRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    Event:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        time:
+          type: string
+          format: date-time
+        name:
+          type: string
+        type:
+          type: string
+          description: such as role_changed (message is origin or replica), conflict_saved (path names the conflict copy), synced, downloaded
+        message:
+          type: string
+        role:
+          type: string
+          description: for role_changed, the new role
+        path:
+          type: string
+          description: for conflict_saved, the conflict copy
+      required:
+        - id
+        - time
+        - type
+        - message
+    EventList:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+        next:
+          type: integer
+          format: int64
+          description: pass as after to continue
+      required:
+        - events
+        - next
+    ShutdownRequest:
+      type: object
+      properties:
+        wait:
+          type: string
+          enum:
+            - none
+            - server
+            - cloud
+        timeout_millis:
+          type: integer
+          format: int64
+      required: []
+    ShutdownResult:
+      type: object
+      properties:
+        released:
+          type: integer
+          format: int64
+        failed:
+          type: array
+          items:
+            type: string
+      required:
+        - released
+        - failed
