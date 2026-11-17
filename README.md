@@ -10,7 +10,7 @@ import Database from "better-sqlite3";
 import { backup } from "@litebackup/sdk";
 
 const db = new Database("/var/lib/app/main.sqlite");
-backup(db); // Start continuous backups in the background.
+backup(db); // Continuous backup runs in a separate background process.
 ```
 
 Or add backups to an existing app with the CLI:
@@ -226,6 +226,46 @@ Each file is backed up separately; the list isn't one atomic snapshot.
 [One-shot jobs and bounded waits →](docs/sqlite-backup-script.md) ·
 [Cron and Kubernetes CronJob →](docs/sqlite-cron-backup.md) ·
 [Temporal activities and schedules →](docs/sqlite-temporal.md)
+
+## Frequently asked questions
+
+### How does Litebackup affect performance and safety?
+
+Litebackup uses SQLite's own code and APIs to back up your database without
+writing to it. Your app keeps its existing driver and the extensively tested
+official SQLite engine. A separate background process handles continuous backup,
+so your app doesn't wait for uploads. Add one SDK call, or use the CLI with no
+application changes.
+
+[How backups work](docs/sqlite-backup.md) · [SQLite's testing](https://www.sqlite.org/testing.html)
+
+### Where does my data live?
+
+Your app's SQLite files stay on its disk. Backups live on your Litebackup server
+and in buckets you own on S3, R2, Google Cloud Storage, or another S3-compatible store.
+
+### What if I lose the server?
+
+Recover a replacement server from your bucket using your recovery kit or
+passphrase. See [server recovery](docs/sqlite-restore.md#recover-after-losing-the-server).
+
+### What does it cost?
+
+Plans cover a set number of databases and machines. See [pricing](https://litebackup.com/pricing)
+for details.
+
+### When should I wait for a backup?
+
+Use `wait("server")` or `wait("cloud")` before finishing a script or handing off
+work that needs to be on your server or in your bucket. Normal app startup
+doesn't need either wait. Keep SQLite files on a persistent disk or volume;
+Litebackup syncs changes in the background.
+
+### What is LITEBACKUP_TOKEN?
+
+A join token plus your server address (`JOIN_TOKEN@HOST`), used when the client
+first joins. The client then saves its own machine API key. See
+[join tokens and client credentials](docs/litebackup-client.md#join-and-register).
 
 ## Go further
 
