@@ -19,6 +19,8 @@ Or add backups to an existing app with the CLI:
 litebackup backup /var/lib/app/main.sqlite
 ```
 
+https://github.com/user-attachments/assets/0a48622a-4a70-4f28-a99f-5cfa109ce421
+
 [Website](https://litebackup.com) · [Pricing](https://litebackup.com/pricing) ·
 [Documentation](docs/README.md) · [API reference](docs/sdk-reference.md)
 
