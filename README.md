@@ -10,7 +10,7 @@ import Database from "better-sqlite3";
 import { backup } from "@litebackup/sdk";
 
 const db = new Database("/var/lib/app/main.sqlite");
-backup(db); // Continuous backup runs in a separate background process.
+backup(db); // Continuous backup runs in the litebackup background process.
 ```
 
 Or add backups to an existing app with the CLI:
@@ -233,9 +233,9 @@ Each file is backed up separately; the list isn't one atomic snapshot.
 
 Litebackup uses SQLite's own code and APIs to back up your database without
 writing to it. Your app keeps its existing driver and the extensively tested
-official SQLite engine. A separate background process handles continuous backup,
-so your app doesn't wait for uploads. Add one SDK call, or use the CLI with no
-application changes.
+official SQLite engine. The `litebackup` background process handles continuous
+backup, so your app doesn't wait for uploads. Add one SDK call, or use the CLI
+with no application changes.
 
 [How backups work](docs/sqlite-backup.md) · [SQLite's testing](https://www.sqlite.org/testing.html)
 
