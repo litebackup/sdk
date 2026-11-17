@@ -24,12 +24,14 @@ https://github.com/user-attachments/assets/0a48622a-4a70-4f28-a99f-5cfa109ce421
 [Website](https://litebackup.com) · [Pricing](https://litebackup.com/pricing) ·
 [Documentation](docs/README.md) · [API reference](docs/sdk-reference.md)
 
-## Install your server
+## Install your Litebackup server
 
-Use a Linux VM on AWS, Google Cloud, DigitalOcean, Hetzner, or another provider.
+Litebackup is self-hosted. Run the server daemon on a dedicated Linux VM on AWS,
+Google Cloud, DigitalOcean, Hetzner, or another provider. It receives changes
+from your app machines and uploads encrypted backups to your own bucket.
 
 For a small deployment, start with **2 vCPUs, 2–4 GB RAM, and an SSD** on a fresh
-Ubuntu 24.04 LTS or Debian 13 VM, with a public IP and inbound TCP 443 open.
+Debian 13 or Ubuntu 26.04 LTS VM, with a public IP and inbound TCP 443 open.
 Size the disk for your databases, write volume, and recent history.
 
 SSH into the VM and run:

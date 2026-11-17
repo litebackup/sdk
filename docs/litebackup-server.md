@@ -1,12 +1,27 @@
 # How to install a Litebackup server
 
-Your server receives changes from app machines, keeps recent versions on disk,
-and uploads encrypted backups to your bucket. It can run separately from your
-app. Start here, then [connect your app machines](litebackup-client.md).
+Litebackup is a self-hosted daemon. Your Litebackup server receives changes
+from app machines, keeps recent versions on disk, and uploads encrypted
+backups to your bucket. One server can serve several app machines; your apps
+keep their local SQLite files and drivers.
+
+Run it on a dedicated Linux VM or host. The installer manages it as a systemd
+service and supplies its HTTPS address and web console. Start here, then
+[connect your app machines](litebackup-client.md).
+
+## VMs and containers
+
+A dedicated VM is the recommended server deployment. Your applications and
+the Litebackup client can run in [Docker or other containers](sqlite-docker.md)
+and connect to that server.
+
+The current server package runs natively under systemd; it does not include
+a standalone Docker image or a server Compose deployment. The client Docker
+example is for backing up an application's SQLite files, not hosting the server.
 
 ## Choose a VM
 
-Use a fresh **Ubuntu 24.04 LTS or Debian 13** VM with systemd, a public IP,
+Use a fresh **Debian 13 or Ubuntu 26.04 LTS** VM with systemd, a public IP,
 and an SSD. The installer supports Linux amd64 and arm64. For a small deployment,
 start with **2 vCPUs and 2–4 GB RAM**, then adjust for your workload.
 
@@ -14,7 +29,7 @@ start with **2 vCPUs and 2–4 GB RAM**, then adjust for your workload.
 | --- | --- | --- |
 | [AWS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EC2_GetStarted.html) | EC2, Ubuntu or Debian, persistent EBS SSD | Public IP; security group permits TCP 443 and your SSH access |
 | [Google Cloud](https://cloud.google.com/compute/docs/instances/create-start-instance) | Compute Engine, Ubuntu or Debian, persistent SSD | External IP; VPC firewall permits TCP 443 and your SSH access |
-| [DigitalOcean](https://docs.digitalocean.com/products/droplets/how-to/create/) | Ubuntu Droplet with SSD storage | Public IP; Cloud Firewall permits TCP 443 and your SSH access |
+| [DigitalOcean](https://docs.digitalocean.com/products/droplets/how-to/create/) | Debian or Ubuntu Droplet with SSD storage | Public IP; Cloud Firewall permits TCP 443 and your SSH access |
 | [Hetzner](https://docs.hetzner.com/cloud/servers/getting-started/creating-a-server/) / Akamai Linode / other VPS | Linux VM with systemd and persistent SSD | Public IP; provider and host firewalls permit TCP 443 |
 
 Put the server near your app machines for faster syncs. Check transfer costs
@@ -49,6 +64,33 @@ Finish the setup screens:
 
 Clients wait while setup is incomplete. The [install page](https://litebackup.com/install)
 tracks the current installer flow.
+
+## Proxies and port forwarding
+
+The production server serves HTTPS on TCP 443 and manages its own certificate.
+For a TCP proxy, load balancer, or NAT gateway, forward public TCP 443 to the
+server's TCP 443 with **TLS passthrough**: the encrypted connection reaches
+Litebackup unchanged, and Litebackup terminates TLS.
+
+If that public address differs from the server's outbound IP, supply it when
+installing on the server. Replace `YOUR_PUBLIC_IP` with the proxy or gateway's
+public IP:
+
+```sh
+curl -fsSL https://litebackup.com/server.sh | bash -s -- --address YOUR_PUBLIC_IP
+```
+
+Use the instance HTTPS hostname supplied during setup. Preserve TLS SNI, and
+do not prepend a PROXY protocol header. Forward connections to this instance,
+not to independent Litebackup servers sharing one hostname.
+
+For example, HAProxy calls this [TLS passthrough](https://www.haproxy.com/documentation/haproxy-unified-gateway/usage/routes/tlsroute/).
+The proxy forwards traffic; it does not need the instance's certificate or key.
+
+A production recipe for a TLS-terminating reverse proxy is not currently
+documented. The plain HTTP `--listen-address` setting applies to development
+mode; do not use `--development` as a production proxy backend. Use direct
+HTTPS or TCP/TLS passthrough for the current installation flow.
 
 ## Add a machine and verify a backup
 
