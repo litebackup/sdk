@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0
+
+This release needs Litebackup server 0.6.0, so upgrade the server before
+clients. Large uploads that fail partway now resume from what the server
+already staged instead of starting over.
+
+- `DatabaseStatus.state` can be `retrying`: an origin whose syncs fail and
+  run again. `lastError` says why.
+- `DatabaseStatus.firstUnsyncedChangeTime` is when the first change the server
+  lacks was seen. It is absent when the server has every change seen, and it
+  may be earlier than the real first change, never later.
+- `DatabaseStatus.nextRetryTime` is when the next attempt of a failed sync
+  runs.
+
 ## 0.5.0
 
 Create a TypeScript client with `const litebackup = new Litebackup()`.
