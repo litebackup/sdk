@@ -56,9 +56,38 @@ func loadSystemConfiguration(path string) *systemConfiguration {
 	return &configuration
 }
 
+// userConfiguration is the part of a user service install the SDK reads:
+// ~/.config/litebackup/service.json, found from HOME alone.
+type userConfiguration struct {
+	RuntimeDirectory string `json:"runtime_directory"`
+}
+
+// loadUserConfiguration reads this user's service install, or returns nil
+// when there is none or this SDK cannot read it.
+func loadUserConfiguration() *userConfiguration {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	content, err := os.ReadFile(filepath.Join(home, ".config", "litebackup", "service.json"))
+	if err != nil {
+		return nil
+	}
+	var configuration userConfiguration
+	if err := json.Unmarshal(content, &configuration); err != nil {
+		return nil
+	}
+	if configuration.RuntimeDirectory == "" {
+		return nil
+	}
+	return &configuration
+}
+
 // SessionSocket resolves a session's name and socket exactly as the
-// litebackup command does. Where `litebackup install service` ran, root and
-// the service's user use the service's socket. Everyone else uses
+// litebackup command does. Where `litebackup install service` ran as root,
+// root and the service's user use the service's socket; where a user
+// installed a service of their own, that user uses the directory it
+// recorded, whatever this process's environment. Everyone else uses
 // $XDG_RUNTIME_DIR/litebackup/<session>/client.sock, or a per-user directory
 // under the temporary directory.
 func SessionSocket(session string) (string, string, error) {
@@ -69,15 +98,20 @@ func SessionSocket(session string) (string, string, error) {
 	if name == "" {
 		name = DefaultSession
 	}
-	for _, character := range name {
-		if !(character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '-' || character == '_' || character == '.') {
-			return "", "", fmt.Errorf("session names use [a-z0-9._-], got %q", name)
+	for index, character := range name {
+		letterOrDigit := character >= 'a' && character <= 'z' || character >= '0' && character <= '9'
+		if index == 0 && !letterOrDigit || !letterOrDigit && character != '-' && character != '_' && character != '.' {
+			return "", "", fmt.Errorf("session names use [a-z0-9._-] and start with a letter or digit, got %q", name)
 		}
 	}
 	uid := os.Getuid()
 	system := loadSystemConfiguration(SystemConfigurationPath)
 	if system != nil && (uid == 0 || uid == system.UID) {
 		return name, filepath.Join(system.RuntimeDirectory, name, socketName), nil
+	}
+	user := loadUserConfiguration()
+	if user != nil {
+		return name, filepath.Join(user.RuntimeDirectory, name, socketName), nil
 	}
 	runtimeRoot := os.Getenv("XDG_RUNTIME_DIR")
 	if runtimeRoot == "" {

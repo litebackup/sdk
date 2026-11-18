@@ -48,9 +48,11 @@ sudo systemctl status litebackup
 sudo journalctl -u litebackup -f
 ```
 
-Root and the configured service user reach the service socket. Another user
-can connect to a different session instead, so run cron, app, and CLI under
-consistent ownership. File permissions apply to the daemon's user. Restore,
+Root and the configured service user reach the service socket. A user who
+ran `litebackup install service` without sudo reaches their own service from
+any environment, cron included: the install records its socket directory in
+`~/.config/litebackup/service.json`. Another user can connect to a different
+session instead, so run cron, app, and CLI under consistent ownership. File permissions apply to the daemon's user. Restore,
 replica, acquire, and offload also need directory write permissions.
 
 ## Sessions and configuration
@@ -60,7 +62,7 @@ replica, acquire, and offload also need directory write permissions.
 | `LITEBACKUP_TOKEN` | `JOIN_TOKEN@HOST` used when the client first joins |
 | `LITEBACKUP_SESSION` | Session name; `default` when unset |
 | `LITEBACKUP_PATH` | Override the client binary path |
-| `XDG_RUNTIME_DIR` | Root for per-user sockets when a service does not supply one |
+| `XDG_RUNTIME_DIR` | Root for per-user sockets when no service install recorded one |
 | `XDG_STATE_HOME` | Root for the client's persistent per-user state |
 
 A TypeScript `token` or `session` option overrides the environment. Use
@@ -68,8 +70,8 @@ A TypeScript `token` or `session` option overrides the environment. Use
 `litebackup.Connect(ctx, litebackup.Options{Token: token, Session: session})`.
 Package helpers share a client per token and session.
 
-Session names use `[a-z0-9._-]`. SDKs start `litebackup launch --session NAME`
-when the socket is absent. A launch lock prevents concurrent processes from
+Session names use `[a-z0-9._-]` and start with a letter or digit. SDKs start
+`litebackup launch --session NAME` when the socket is absent. A launch lock prevents concurrent processes from
 starting duplicate clients for one session.
 
 Sessions isolate local configuration, not remote database names. Two sessions

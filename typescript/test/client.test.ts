@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 import { expectedName, setDurabilityPoll } from "../src/backup.js";
@@ -242,11 +242,25 @@ test("resolves the service socket where litebackup install service ran", async (
   const directory = await mkdtemp(join(tmpdir(), "litebackup-sdk-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const configurationPath = join(directory, "client.json");
-  const environment = { XDG_RUNTIME_DIR: join(directory, "home") };
+  const environment = { XDG_RUNTIME_DIR: join(directory, "home"), HOME: join(directory, "user") };
   assert.equal(sessionSocket(undefined, environment, configurationPath).socketPath, join(directory, "home", "litebackup", "default", "client.sock"));
   await writeFile(configurationPath, JSON.stringify({ user: "app", uid: userInfo().uid, state_directory: "/var/lib/litebackup-client", runtime_directory: join(directory, "run") }));
   assert.equal(sessionSocket("reports", environment, configurationPath).socketPath, join(directory, "run", "reports", "client.sock"));
   assert.throws(() => sessionSocket("Bad Name", environment, configurationPath));
+});
+
+test("resolves a user service socket from its record, whatever the environment", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "litebackup-sdk-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const record = join(directory, ".config", "litebackup", "service.json");
+  await mkdir(dirname(record), { recursive: true });
+  await writeFile(record, JSON.stringify({ session: "default", state_directory: "/var/lib/app/state/litebackup", runtime_directory: "/run/user/1000/litebackup" }));
+  const environment = { HOME: directory };
+  const configurationPath = join(directory, "client.json");
+  assert.equal(sessionSocket(undefined, environment, configurationPath).socketPath, "/run/user/1000/litebackup/default/client.sock");
+  for (const name of ["..", ".", ".hidden"]) {
+    assert.throws(() => sessionSocket(name, environment, configurationPath));
+  }
 });
 
 test("names the install command when no binary is found", () => {

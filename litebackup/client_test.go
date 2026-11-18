@@ -406,6 +406,7 @@ func receive[T any](t *testing.T, values <-chan T) T {
 
 func TestSessionSocket(t *testing.T) {
 	directory := t.TempDir()
+	t.Setenv("HOME", filepath.Join(directory, "user"))
 	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(directory, "home"))
 	t.Setenv(SessionEnvironment, "")
 	configuration := filepath.Join(directory, "client.json")
@@ -508,4 +509,37 @@ func mustWorkingDirectory(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestSessionSocketUsesUserService(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("HOME", directory)
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv(SessionEnvironment, "")
+	previous := SystemConfigurationPath
+	SystemConfigurationPath = filepath.Join(directory, "client.json")
+	t.Cleanup(func() { SystemConfigurationPath = previous })
+	record := filepath.Join(directory, ".config", "litebackup", "service.json")
+	if err := os.MkdirAll(filepath.Dir(record), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content, err := json.Marshal(map[string]any{"session": "default", "state_directory": "/var/lib/app/state/litebackup", "runtime_directory": "/run/user/1000/litebackup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(record, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, socket, err := SessionSocket("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if socket != "/run/user/1000/litebackup/default/client.sock" {
+		t.Fatalf("user service socket %s", socket)
+	}
+	for _, name := range []string{"..", ".", ".hidden"} {
+		if _, _, err := SessionSocket(name); err == nil {
+			t.Fatalf("session %q passed", name)
+		}
+	}
 }
