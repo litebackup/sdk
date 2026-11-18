@@ -34,6 +34,8 @@ For a small deployment, start with **2 vCPUs, 2–4 GB RAM, and an SSD** on a fr
 Debian 13 or Ubuntu 26.04 LTS VM, with a public IP and inbound TCP 443 open.
 Size the disk for your databases, write volume, and recent history.
 
+<a href="https://cloud.digitalocean.com/droplets/new?image=debian-13-x64&amp;refcode=13cb93d1ec16"><img src="docs/assets/digitalocean.svg" width="20" height="20" alt=""> Create a Debian 13 Droplet on DigitalOcean</a> (referral link). Follow the [DigitalOcean setup guide](https://litebackup.com/install-digitalocean) for firewall and sizing details.
+
 SSH into the VM and run:
 
 ```sh
