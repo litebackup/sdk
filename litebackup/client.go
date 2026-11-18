@@ -30,7 +30,7 @@ import (
 
 // SDKVersion is the version sent with every call. Daemons refuse SDKs older
 // than their minimum with sdk_unsupported.
-const SDKVersion = "0.6.1"
+const SDKVersion = "0.7.0"
 
 const (
 	sdkVersionHeader    = "X-Litebackup-SDK-Version"

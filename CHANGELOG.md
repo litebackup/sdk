@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+
+The SDK API is unchanged from 0.6.1. Bundled Litebackup 0.7.0 adds dismissible
+action messages to the console and setup screens while keeping form validation
+beside its form.
+
 ## 0.6.1
 
 The same SDK as 0.6.0, released with Litebackup 0.6.1.
