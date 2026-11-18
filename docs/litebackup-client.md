@@ -22,7 +22,7 @@ are required; Windows is not a supported client target.
 With a join token from **Machines → Add machine**:
 
 ```sh
-curl -fsSL https://litebackup.com/cli.sh | sudo bash
+curl -fsSL https://litebackup.com/cli.sh | bash
 export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
 litebackup up "$LITEBACKUP_TOKEN"
 litebackup start '/var/lib/app/*.sqlite' app/
@@ -39,20 +39,33 @@ already joined keeps its existing server and identity; changing the token
 does not move that session to another server. Server API keys are for direct
 requests to the server's HTTPS API; this SDK talks to the local client.
 
-For the service install, use an existing OS user that can read your app files:
+To keep backing up across reboots, install the client as a service. Run it as
+the user that owns your app's databases:
+
+```sh
+litebackup install service --join "$LITEBACKUP_TOKEN"
+litebackup start '/var/lib/app/*.sqlite' app/
+systemctl --user status litebackup
+journalctl --user -u litebackup -f
+```
+
+On Linux this is a systemd user service, which starts at boot when lingering
+can be turned on and at login otherwise. On macOS it is a launchd agent, which
+starts at login. The install records the service's socket directory in
+`~/.config/litebackup/service.json`, so that user's CLI, SDKs, and cron jobs
+reach it from any environment.
+
+Run it as root for a system service that reaches every database, with
+`--user app` to run it as your app's user:
 
 ```sh
 sudo litebackup install service --user app --join "$LITEBACKUP_TOKEN"
-sudo litebackup start '/var/lib/app/*.sqlite' app/
 sudo systemctl status litebackup
-sudo journalctl -u litebackup -f
 ```
 
-Root and the configured service user reach the service socket. A user who
-ran `litebackup install service` without sudo reaches their own service from
-any environment, cron included: the install records its socket directory in
-`~/.config/litebackup/service.json`. Another user can connect to a different
-session instead, so run cron, app, and CLI under consistent ownership. File permissions apply to the daemon's user. Restore,
+Root and the system service's user reach the system service's socket. Another
+user connects to a different session instead, so run cron, app, and CLI under
+consistent ownership. File permissions apply to the daemon's user. Restore,
 replica, acquire, and offload also need directory write permissions.
 
 ## Sessions and configuration
@@ -90,7 +103,7 @@ Use `release()` for databases obtained with `acquire()`. Close every SQLite conn
 
 `shutdown()` / `Shutdown()` drains and stops the entire session. Only use it
 when your process owns that session; another app can be sharing it. A service
-install handles daemon restarts and reboot startup through systemd.
+install handles daemon restarts and reboot startup through systemd or launchd.
 
 ## Containers and short-lived jobs
 

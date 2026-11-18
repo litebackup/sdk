@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createConnection } from "node:net";
+import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
 /** Overrides the litebackup binary the SDK starts. */
@@ -18,9 +19,12 @@ const platformPackages: Record<string, string> = {
   "linux-x64": "@litebackup/bin-linux-x64",
 };
 
-/** The one line that installs the litebackup command for every user of this machine, on Linux and macOS. */
+/**
+ * The one line that installs the litebackup command on Linux and macOS for
+ * whoever runs it: into ~/.local/bin, or /usr/local/bin as root.
+ */
 export function installCommand(): string {
-  return "curl -fsSL https://litebackup.com/cli.sh | sudo bash";
+  return "curl -fsSL https://litebackup.com/cli.sh | bash";
 }
 
 /** Finds litebackup on PATH, or returns undefined. */
@@ -35,7 +39,7 @@ function onPath(environment: NodeJS.ProcessEnv): string | undefined {
 
 /**
  * Finds the litebackup binary: LITEBACKUP_PATH, then this platform's
- * optional npm package, then litebackup on PATH.
+ * optional npm package, then litebackup on PATH, then ~/.local/bin.
  */
 export function litebackupBinary(environment: NodeJS.ProcessEnv = process.env): string {
   const override = environment[binaryPathEnvironment]?.trim();
@@ -58,6 +62,12 @@ export function litebackupBinary(environment: NodeJS.ProcessEnv = process.env): 
   if (found) {
     return found;
   }
+  // installCommand puts it in ~/.local/bin for a user other than root, which
+  // an app's PATH may not include.
+  const local = join(environment.HOME || homedir(), ".local", "bin", "litebackup");
+  if (existsSync(local)) {
+    return local;
+  }
   throw new Error(`the litebackup command is not installed; set ${binaryPathEnvironment} or install it with: ${installCommand()}`);
 }
 
@@ -78,7 +88,7 @@ export function socketListening(socketPath: string): Promise<boolean> {
  * launch command, which takes the session's launch lock and starts
  * `litebackup daemon --session`, exactly like the CLI does, so concurrent
  * processes start one daemon. The daemon joins with the token on its first
- * start. Where `litebackup install service` ran, systemd owns the daemon,
+ * start. Where `litebackup install service` ran, systemd or launchd owns the daemon,
  * and the launch command explains how to reach or start the service instead.
  */
 export async function launchDaemon(args: { session: string; socketPath: string; environment: NodeJS.ProcessEnv; token?: string }): Promise<void> {

@@ -98,7 +98,7 @@ In the console, open **Machines → Add machine** and copy the join token. On th
 machine that holds your SQLite file:
 
 ```sh
-curl -fsSL https://litebackup.com/cli.sh | sudo bash
+curl -fsSL https://litebackup.com/cli.sh | bash
 export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
 litebackup up "$LITEBACKUP_TOKEN"
 litebackup start /var/lib/app/main.sqlite
@@ -134,6 +134,6 @@ curl -fsS http://127.0.0.1:8099/metrics
 Keep this listener private. Public client traffic uses HTTPS 443.
 
 Update the server through its instance controls, then update each installed
-client with `sudo litebackup install cli`. Keep npm SDK and binary versions
+client with `litebackup install cli`, run as the user that installed it. Keep npm SDK and binary versions
 aligned when upgrading an app. See [troubleshooting](sqlite-backup-errors.md) for
 compatibility errors and [restore](sqlite-restore.md) for recovery after losing the VM.

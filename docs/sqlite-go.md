@@ -4,13 +4,14 @@ Install a [server](litebackup-server.md), copy a join token from **Machines → 
 and install the client command where the Go app runs:
 
 ```sh
-curl -fsSL https://litebackup.com/cli.sh | sudo bash
+curl -fsSL https://litebackup.com/cli.sh | bash
 go get github.com/litebackup/sdk/litebackup
 export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
 ```
 
 The SDK starts the local client when needed. It uses `LITEBACKUP_PATH`, then
-`litebackup` on `PATH`. Your application can use any SQLite driver.
+`litebackup` on `PATH`, then `~/.local/bin/litebackup`, where the installer
+puts it for a user other than root. Your application can use any SQLite driver.
 
 ## Continuous backup
 

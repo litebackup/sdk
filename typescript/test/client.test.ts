@@ -225,13 +225,21 @@ test("resolves a user service socket from its record, whatever the environment",
   }
 });
 
-test("names the install command when no binary is found", () => {
+test("names the install command when no binary is found, and finds a user install", async (t) => {
   assert.equal(litebackupBinary({ LITEBACKUP_PATH: "/opt/litebackup" }), "/opt/litebackup");
+  const home = await mkdtemp(join(tmpdir(), "litebackup-home-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
   if (process.platform === "linux" || process.platform === "darwin") {
     // The platform package is not installed in a development tree.
-    assert.throws(() => litebackupBinary({ PATH: "/nonexistent" }), (error: unknown) => error instanceof Error && error.message.includes(installCommand()));
+    assert.throws(() => litebackupBinary({ PATH: "/nonexistent", HOME: home }), (error: unknown) => error instanceof Error && error.message.includes(installCommand()));
   }
-  assert.equal(installCommand(), "curl -fsSL https://litebackup.com/cli.sh | sudo bash");
+  assert.equal(installCommand(), "curl -fsSL https://litebackup.com/cli.sh | bash");
+  const local = join(home, ".local", "bin", "litebackup");
+  await mkdir(dirname(local), { recursive: true });
+  await writeFile(local, "#!/bin/sh\n", { mode: 0o755 });
+  if (process.platform === "linux" || process.platform === "darwin") {
+    assert.equal(litebackupBinary({ PATH: "/nonexistent", HOME: home }), local);
+  }
 });
 
 test("prefix replicas register a directory, preserve an empty prefix, and stop by prefix and directory", async (t) => {

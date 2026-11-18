@@ -79,7 +79,7 @@ Add machine, not an API key. The client joins once and saves its own machine key
 Install the command on each app machine, then join as the user running your app:
 
 ```sh
-curl -fsSL https://litebackup.com/cli.sh | sudo bash
+curl -fsSL https://litebackup.com/cli.sh | bash
 export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
 litebackup up "$LITEBACKUP_TOKEN"
 ```

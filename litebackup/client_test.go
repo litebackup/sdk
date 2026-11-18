@@ -403,11 +403,24 @@ func TestSessionSocket(t *testing.T) {
 }
 
 func TestBinaryInstallCommand(t *testing.T) {
+	home := t.TempDir()
 	t.Setenv(BinaryPathEnvironment, "")
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HOME", home)
 	_, err := Binary()
-	if err == nil || !strings.Contains(err.Error(), "curl -fsSL https://litebackup.com/cli.sh | sudo bash") {
+	if err == nil || !strings.Contains(err.Error(), "curl -fsSL https://litebackup.com/cli.sh | bash") {
 		t.Fatalf("error %v", err)
+	}
+	local := filepath.Join(home, ".local", "bin", "litebackup")
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	found, err := Binary()
+	if err != nil || found != local {
+		t.Fatalf("a user install in ~/.local/bin: %s %v", found, err)
 	}
 	t.Setenv(BinaryPathEnvironment, "/opt/litebackup")
 	binary, err := Binary()

@@ -120,13 +120,16 @@ func SessionSocket(session string) (string, string, error) {
 	return name, filepath.Join(runtimeRoot, "litebackup", name, socketName), nil
 }
 
-// InstallCommand is the one line that installs the litebackup command for
-// every user of this machine, on Linux and macOS.
+// InstallCommand is the one line that installs the litebackup command on
+// Linux and macOS for whoever runs it: into ~/.local/bin, or /usr/local/bin
+// as root.
 func InstallCommand() string {
-	return "curl -fsSL https://litebackup.com/cli.sh | sudo bash"
+	return "curl -fsSL https://litebackup.com/cli.sh | bash"
 }
 
-// Binary finds the litebackup binary: LITEBACKUP_PATH, then litebackup on PATH.
+// Binary finds the litebackup binary: LITEBACKUP_PATH, then litebackup on
+// PATH, then ~/.local/bin/litebackup, where InstallCommand puts it for a
+// user other than root, which an app's PATH may not include.
 func Binary() (string, error) {
 	override := strings.TrimSpace(os.Getenv(BinaryPathEnvironment))
 	if override != "" {
@@ -135,6 +138,14 @@ func Binary() (string, error) {
 	found, err := exec.LookPath("litebackup")
 	if err == nil {
 		return found, nil
+	}
+	home, err := os.UserHomeDir()
+	if err == nil {
+		local := filepath.Join(home, ".local", "bin", "litebackup")
+		info, statErr := os.Stat(local)
+		if statErr == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return local, nil
+		}
 	}
 	return "", fmt.Errorf("the litebackup command is not installed; set %s or install it with: %s", BinaryPathEnvironment, InstallCommand())
 }
@@ -152,7 +163,7 @@ func socketListening(path string) bool {
 // `litebackup launch --session`, which takes the session's launch lock and
 // starts `litebackup daemon`, so concurrent processes start one daemon. The
 // daemon joins with token on its first start. Where `litebackup install
-// service` ran, systemd owns the daemon and the launch command says how to
+// service` ran, systemd or launchd owns the daemon and the launch command says how to
 // reach or start the service instead.
 func launchDaemon(ctx context.Context, session string, socket string, token string) error {
 	if socketListening(socket) {

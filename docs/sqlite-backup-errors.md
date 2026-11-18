@@ -10,12 +10,16 @@ litebackup replicate list
 litebackup conflict list
 ```
 
-For a Linux client service:
+For a Linux client service, as the user that installed it:
 
 ```sh
-sudo systemctl status litebackup
-sudo journalctl -u litebackup -f
+systemctl --user status litebackup
+journalctl --user -u litebackup -f
 ```
+
+For a system service that root installed, use `sudo systemctl status litebackup`
+and `sudo journalctl -u litebackup -f`. On macOS, the service logs to
+`~/.local/state/litebackup/default/daemon.log` for the default session.
 
 ## Common failures
 

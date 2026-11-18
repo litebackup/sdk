@@ -31,7 +31,9 @@ These export files must not be covered by the app's continuous backup; see
 [one-shot jobs](sqlite-backup-script.md) for waiting on an existing backup instead.
 
 Create writable `/var/lib/app/run` and `/var/lib/app/log` directories, then
-edit that user's crontab:
+edit that user's crontab: Cron does not read your shell's `PATH`, so if
+`litebackup` is in `~/.local/bin`, add that directory's full path to the
+`PATH` line.
 
 ```cron
 SHELL=/bin/bash
