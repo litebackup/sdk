@@ -33,7 +33,7 @@ export type EventList = Camelize<Schemas["EventList"]>;
 export type ShutdownResult = Camelize<Schemas["ShutdownResult"]>;
 
 /** The SDK version sent with every call. */
-export const sdkVersion = "0.4.1";
+export const sdkVersion = "0.4.2";
 
 /** An error the Litebackup daemon answered with, carrying its code. */
 export class LitebackupError extends Error {

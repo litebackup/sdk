@@ -1,6 +1,6 @@
 {
   "name": "@litebackup/sdk",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Back up, replicate, and restore SQLite databases with Litebackup",
   "license": "UNLICENSED",
   "type": "module",
@@ -25,10 +25,10 @@
     "prepack": "npm run build"
   },
   "optionalDependencies": {
-    "@litebackup/bin-darwin-arm64": "0.4.1",
-    "@litebackup/bin-darwin-x64": "0.4.1",
-    "@litebackup/bin-linux-arm64": "0.4.1",
-    "@litebackup/bin-linux-x64": "0.4.1"
+    "@litebackup/bin-darwin-arm64": "0.4.2",
+    "@litebackup/bin-darwin-x64": "0.4.2",
+    "@litebackup/bin-linux-arm64": "0.4.2",
+    "@litebackup/bin-linux-x64": "0.4.2"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
