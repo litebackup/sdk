@@ -37,7 +37,7 @@ as the client's saved state remains available.
 The SDK can join on first use, so `up` is optional for SDK apps. A client that
 already joined keeps its existing server and identity; changing the token
 does not move that session to another server. Server API keys are for direct
-requests to the server's HTTPS API; this SDK talks to the local client.
+requests to the [HTTPS API](http-api.md); this SDK talks to the local client.
 
 To keep backing up across reboots, install the client as a service. Run it as
 the user that owns your app's databases:
@@ -79,9 +79,9 @@ replica, acquire, and offload also need directory write permissions.
 | `XDG_STATE_HOME` | Root for the client's persistent per-user state |
 
 A TypeScript `token` or `session` option overrides the environment. Use
-`Litebackup.connect({ token, session })` for an explicit client; Go uses
+`new Litebackup({ token, session })` for an explicit client; Go uses
 `litebackup.Connect(ctx, &litebackup.ConnectArgs{Token: token, Session: session})`.
-TypeScript's socket helpers share a client per token and session. Go's socket
+Each TypeScript client connects on its first socket operation. Go's socket
 helpers use a single process-wide client.
 
 Session names use `[a-z0-9._-]` and start with a letter or digit. SDKs start
@@ -94,14 +94,14 @@ application or shard when they represent different databases.
 
 ## App exit and reboot
 
-`close()` / `Close()` closes this SDK connection and stops its event watchers.
+`close()` / `Close()` closes this SDK connection and stops its event watchers. TypeScript also cancels foreground jobs started by this client.
 The daemon keeps running and syncing after your app exits.
 
-Use `stopBackup(name)` or Go `StopBackup(ctx, name)` for a single database by remote name. Use `stopBackupRule(id)` or `StopBackupRule(ctx, id)` to remove a whole backup rule. The files and retained versions stay available. A scheduled job can call foreground `backup` with a server or cloud wait.
+Use `backups.stop(name)` or Go `StopBackup(ctx, name)` for a single database by remote name. Use `rules.stop(id)` or `StopBackupRule(ctx, id)` to remove a whole backup rule. The files and retained versions stay available. A scheduled job can call `backups.once()` with a server or cloud wait.
 
 Use `release()` for databases obtained with `acquire()`. Close every SQLite connection before releasing.
 
-`shutdown()` / `Shutdown()` drains and stops the entire session. Only use it
+`session.shutdown()` / `Shutdown()` drains and stops the entire session. Only use it
 when your process owns that session; another app can be sharing it. A service
 install handles daemon restarts and reboot startup through systemd or launchd.
 

@@ -29,7 +29,9 @@ Save as `activities.ts`:
 
 ```ts
 import { Context } from "@temporalio/activity";
-import { backup } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
+
+const litebackup = new Litebackup();
 
 export async function backupDatabases(paths: string[]): Promise<void> {
   if (paths.length === 0) throw new Error("Provide at least one database path");
@@ -37,7 +39,7 @@ export async function backupDatabases(paths: string[]): Promise<void> {
   for (const path of paths) {
     const heartbeat = setInterval(() => context.heartbeat({ path }), 10_000);
     try {
-      await backup(path, {
+      await litebackup.backups.once(path, {
         prefix: "scheduled/",
         wait: "cloud",
         timeout: "30m",
@@ -105,8 +107,7 @@ try {
 }
 ```
 
-Compile to JavaScript before starting `worker.js`. Set `LITEBACKUP_TOKEN` for
-first use, or run under the already joined client's OS user. This host-specific
+Compile to JavaScript before starting `worker.js`. Set `LITEBACKUP_TOKEN` for each fresh job, or run under the already joined client's OS user. This host-specific
 queue should have one active Activity Worker for these local files. Do not
 put unrelated database hosts on the same queue. The Workflow's path must
 resolve to the compiled `workflows.js` beside the compiled worker.

@@ -1,3 +1,4 @@
+import { LitebackupError } from "./types.js";
 import { readFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
@@ -67,7 +68,7 @@ export function sessionSocket(
 ): { session: string; socketPath: string } {
   const name = session || environment.LITEBACKUP_SESSION || defaultSession;
   if (!sessionPattern.test(name)) {
-    throw new Error(`session names use [a-z0-9._-] and start with a letter or digit, got ${JSON.stringify(name)}`);
+    throw new LitebackupError("invalid_argument", `session names use [a-z0-9._-] and start with a letter or digit, got ${JSON.stringify(name)}`, 0);
   }
   const uid = userInfo().uid;
   const system = systemConfiguration(configurationPath);

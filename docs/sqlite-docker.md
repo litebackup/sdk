@@ -25,8 +25,8 @@ Build the [standalone example](../examples/docker/cli.Dockerfile) with those two
 
 ```sh
 docker build -f examples/docker/cli.Dockerfile --platform linux/amd64 \
-  --build-arg LITEBACKUP_VERSION=0.4.0 \
-  --build-arg LITEBACKUP_SHA256=d961d6679dde34b30b098a6e40c1c06b91ea433da61fc26df7a340462122703d \
+  --build-arg LITEBACKUP_VERSION=0.5.0 \
+  --build-arg LITEBACKUP_SHA256=762d9cc3fc11248629bbd3c59d1d68827a7a164de5f80ed02a5c53940bcfcf35 \
   -t litebackup-cli:pinned .
 docker run --rm litebackup-cli:pinned litebackup version
 ```
@@ -50,7 +50,7 @@ a GET returns the count. It binds the host port to localhost. You can set
 `APP_PORT` if port 3000 is already in use.
 
 The [app](../examples/docker/app.mjs) uses Node's SQLite driver and registers
-the file with `startBackup()`. Its [Dockerfile](../examples/docker/Dockerfile)
+the file with `backups.start()`. Its [Dockerfile](../examples/docker/Dockerfile)
 builds the SDK from this checkout, copies the matching Linux CLI, and runs as `node` (UID 1000).
 [Compose](../examples/docker/compose.yaml) starts the container again after a
 host reboot. The join token is only needed for the client's first join.

@@ -12,7 +12,9 @@ creates the remote database or downloads its latest version.
 ```ts
 import { appendFile, mkdir } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { acquire, release } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
+
+const litebackup = new Litebackup();
 
 const id = "42";
 const name = `agents/${id}.sqlite`;
@@ -20,7 +22,7 @@ const path = `/var/lib/app/agents/${id}.sqlite`;
 await mkdir("/var/lib/app/agents", { recursive: true });
 await appendFile(path, "");
 
-await acquire(name, { to: path, timeout: "2m" });
+await litebackup.databases.acquire(name, { to: path, timeout: "2m" });
 try {
   const db = new DatabaseSync(path);
   try {
@@ -31,7 +33,7 @@ try {
   }
 } finally {
   // Save committed progress even if the agent fails.
-  await release(name, { wait: "cloud", offload: true, timeout: "30m" });
+  await litebackup.databases.release(name, { wait: "cloud", offload: true, timeout: "30m" });
 }
 ```
 
@@ -39,7 +41,7 @@ Use `wait: "cloud"` when the machine may disappear after the run. On a
 persistent machine, `wait: "server"` returns sooner. Either way, offloading
 only removes the local file after the bucket has it.
 
-Do not also register a continuous `startBackup()` for an acquired database. The
+Do not also register a continuous `backups.start()` for an acquired database. The
 acquisition already syncs while you write.
 
 ## CLI equivalent

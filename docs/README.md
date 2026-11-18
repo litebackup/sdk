@@ -28,3 +28,5 @@ All database directories must exist and be accessible to the local client.
 
 Use the [API reference](sdk-reference.md) for method names and options, and the
 [client guide](litebackup-client.md) for sessions, permissions, and shutdown.
+
+[Agent fleets](sqlite-fleet.md) · [Serverless workers](sqlite-serverless.md) · [Direct HTTP API](http-api.md)

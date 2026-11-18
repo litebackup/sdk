@@ -1,11 +1,11 @@
 package litebackup
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -32,7 +32,10 @@ func (c *Client) StartBackup(ctx context.Context, path string, args *StartBackup
 		args = &StartBackupArgs{}
 	}
 	if path == "" {
-		return nil, errors.New("backup needs a path")
+		return nil, &Error{Code: "invalid_argument", Message: "backup needs a path"}
+	}
+	if args.Name != "" && args.Prefix != "" {
+		return nil, &Error{Code: "invalid_argument", Message: "choose a name or a prefix"}
 	}
 	absolute, err := absolutePath(path)
 	if err != nil {
@@ -65,6 +68,9 @@ func (e *Error) Is(target error) bool {
 
 // Backup runs the foreground job for this session.
 func (c *Client) Backup(ctx context.Context, path string, args *BackupArgs) error {
+	if c.customSocket {
+		return &Error{Code: "invalid_argument", Message: "foreground backup needs a named session and cannot target SocketPath"}
+	}
 	return runBackup(ctx, c.session, path, args)
 }
 
@@ -72,14 +78,14 @@ func runBackup(ctx context.Context, session, path string, args *BackupArgs) erro
 	if args == nil {
 		args = &BackupArgs{}
 	}
+	if path == "" || (args.Name != "" && args.Prefix != "") || strings.HasSuffix(args.Name, "/") {
+		return &Error{Code: "invalid_argument", Message: "expected a source and either a name or a prefix"}
+	}
 	binary, err := Binary()
 	if err != nil {
 		return err
 	}
-	if path == "" || (args.Name != "" && args.Prefix != "") || strings.HasSuffix(args.Name, "/") {
-		return &Error{Code: "invalid_argument", Message: "expected a source and either a name or a prefix"}
-	}
-	commandArgs := []string{"backup", "--json-errors"}
+	commandArgs := []string{"backup", "--stdout-format", "json"}
 	if session != "" {
 		commandArgs = append(commandArgs, "--session", session)
 	}
@@ -99,15 +105,20 @@ func runBackup(ctx context.Context, session, path string, args *BackupArgs) erro
 	cmd := exec.CommandContext(ctx, binary, commandArgs...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 15 * time.Second
-	cmd.Stderr = os.Stderr
-	out, err := cmd.Output()
+	_, err = cmd.Output()
+	if err == nil {
+		return nil
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if err != nil {
-		var failure Error
-		if json.Unmarshal(out, &failure) == nil && failure.Code != "" {
-			return &failure
+	var exited *exec.ExitError
+	if errors.As(err, &exited) {
+		for line := range bytes.Lines(exited.Stderr) {
+			var failure Error
+			if json.Unmarshal(line, &failure) == nil && failure.Code != "" {
+				return &failure
+			}
 		}
 	}
 	return err

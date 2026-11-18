@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Pack the SDK and this platform's binary package, install both into a scratch project, and check the binary resolves and runs.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -19,10 +19,9 @@ try {
     join(scratch, "check.mjs"),
     [
       'import { execFileSync } from "node:child_process";',
-      'import { startBackup, stopBackup, stopBackupRule, backup, failover, litebackupBinary, replicate, replicatePrefix, restore, versions, Litebackup } from "@litebackup/sdk";',
-      'for (const [name, value] of Object.entries({ startBackup, stopBackup, stopBackupRule, backup, failover, replicate, replicatePrefix, restore, versions, connect: Litebackup.connect })) {',
-      '  if (typeof value !== "function") throw new Error(`the package does not export ${name}`);',
-      '}',
+      'import { Litebackup, litebackupBinary } from "@litebackup/sdk";',
+      "const client = new Litebackup();",
+      'if (typeof client.backups.once !== "function") throw new Error("missing backups.once");',
       "const binary = litebackupBinary({});",
       'execFileSync(binary, ["start","--help"]);',
       'if (!binary.includes("node_modules")) throw new Error(`resolved ${binary} instead of the platform package`);',
@@ -30,6 +29,25 @@ try {
     ].join("\n"),
   );
   execFileSync("node", ["check.mjs"], { cwd: scratch, stdio: "inherit" });
+  // Compile each published example as a consumer of the installed declarations.
+  const docs = join(root, "..", "docs");
+  const guides = [join(root, "README.md"), join(root, "..", "README.md"), ...readdirSync(docs).filter((name) => name.endsWith(".md")).map((name) => join(docs, name))];
+  for (const guide of guides) {
+    const markdown = readFileSync(guide, "utf8");
+    let index = 0;
+    for (const match of markdown.matchAll(/^```(?:ts|typescript)\n([\s\S]*?)^```/gm)) {
+      const file = guide.endsWith("sqlite-temporal.md") ? ["activities", "workflows", "worker", "schedule"][index] : relative(root, guide).replace(/[^a-zA-Z0-9]/g, "_") + index;
+      writeFileSync(join(scratch, file + ".ts"), match[1]);
+      index++;
+    }
+  }
+  for (const file of readdirSync(join(root, "examples"))) {
+    const code = readFileSync(join(root, "examples", file), "utf8").replace('"../src/index.js"', '"@litebackup/sdk"');
+    writeFileSync(join(scratch, file), code);
+  }
+  execFileSync("npm", ["install", "--silent", "--ignore-scripts", "--no-audit", "--no-fund", "--omit=optional", "typescript@5.9.3", "@types/node@24.19.2", "@types/better-sqlite3@7.6.13",
+    ...["activity", "workflow", "worker", "client"].map((name) => "@temporalio/" + name + "@1.26.0")], { cwd: scratch, stdio: "inherit" });
+  execFileSync(join(scratch, "node_modules/.bin/tsc"), ["--noEmit", "--strict", "--skipLibCheck", "--module", "NodeNext", "--target", "es2023", ...readdirSync(scratch).filter((name) => name.endsWith(".ts"))], { cwd: scratch, stdio: "inherit" });
   console.log(`pack check passed for ${platform}: ${sdkTarball}, ${binaryTarball}`);
 } finally {
   rmSync(scratch, { recursive: true, force: true });

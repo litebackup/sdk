@@ -7,10 +7,9 @@ For apps that stay up, consider [continuous backup](sqlite-backup.md).
 
 ## Prepare the database host
 
-Install a [server](litebackup-server.md) and the CLI, then join once as the OS user that runs the job.
+Install a [server](litebackup-server.md) and the CLI. Give the job access to the database directory and set `LITEBACKUP_TOKEN` in its environment. An existing joined session can reuse its machine identity.
 
 ```sh
-litebackup up "$LITEBACKUP_TOKEN"
 litebackup backup ./main.sqlite scheduled/ --wait cloud
 ```
 
@@ -69,7 +68,7 @@ docker build --build-context cli=docker-image://litebackup-cli:pinned \
 ```
 
 Create a Secret named `litebackup-join` with key `token` through your secret
-manager. Provision `app-databases` and `litebackup-client-state` PVCs, replace
+manager. Provision the `app-databases` PVC, replace
 the image reference, and adapt volume permissions for your cluster:
 
 ```yaml
@@ -108,24 +107,18 @@ spec:
               volumeMounts:
                 - name: databases
                   mountPath: /data
-                - name: client-state
-                  mountPath: /state
           volumes:
             - name: databases
               persistentVolumeClaim:
                 claimName: app-databases
-            - name: client-state
-              persistentVolumeClaim:
-                claimName: litebackup-client-state
 ```
 
 The image runs as `node` (UID 1000). Set the pod's UID and GID to match your
-app and grant that user access to both volumes. The app must create the
+app and grant that user access to the database volume. The app must create the
 export files before this job runs.
 
 `Forbid` only prevents overlap within this CronJob. It does not coordinate
-other CronJobs or writers using the same backup names. The persistent client
-state keeps the joined machine identity across pods. Each foreground job has its own writer session. A successful pod has waited for the bucket and released its locks.
+other CronJobs or writers using the same backup names. A fresh pod spends one use of the token for each foreground job. Each foreground job has its own writer session. A successful pod has waited for the bucket and released its locks.
 
 Kubernetes schedules are approximate and Jobs may be retried. Keep the job
 idempotent, use stable names, and alert on failed Jobs. See the

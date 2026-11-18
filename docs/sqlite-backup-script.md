@@ -9,12 +9,14 @@ litebackup backup '/data/exports/**/*.sqlite' scheduled/ --wait cloud --timeout 
 Each matched file takes its writer lock, captures committed SQLite pages and waits for acknowledgement. A failed file produces an error and the job continues with other matches. A nonzero exit means the job failed. An overlapping writer gets `busy`. Files already published remain available to restore.
 
 ```ts
-import { backup } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
 
-await backup("/data/exports/**/*.sqlite", {
+const litebackup = new Litebackup();
+
+await litebackup.backups.once("/data/exports/**/*.sqlite", {
   prefix: "scheduled/",
   wait: "cloud",
-  signal: AbortSignal.timeout(30 * 60_000),
+  timeout: "30m",
 });
 ```
 

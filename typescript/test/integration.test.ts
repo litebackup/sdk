@@ -10,7 +10,7 @@ import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
-import { Litebackup, LitebackupError, sessionSocket, backup, restore, versions } from "../src/index.js";
+import { Litebackup, LitebackupError, sessionSocket } from "../src/index.js";
 
 const run = promisify(execFile);
 const binary = process.env.LITEBACKUP_PATH;
@@ -98,8 +98,8 @@ class DevelopmentServer {
     t.after(async () => {
       // Stop the daemons before the server, because their shutdown ends their sessions on it.
       for (const client of server.clients) {
+        await client.session.shutdown({ wait: "none" }).catch(() => undefined);
         client.close();
-        await client.shutdown({ wait: "none" }).catch(() => undefined);
       }
       spawnSync("pkill", ["-9", "-f", `(daemon --session .*-${runToken}$)|(${runToken}/server)`]);
       child.kill("SIGKILL");
@@ -127,14 +127,16 @@ class DevelopmentServer {
   /** Starts a session's daemon with its own join token, as an app on another machine would. */
   async connect(name: string): Promise<Litebackup> {
     const session = this.session(name);
-    const client = await Litebackup.connect({ token: await this.joinToken(session), session });
+    const client = new Litebackup({ token: await this.joinToken(session), session });
+    await client.connect();
     this.clients.push(client);
     return client;
   }
 
   /** Starts a session's daemon again; it keeps the join it made. */
   async reconnect(name: string): Promise<Litebackup> {
-    const client = await Litebackup.connect({ session: this.session(name) });
+    const client = new Litebackup({ session: this.session(name) });
+    await client.connect();
     this.clients.push(client);
     return client;
   }
@@ -169,43 +171,44 @@ test("backs up, names, replicates, restores, acquires, and releases", { skip, ti
   // Backups and name collisions.
   const mainPath = server.path("web-1", "main.db");
   addRows(mainPath, 10);
-  const main = await web1.startBackup(mainPath);
+  const main = await web1.backups.start(mainPath);
   assert.equal(main.name, "main.db");
-  await web1.sync(main.name);
+  await web1.databases.sync(main.name);
   const otherPath = server.path("web-2", "main.db");
   addRows(otherPath, 3);
-  await assert.rejects(web2.backup(otherPath), (error: unknown) => error instanceof LitebackupError && error.code === "busy");
-  const prefixed = await web2.startBackup(otherPath, { prefix: "web-2/" });
-  await web2.sync(prefixed.name);
+  await assert.rejects(web2.backups.once(otherPath), (error: unknown) => error instanceof LitebackupError && error.code === "busy");
+  const prefixed = await web2.backups.start(otherPath, { prefix: "web-2/" });
+  await web2.databases.sync(prefixed.name);
   assert.equal(prefixed.name, "web-2/main.db");
-  assert.deepEqual((await web2.backups.list()).map((listed) => listed.id), [prefixed.id]);
+  assert.deepEqual((await web2.rules.list()).map((listed) => listed.id), [prefixed.id]);
 
   // Versions and restore.
   addRows(mainPath, 5);
-  await web1.sync(main.name);
-  const listed = await web1.versions("main.db");
+  await web1.databases.sync(main.name);
+  const listed = await web1.databases.versions("main.db");
   assert.ok(listed.length >= 2, `versions: ${JSON.stringify(listed)}`);
   const restoredPath = server.path("restored", "main.db");
-  const restored = await web2.restore("main.db", { to: restoredPath, version: listed[0]!.version });
+  const restored = await web2.databases.restore("main.db", { to: restoredPath, version: listed[0]!.version });
   assert.equal(restored.version, listed[0]!.version);
   assert.equal(countRows(restoredPath), 10);
-  await assert.rejects(web2.restore("main.db", { to: restoredPath }), (error: unknown) => error instanceof LitebackupError && error.code === "exists");
+  await assert.rejects(web2.databases.restore("main.db", { to: restoredPath }), (error: unknown) => error instanceof LitebackupError && error.code === "exists");
 
-  // The package helpers share a client of LITEBACKUP_SESSION.
+  // Select a previously joined session through the environment.
   process.env.LITEBACKUP_SESSION = server.session("web-2");
-  assert.equal((await versions("main.db")).length, listed.length);
+  const fromEnvironment = new Litebackup();
+  assert.equal((await fromEnvironment.databases.versions("main.db")).length, listed.length);
   const headPath = server.path("restored", "head.db");
-  await restore("main.db", { to: headPath, time: new Date() });
+  await fromEnvironment.databases.restore("main.db", { to: headPath, time: new Date() });
   assert.equal(countRows(headPath), 15);
   const helperPath = server.path("web-2", "helper.db");
   addRows(helperPath, 1);
-  await backup(helperPath, { prefix: "web-2/" });
+  await fromEnvironment.backups.once(helperPath, { prefix: "web-2/" });
 
   // A replica on a readonly machine.
   const replicaPath = server.path("reader", "main.db");
-  const replica = await reader.replicate("main.db", { to: replicaPath });
+  const replica = await reader.replicas.start("main.db", { to: replicaPath });
   assert.equal(replica.role, "replica");
-  assert.equal(replica.syncedServer.version, (await web1.database("main.db")).syncedServer.version);
+  assert.equal(replica.syncedServer.version, (await web1.databases.get("main.db")).syncedServer.version);
   assert.equal(countRows(replicaPath), 15);
   const writer = new DatabaseSync(replicaPath, { timeout: 100 });
   assert.throws(() => writer.exec("DELETE FROM items"), (error: unknown) => (error as { errcode?: number }).errcode === 5, "app writes to the replica get SQLITE_BUSY");
@@ -215,20 +218,20 @@ test("backs up, names, replicates, restores, acquires, and releases", { skip, ti
   // Acquire and release move a database between machines.
   const tenantPath = server.path("web-1", "42.db");
   addRows(tenantPath, 4);
-  const acquired = await web1.acquire("tenants/42.db", { to: tenantPath, maintenance: true });
+  const acquired = await web1.databases.acquire("tenants/42.db", { to: tenantPath, maintenance: true });
   assert.equal(acquired.outcome, "created");
   assert.equal(acquired.database.acquired, true);
-  const holder = await web1.writer("tenants/42.db");
+  const holder = await web1.databases.writer("tenants/42.db");
   assert.equal(holder.thisMachine, true);
   assert.equal(holder.active, true);
   addRows(tenantPath, 2);
-  const released = await web1.release("tenants/42.db", { wait: "server" });
+  const released = await web1.databases.release("tenants/42.db", { wait: "server" });
   assert.ok(released.database.syncedServer.version >= 2);
   const movedPath = server.path("web-2", "42.db");
-  const moved = await web2.acquire("tenants/42.db", { to: movedPath });
+  const moved = await web2.databases.acquire("tenants/42.db", { to: movedPath });
   assert.equal(moved.outcome, "downloaded");
   assert.equal(countRows(movedPath), 6);
-  await web2.release("tenants/42.db", { wait: "server" });
+  await web2.databases.release("tenants/42.db", { wait: "server" });
   assert.deepEqual(await web2.conflicts.list(), []);
 });
 
@@ -245,12 +248,12 @@ test("fails over between three machines and saves the old origin's writes as a c
 
   const firstPath = server.path("first", "shared.db");
   addRows(firstPath, 5);
-  const firstFailover = await first.failover(firstPath, { name });
+  const firstFailover = await first.failovers.start(firstPath, { name });
   assert.equal(firstFailover.isOrigin, true);
-  await first.sync(name);
-  const secondFailover = await second.failover(server.path("second", "shared.db"), { name });
+  await first.databases.sync(name);
+  const secondFailover = await second.failovers.start(server.path("second", "shared.db"), { name });
   const thirdPath = server.path("third", "shared.db");
-  const thirdFailover = await third.failover(thirdPath, { name });
+  const thirdFailover = await third.failovers.start(thirdPath, { name });
   const tookOver = new Promise<string>((resolve) => {
     secondFailover.on("origin", () => resolve("second"));
     thirdFailover.on("origin", () => resolve("third"));
@@ -273,11 +276,11 @@ test("fails over between three machines and saves the old origin's writes as a c
 
   // The first machine comes back: its writes are saved as a conflict and it follows the new origin.
   const restarted = await server.reconnect("first");
-  const comeback = await restarted.failover(firstPath, { name });
+  const comeback = await restarted.failovers.start(firstPath, { name });
   // The restarted daemon resumes the failover rule on its own and may set
   // the writes aside before this failover call; its event log has them.
   await eventually(60_000, async () => {
-    const page = await restarted.eventPage({ limit: 10_000 });
+    const page = await restarted.events.page({ limit: 10_000 });
     const saved = page.events.find((event) => event.type === "conflict_saved" && event.name === name);
     assert.ok(saved?.path, "no conflict_saved event with a path yet");
     assert.ok(existsSync(saved.path), `${saved.path} is missing`);
@@ -303,21 +306,21 @@ test("backs up and acquires empty files as new databases", { skip, timeout: 120_
 
   const emptyPath = server.path("web-1", "empty.db");
   new DatabaseSync(emptyPath).close();
-  const empty = await web1.startBackup(emptyPath);
-  assert.equal((await web1.database("empty.db")).syncedServer.version, 0);
+  const empty = await web1.backups.start(emptyPath);
+  assert.equal((await web1.databases.get("empty.db")).syncedServer.version, 0);
   addRows(emptyPath, 1);
-  await web1.sync(empty.name);
-  assert.equal((await web1.database("empty.db")).syncedServer.version, 1);
+  await web1.databases.sync(empty.name);
+  assert.equal((await web1.databases.get("empty.db")).syncedServer.version, 1);
 
   const tenantPath = server.path("web-1", "7.db");
   new DatabaseSync(tenantPath).close();
-  const created = await web1.acquire("tenants/7.db", { to: tenantPath });
+  const created = await web1.databases.acquire("tenants/7.db", { to: tenantPath });
   assert.equal(created.outcome, "created");
   addRows(tenantPath, 3);
-  await web1.release("tenants/7.db", { wait: "server" });
+  await web1.databases.release("tenants/7.db", { wait: "server" });
   const movedPath = server.path("web-2", "7.db");
   new DatabaseSync(movedPath).close();
-  const moved = await web2.acquire("tenants/7.db", { to: movedPath });
+  const moved = await web2.databases.acquire("tenants/7.db", { to: movedPath });
   assert.equal(moved.outcome, "downloaded");
   assert.equal(countRows(movedPath), 3);
   assert.deepEqual(await web2.conflicts.list(), []);
@@ -329,10 +332,10 @@ test("prefix replicas download existing and future databases and stop as a group
   const reader = await server.connect("prefix-reader");
   const firstPath = server.path("prefix-origin", "first.db");
   addRows(firstPath, 2);
-  await origin.backup(firstPath, { prefix: "tenants/" });
+  await origin.backups.once(firstPath, { prefix: "tenants/" });
   const directory = server.path("prefix-reader", "replicas");
   mkdirSync(directory, { recursive: true });
-  const prefix = await reader.replicatePrefix("tenants", { to: directory });
+  const prefix = await reader.replicas.startPrefix("tenants", { to: directory });
   assert.equal(prefix.prefix, "tenants");
   const firstCopy = join(directory, "first.db");
   await eventually(30_000, async () => {
@@ -341,7 +344,7 @@ test("prefix replicas download existing and future databases and stop as a group
   });
   const secondPath = server.path("prefix-origin", "second.db");
   addRows(secondPath, 3);
-  await origin.backup(secondPath, { prefix: "tenants/" });
+  await origin.backups.once(secondPath, { prefix: "tenants/" });
   const secondCopy = join(directory, "second.db");
   await eventually(30_000, async () => {
     assert.ok(existsSync(secondCopy));
@@ -362,9 +365,9 @@ test("documented one-shot runners archive their files and leave no backup rules"
   const jsPath = server.path("job", "js-input.db");
   addRows(jsPath, 4);
   await run(process.execPath, [new URL("../examples/one-shot.js", import.meta.url).pathname, jsPath], { env: environment });
-  assert.deepEqual(await job.backups.list(), []);
+  assert.deepEqual(await job.rules.list(), []);
   const jsRestored = server.path("restored", "js-input.db");
-  await job.restore("scheduled/js-input.db", { to: jsRestored });
+  await job.databases.restore("scheduled/js-input.db", { to: jsRestored });
   assert.equal(countRows(jsRestored), 4);
 
   const binDirectory = server.path("bin");
@@ -375,16 +378,16 @@ test("documented one-shot runners archive their files and leave no backup rules"
   await run("bash", [new URL("../../../examples/cron/backup-sqlite.sh", import.meta.url).pathname, cliPath], {
     env: { ...environment, PATH: `${binDirectory}:${process.env.PATH}` },
   });
-  assert.deepEqual(await job.backups.list(), []);
+  assert.deepEqual(await job.rules.list(), []);
   const cliRestored = server.path("restored", "cli-input.db");
-  await job.restore("scheduled/cli-input.db", { to: cliRestored });
+  await job.databases.restore("scheduled/cli-input.db", { to: cliRestored });
   assert.equal(countRows(cliRestored), 5);
 
   // A one-shot job must not stop a continuous backup of the same file.
   const continuousPath = server.path("job", "continuous.db");
   addRows(continuousPath, 2);
-  const continuous = await job.startBackup(continuousPath);
-  await job.sync(continuous.name);
+  const continuous = await job.backups.start(continuousPath);
+  await job.databases.sync(continuous.name);
   await assert.rejects(
     run("bash", [new URL("../../../examples/cron/backup-sqlite.sh", import.meta.url).pathname, continuousPath], {
       env: { ...environment, PATH: `${binDirectory}:${process.env.PATH}` },
@@ -395,10 +398,10 @@ test("documented one-shot runners archive their files and leave no backup rules"
     },
   );
   await assert.rejects(run(process.execPath, [new URL("../examples/one-shot.js", import.meta.url).pathname, continuousPath], { env: environment }));
-  assert.deepEqual((await job.backups.list()).map((backup) => backup.id), [continuous.id]);
-  await job.sync(continuous.name);
-  assert.deepEqual((await job.backups.list()).map((backup) => backup.id), [continuous.id]);
-  await job.stopBackup(continuous.name);
+  assert.deepEqual((await job.rules.list()).map((backup) => backup.id), [continuous.id]);
+  await job.databases.sync(continuous.name);
+  assert.deepEqual((await job.rules.list()).map((backup) => backup.id), [continuous.id]);
+  await job.backups.stop(continuous.name);
 });
 
 test("foreground recursive backup reports bad files and preserves relative names", { skip, timeout: 30_000 }, async (t) => {
@@ -406,6 +409,7 @@ test("foreground recursive backup reports bad files and preserves relative names
   const reader = await server.connect("reader");
   const session = server.session("scheduled");
   const token = await server.joinToken(session);
+  const worker = new Litebackup({ session, token });
   const root = server.path("source");
   addRows(join(root, "Équipe", "42.sqlite"), 2);
   addRows(join(root, "Main.sqlite"), 3);
@@ -414,27 +418,27 @@ test("foreground recursive backup reports bad files and preserves relative names
   await symlink(root, join(root, "cycle"));
   await writeFile(join(root, "invalid.sqlite"), "invalid");
   await assert.rejects(
-    backup(join(rootLink, "**", "*.sqlite"), { session, token, prefix: "租户/" }),
+    worker.backups.once(join(rootLink, "**", "*.sqlite"), { prefix: "租户/" }),
     (err: unknown) => err instanceof LitebackupError && err.message.includes("invalid.sqlite"),
   );
   for (const name of ["租户/Équipe/42.sqlite", "租户/Main.sqlite"]) {
-    assert.equal((await reader.versions(name)).length, 1);
+    assert.equal((await reader.databases.versions(name)).length, 1);
   }
   const source = join(root, "Main.sqlite");
   const exact = "Mixed Case/É.sqlite";
-  await backup(source, { session, token, name: exact, wait: "cloud" });
+  await worker.backups.once(source, { name: exact, wait: "cloud" });
   const restored = server.path("result", "Exact.sqlite");
-  await reader.restore(exact, { to: restored });
+  await reader.databases.restore(exact, { to: restored });
   assert.equal(countRows(restored), 3);
   const controller = new AbortController();
-  const pending = backup(source, { session, name: "cancel.sqlite", wait: "cloud", signal: controller.signal });
+  const pending = worker.backups.once(source, { name: "cancel.sqlite", wait: "cloud", signal: controller.signal });
   const cancelled = assert.rejects(pending, (err: unknown) => err instanceof LitebackupError && err.code === "cancelled");
   await eventually(3_000, async () => {
-    assert.ok((await reader.writer("cancel.sqlite")).active);
+    assert.ok((await reader.databases.writer("cancel.sqlite")).active);
   });
   controller.abort();
   await cancelled;
-  assert.equal((await reader.writer("cancel.sqlite")).active, false);
+  assert.equal((await reader.databases.writer("cancel.sqlite")).active, false);
   assert.equal(existsSync(sessionSocket(session, process.env).socketPath), false);
 });
 
@@ -445,31 +449,51 @@ test("stop selects single files by remote name and whole backup rules by ID", { 
   const cli = (...args: string[]) => run(binary!, args, { cwd: server.directory, env });
   const path = server.path("source", "local.sqlite");
   addRows(path, 2);
-  const single = await client.startBackup(path, { prefix: "Équipe/" });
+  const single = await client.backups.start(path, { prefix: "Équipe/" });
   assert.equal(single.name, "Équipe/local.sqlite");
-  await client.sync(single.name);
+  await client.databases.sync(single.name);
   await rm(path);
-  assert.equal((await client.backups.list())[0]?.name, single.name);
+  assert.equal((await client.rules.list())[0]?.name, single.name);
   await assert.rejects(cli("stop", path));
   await cli("stop", single.name);
-  assert.ok((await client.versions(single.name)).length > 0);
+  assert.ok((await client.databases.versions(single.name)).length > 0);
 
   addRows(path, 1);
   const siblingPath = server.path("source", "other.sqlite");
   addRows(siblingPath, 1);
-  const group = await client.startBackup(join(dirname(path), "**", "*.sqlite"), { prefix: "Équipe/" });
-  const empty = await client.startBackup(join(dirname(path), "*.empty"), { prefix: "Équipe/" });
+  const group = await client.backups.start(join(dirname(path), "**", "*.sqlite"), { prefix: "Équipe/" });
+  const empty = await client.backups.start(join(dirname(path), "*.empty"), { prefix: "Équipe/" });
   await eventually(5_000, async () => {
-    assert.deepEqual((await client.databases()).map((db) => db.name), [single.name, "Équipe/other.sqlite"]);
+    assert.deepEqual((await client.databases.list()).map((db) => db.name), [single.name, "Équipe/other.sqlite"]);
   });
-  await assert.rejects(client.stopBackup(single.name), (err: unknown) =>
+  await assert.rejects(client.backups.stop(single.name), (err: unknown) =>
     err instanceof LitebackupError && err.code === "invalid_argument" && err.message.includes(group.id));
   await assert.rejects(cli("stop", "--rule", group.id, single.name));
-  assert.equal((await client.backups.list()).length, 2);
-  assert.equal((await client.databases()).length, 2);
+  assert.equal((await client.rules.list()).length, 2);
+  assert.equal((await client.databases.list()).length, 2);
   await cli("stop", "--rule", group.id);
-  assert.deepEqual((await client.backups.list()).map((rule) => rule.id), [empty.id]);
-  assert.deepEqual(await client.databases(), []);
-  await client.stopBackupRule(empty.id);
-  assert.deepEqual(await client.backups.list(), []);
+  assert.deepEqual((await client.rules.list()).map((rule) => rule.id), [empty.id]);
+  assert.deepEqual(await client.databases.list(), []);
+  await client.rules.stop(empty.id);
+  assert.deepEqual(await client.rules.list(), []);
+});
+
+test("a killed foreground job loses its writer lease and saves no identity", { skip, timeout: 30_000 }, async (t) => {
+  const server = await DevelopmentServer.start(t);
+  const reader = await server.connect("reader");
+  const session = server.session("killed");
+  const token = await server.joinToken(session);
+  const path = server.path("source", "kill.sqlite");
+  addRows(path, 1);
+  const child = spawn(binary!, ["backup", "--wait", "cloud", "--session", session, "--", path], {
+    env: { ...process.env, LITEBACKUP_TOKEN: token }, stdio: "ignore",
+  });
+  const done = new Promise((resolve) => child.once("exit", resolve));
+  t.after(() => { child.kill("SIGKILL"); });
+  await eventually(5000, async () => assert.ok((await reader.databases.writer("kill.sqlite")).active));
+  assert.ok(child.kill("SIGKILL"));
+  await done;
+  await eventually(8000, async () => assert.equal((await reader.databases.writer("kill.sqlite")).active, false));
+  assert.equal(existsSync(join(process.env.XDG_STATE_HOME!, "litebackup", session, "credentials.json")), false);
+  await new Litebackup({ session, token }).backups.once(path);
 });

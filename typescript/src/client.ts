@@ -37,7 +37,7 @@ const sdkVersionHeader = "x-litebackup-sdk-version";
 const clientVersionHeader = "x-litebackup-client-version";
 
 /** Options for connecting to a Litebackup session. */
-export interface ConnectOptions {
+export interface LitebackupOptions {
   /**
    * Join token, TOKEN@HOST, the daemon joins with on its first start;
    * defaults to LITEBACKUP_TOKEN. A daemon that already joined keeps its join.
@@ -113,6 +113,19 @@ export interface VersionsOptions {
   limit?: number;
 }
 
+export interface PageOptions {
+  after?: string;
+  limit?: number;
+}
+
+export interface SignalOptions {
+  signal?: AbortSignal;
+}
+
+export interface EventPageOptions extends EventsOptions {
+  limit?: number;
+}
+
 /** Options for events. */
 export interface EventsOptions {
   /** Return events with IDs greater than this one; 0 starts at the oldest. */
@@ -135,18 +148,42 @@ export function absolutePath(path: string): string {
 
 /** Talks to the Litebackup daemon of one session over its unix socket. */
 export class Litebackup {
-  private sessionName: string;
-  get session(): string { return this.sessionName; }
-  readonly socketPath: string;
-  /** The daemon's version, known after the first call. */
+  private targetEnvironment?: NodeJS.ProcessEnv;
+  private readonly options: LitebackupOptions;
+  private connection?: Promise<void>;
+  private socketPath = "";
+  private readonly lifetime = new AbortController();
   clientVersion = "";
 
-  /** Backups and failovers running on this machine. */
-  readonly backups: {
-    list(options?: { signal?: AbortSignal }): Promise<BackupInfo[]>;
+  readonly backups = {
+    start: this.#startBackup.bind(this),
+    once: this.#backup.bind(this),
+    stop: this.#stopBackup.bind(this),
   };
+  readonly rules = {
+    list: async (options: SignalOptions = {}): Promise<BackupInfo[]> =>
+      (await this.call<Schemas["BackupList"]>("GET", "/v1/backup-rules/list", undefined, options.signal)).backups,
+    stop: this.#stopBackupRule.bind(this),
+  };
+  readonly databases = {
+    get: this.#database.bind(this),
+    list: this.#listDatabases.bind(this),
+    page: this.#databasesPage.bind(this),
+    versions: this.#versions.bind(this),
+    restore: this.#restore.bind(this),
+    sync: this.#sync.bind(this),
+    offload: this.#offload.bind(this),
+    writer: this.#writer.bind(this),
+    acquire: this.#acquire.bind(this),
+    release: this.#release.bind(this),
+  };
+  readonly events = { page: this.#eventPage.bind(this), watch: this.#watchEvents.bind(this) };
+  readonly session = { status: this.#status.bind(this), shutdown: this.#shutdown.bind(this) };
+  readonly failovers = { start: this.#failover.bind(this) };
   /** Prefix replicas and replicas on this machine. */
   readonly replicas: {
+    start(name: string, options?: ReplicateOptions): Promise<DatabaseStatus>;
+    startPrefix(prefix: string, options: ReplicatePrefixOptions): Promise<PrefixReplica>;
     list(): Promise<ReplicaList>;
     stop(name: string): Promise<void>;
     stopPrefix(prefix: string, to: string): Promise<void>;
@@ -157,20 +194,16 @@ export class Litebackup {
     delete(id: string): Promise<void>;
   };
 
-  /** @internal */
   /** Failovers this client follows; close() stops following them. @internal */
-  readonly failovers = new Set<Failover>();
+  readonly watches = new Set<Failover>();
   /** @internal */
   closed = false;
 
-  /** Use Litebackup.connect, which starts the daemon when needed. */
-  private constructor(session: string, socketPath: string, private readonly environment: NodeJS.ProcessEnv) {
-    this.sessionName = session;
-    this.socketPath = socketPath;
-    this.backups = {
-      list: async (options = {}) => (await this.call<Schemas["BackupList"]>("GET", "/v1/backup-rules/list", undefined, options.signal)).backups,
-    };
+  constructor(options: LitebackupOptions = {}) {
+    this.options = { ...options, environment: options.environment && { ...options.environment } };
     this.replicas = {
+      start: this.#replicate.bind(this),
+      startPrefix: this.#replicatePrefix.bind(this),
       list: () => this.call("GET", "/v1/replicas/list"),
       stopPrefix: async (prefix, to) => {
         if (!to) {
@@ -191,22 +224,46 @@ export class Litebackup {
   }
 
   /** Connects to a session, starting its daemon like the CLI does. */
-  static async connect(options: ConnectOptions = {}): Promise<Litebackup> {
-    const environment = options.environment ?? process.env;
-    let session = options.session ?? "";
-    let socketPath = options.socketPath;
-    if (!socketPath) {
-      const resolved = sessionSocket(options.session, environment);
-      session = resolved.session;
-      socketPath = resolved.socketPath;
-      if (options.launch !== false) {
-        await launchDaemon({ session, socketPath, environment, token: options.token });
+  async connect(): Promise<void> {
+    this.ensureOpen();
+    this.connection ??= this.#open().catch((error) => {
+      this.connection = undefined;
+      if (error instanceof LitebackupError) throw error;
+      throw new LitebackupError("connection_failed", String(error), 0);
+    });
+    await this.connection;
+    this.ensureOpen();
+  }
+
+  private ensureOpen(): void {
+    if (this.closed) throw new LitebackupError("closed", "the client is closed", 0);
+  }
+
+  private environment(): NodeJS.ProcessEnv {
+    const env = this.targetEnvironment ?? this.options.environment ?? process.env;
+    const token = this.options.token ?? env.LITEBACKUP_TOKEN;
+    if (token?.trim().startsWith("litebackup_") && !token.trim().startsWith("litebackup_join_")) {
+      throw new LitebackupError("invalid_argument", "Get a join token from Machines → Add machine", 0);
+    }
+    this.targetEnvironment ??= { ...env };
+    return { ...this.targetEnvironment, LITEBACKUP_TOKEN: token };
+  }
+
+  async #open(): Promise<void> {
+    const environment = this.environment();
+    if (this.options.socketPath !== undefined) {
+      if (!this.options.socketPath) throw new LitebackupError("invalid_argument", "socketPath needs a path", 0);
+      this.socketPath = this.options.socketPath;
+    } else {
+      const target = sessionSocket(this.options.session, environment);
+      this.socketPath = target.socketPath;
+      if (this.options.launch !== false) {
+        await launchDaemon({ ...target, environment }).catch((error) => {
+          throw new LitebackupError("launch_failed", String(error), 0);
+        });
       }
     }
-    const litebackup = new Litebackup(session, socketPath, environment);
-    const status = await litebackup.status();
-    if (!session) litebackup.sessionName = status.session;
-    return litebackup;
+    await this.request("GET", "/v1/status/show?limit=1");
   }
 
   /**
@@ -215,13 +272,21 @@ export class Litebackup {
    * @internal
    */
   async call<T>(method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal): Promise<any> {
+    await this.connect();
+    return this.request<T>(method, path, body, signal);
+  }
+
+  private async request<T>(method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal): Promise<any> {
     const response = await socketFetch({
       socketPath: this.socketPath,
       method,
       path,
       headers: { [sdkVersionHeader]: `typescript/${sdkVersion}` },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal,
+      signal: signal ? AbortSignal.any([signal, this.lifetime.signal]) : this.lifetime.signal,
+    }).catch((error) => {
+      this.ensureOpen();
+      throw new LitebackupError(signal?.aborted ? "cancelled" : "connection_failed", String(error), 0);
     });
     this.clientVersion = response.headers[clientVersionHeader] ?? this.clientVersion;
     if (response.status !== 200) {
@@ -236,11 +301,15 @@ export class Litebackup {
       }
       throw new LitebackupError(code, message, response.status);
     }
-    return camelize(JSON.parse(response.body) as T);
+    try {
+      return camelize(JSON.parse(response.body) as T);
+    } catch {
+      throw new LitebackupError("invalid_response", "the daemon returned invalid JSON", response.status);
+    }
   }
 
   /** Persist a continuous rule. Discovery runs in the daemon. */
-  async startBackup(source: BackupSource, options: StartBackupOptions = {}): Promise<BackupInfo> {
+  async #startBackup(source: BackupSource, options: StartBackupOptions = {}): Promise<BackupInfo> {
     return this.call("POST", "/v1/backup-rules/start", {
       path: sourcePath(source),
       name: options.name,
@@ -250,17 +319,20 @@ export class Litebackup {
   }
 
   /** Stop a single-file backup on this machine by its exact remote database name. */
-  stopBackup(name: string): Promise<{ leasePending: boolean }> {
+  async #stopBackup(name: string): Promise<{ leasePending: boolean }> {
     return this.call("POST", "/v1/backup-rules/stop", { name });
   }
 
-  /** Stop the whole backup rule, including future matches, using the ID returned by startBackup. */
-  stopBackupRule(ruleId: string): Promise<{ leasePending: boolean }> {
+  /** Stop the whole backup rule, including future matches, using the ID returned by backups.start. */
+  async #stopBackupRule(ruleId: string): Promise<{ leasePending: boolean }> {
     return this.call("POST", "/v1/backup-rules/stop", { rule_id: ruleId });
   }
 
-  backup(source: BackupSource, options: BackupOptions = {}): Promise<void> {
-    return runBackup(source, { ...options, session: this.session }, this.environment);
+  async #backup(source: BackupSource, options: BackupOptions = {}): Promise<void> {
+    this.ensureOpen();
+    if (this.options.socketPath !== undefined) throw new LitebackupError("invalid_argument", "foreground backup needs a named session and cannot target socketPath", 0);
+    const signal = options.signal ? AbortSignal.any([options.signal, this.lifetime.signal]) : this.lifetime.signal;
+    return runBackup(source, { ...options, signal }, this.environment(), this.options.session);
   }
 
   /**
@@ -268,12 +340,12 @@ export class Litebackup {
    * write lock is the origin, the others keep live readonly replicas at the
    * same path and take over when the origin's lease runs out.
    */
-  failover(path: string, options: FailoverOptions = {}): Promise<Failover> {
+  async #failover(path: string, options: FailoverOptions = {}): Promise<Failover> {
     return Failover.start(this, path, options);
   }
 
   /** Keeps a live readonly replica of a database and resolves once its first version is local. */
-  async replicate(name: string, options: ReplicateOptions = {}): Promise<DatabaseStatus> {
+  async #replicate(name: string, options: ReplicateOptions = {}): Promise<DatabaseStatus> {
     const body: Schemas["ReplicaRequest"] = { name };
     if (options.to) {
       body.to = absolutePath(options.to);
@@ -292,7 +364,7 @@ export class Litebackup {
   }
 
   /** Registers live readonly replicas of current and future databases under a prefix. An empty prefix follows all databases. */
-  async replicatePrefix(prefix: string, options: ReplicatePrefixOptions): Promise<PrefixReplica> {
+  async #replicatePrefix(prefix: string, options: ReplicatePrefixOptions): Promise<PrefixReplica> {
     if (!options?.to) {
       throw new LitebackupError("invalid_argument", "replicating a prefix needs a directory", 0);
     }
@@ -308,7 +380,7 @@ export class Litebackup {
   }
 
   /** Writes a version of a database to a new file and checks it. An existing file is never overwritten (exists). */
-  restore(name: string, options: RestoreOptions): Promise<RestoreResult> {
+  async #restore(name: string, options: RestoreOptions): Promise<RestoreResult> {
     if (!options?.to) {
       throw new LitebackupError("invalid_argument", "restore needs a path to write to", 0);
     }
@@ -320,13 +392,15 @@ export class Litebackup {
       body.version = options.version;
     }
     if (options.time !== undefined) {
+      if (options.time instanceof Date && !Number.isFinite(options.time.getTime())) throw new LitebackupError("invalid_argument", "restore needs a valid time", 0);
       body.time = options.time instanceof Date ? options.time.toISOString() : options.time;
     }
     return this.call("POST", "/v1/databases/restore", body);
   }
 
   /** The versions of a database the server can restore, oldest first. */
-  async versions(name: string, options: VersionsOptions = {}): Promise<Version[]> {
+  async #versions(name: string, options: VersionsOptions = {}): Promise<Version[]> {
+    if (options.limit === 0) return [];
     const versions: Version[] = [];
     let after = options.after ?? 0;
     for (;;) {
@@ -348,7 +422,7 @@ export class Litebackup {
   }
 
   /** Takes the write lock on a database and makes the local file the server head, for worker pools that move databases between machines. */
-  acquire(name: string, options: AcquireOptions = {}): Promise<AcquireResult> {
+  async #acquire(name: string, options: AcquireOptions = {}): Promise<AcquireResult> {
     const body: Schemas["AcquireRequest"] = { name };
     if (options.to) {
       body.path = absolutePath(options.to);
@@ -372,7 +446,7 @@ export class Litebackup {
   }
 
   /** Syncs an acquired database a final time, runs its maintenance, and releases its write lock. */
-  release(name: string, options: ReleaseOptions = {}): Promise<ReleaseResult> {
+  async #release(name: string, options: ReleaseOptions = {}): Promise<ReleaseResult> {
     const body: Schemas["ReleaseRequest"] = { name };
     if (options.wait) {
       body.wait = options.wait;
@@ -387,21 +461,21 @@ export class Litebackup {
   }
 
   /** Which machine writes a database, when its lease runs out, and whether it ran out. */
-  writer(name: string): Promise<Writer> {
+  async #writer(name: string): Promise<Writer> {
     return this.call("GET", `/v1/databases/writer?${new URLSearchParams({ name })}`);
   }
 
   /** The session, its server, and one page of databases. */
-  status(after = "", limit = 100): Promise<Status> {
+  async #status({ after = "", limit = 100 }: PageOptions = {}): Promise<Status> {
     return this.call("GET", `/v1/status/show?${new URLSearchParams({ after, limit: String(limit) })}`);
   }
 
   /** Lists all databases. Use databasesPage() to process one page at a time. */
-  async databases(): Promise<DatabaseStatus[]> {
+  async #listDatabases(): Promise<DatabaseStatus[]> {
     const databases: DatabaseStatus[] = [];
     let after = "";
     do {
-      const page = await this.databasesPage(after);
+      const page = await this.#databasesPage({ after });
       databases.push(...page.databases);
       after = page.next ?? "";
     } while (after);
@@ -409,34 +483,34 @@ export class Litebackup {
   }
 
   /** Pass the returned next cursor as after to continue. */
-  databasesPage(after = "", limit = 100): Promise<DatabasePage> {
+  async #databasesPage({ after = "", limit = 100 }: PageOptions = {}): Promise<DatabasePage> {
     return this.call("GET", `/v1/databases/list?${new URLSearchParams({ after, limit: String(limit) })}`);
   }
 
   /** One database: its role, state, and the versions the server and the bucket hold. */
-  database(name: string, options: { signal?: AbortSignal } = {}): Promise<DatabaseStatus> {
+  async #database(name: string, options: SignalOptions = {}): Promise<DatabaseStatus> {
     return this.call("GET", `/v1/databases/status?${new URLSearchParams({ name })}`, undefined, options.signal);
   }
 
   /** Syncs a database now and resolves once the server acknowledged it. */
-  sync(name: string, options: { signal?: AbortSignal } = {}): Promise<DatabaseStatus> {
+  async #sync(name: string, options: SignalOptions = {}): Promise<DatabaseStatus> {
     return this.call("POST", "/v1/databases/sync", { name }, options.signal);
   }
 
   /** Removes the local file of a released database once the bucket holds its last version; acquire brings it back. */
-  offload(name: string): Promise<DatabaseStatus> {
+  async #offload(name: string): Promise<DatabaseStatus> {
     return this.call("POST", "/v1/databases/offload", { name });
   }
 
   /** One page of events after an ID, waiting up to waitMillis for the first. */
-  async eventPage(options: { after?: number; waitMillis?: number; limit?: number; signal?: AbortSignal } = {}): Promise<EventList> {
+  async #eventPage(options: EventPageOptions = {}): Promise<EventList> {
     const query = new URLSearchParams();
     if (options.after) {
       // -1 answers no events and, as next, where the log ends.
       query.set("after", String(options.after));
     }
-    if (options.waitMillis) {
-      query.set("wait_millis", String(options.waitMillis));
+    if (options.wait !== undefined) {
+      query.set("wait_millis", String(milliseconds(options.wait)));
     }
     if (options.limit) {
       query.set("limit", String(options.limit));
@@ -446,11 +520,11 @@ export class Litebackup {
   }
 
   /** Yields events, oldest first, by long-polling the daemon until the signal aborts. */
-  async *events(options: EventsOptions = {}): AsyncGenerator<LitebackupEvent> {
+  async *#watchEvents(options: EventsOptions = {}): AsyncGenerator<LitebackupEvent> {
     let after = options.after ?? 0;
     const waitMillis = milliseconds(options.wait ?? 30_000);
     while (!options.signal?.aborted) {
-      const page = await this.eventPage({ after, waitMillis, signal: options.signal });
+      const page = await this.#eventPage({ after, wait: waitMillis, signal: options.signal });
       for (const event of page.events) {
         yield event;
       }
@@ -459,7 +533,7 @@ export class Litebackup {
   }
 
   /** Syncs every database a final time, releases every write lock, ends the session, and stops the daemon. */
-  shutdown(options: ShutdownOptions = {}): Promise<ShutdownResult> {
+  async #shutdown(options: ShutdownOptions = {}): Promise<ShutdownResult> {
     const body: Schemas["ShutdownRequest"] = {};
     if (options.wait) {
       body.wait = options.wait;
@@ -473,9 +547,10 @@ export class Litebackup {
   /** Stops watching failovers. The daemon keeps running. */
   close(): void {
     this.closed = true;
-    for (const failover of this.failovers) {
+    for (const failover of this.watches) {
       failover.end();
     }
-    this.failovers.clear();
+    this.lifetime.abort();
+    this.watches.clear();
   }
 }

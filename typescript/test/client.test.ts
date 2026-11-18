@@ -4,7 +4,7 @@ import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { Litebackup, LitebackupError, backup, startBackup, installCommand, litebackupBinary, sdkVersion, sessionSocket, versions } from "../src/index.js";
+import { Litebackup, LitebackupError, installCommand, litebackupBinary, sdkVersion, sessionSocket } from "../src/index.js";
 import { FakeDaemon, databaseStatus } from "./fake.js";
 
 test("sends the SDK version, converts answers to camelCase, and maps errors", async (t) => {
@@ -12,45 +12,47 @@ test("sends the SDK version, converts answers to camelCase, and maps errors", as
   daemon.route("GET /v1/databases/status", (request) => [200, databaseStatus(request.query.get("name")!, "origin", "syncing", 3, 2)]);
   daemon.route("POST /v1/databases/release", () => [409, { code: "still_open", message: "a process still has the database open" }]);
   daemon.route("POST /v1/databases/offload", () => [426, "not json"]);
-  const litebackup = await Litebackup.connect({ socketPath: daemon.socketPath });
+  const litebackup = new Litebackup({ socketPath: daemon.socketPath });
+  await litebackup.connect();
   assert.equal(litebackup.clientVersion, "0.3.18");
 
-  const status = await litebackup.database("app/main.db");
+  const status = await litebackup.databases.get("app/main.db");
   assert.equal(status.syncedServer.version, 3);
   assert.equal(status.syncedCloud.version, 2);
   assert.equal(status.lastFullScanReason, "first");
   assert.equal(status.localChanged, false);
   assert.equal((status as unknown as Record<string, unknown>).synced_server, undefined);
 
-  await assert.rejects(litebackup.release("app/main.db", { wait: "cloud", timeout: "5s" }), (error: unknown) => {
+  await assert.rejects(litebackup.databases.release("app/main.db", { wait: "cloud", timeout: "5s" }), (error: unknown) => {
     assert.ok(error instanceof LitebackupError);
     assert.equal(error.code, "still_open");
     assert.equal(error.status, 409);
     return true;
   });
   assert.deepEqual(daemon.received("/v1/databases/release")[0]!.body, { name: "app/main.db", wait: "cloud", timeout_millis: 5000 });
-  await assert.rejects(litebackup.offload("x.db"), (error: unknown) => error instanceof LitebackupError && error.code === "http_426");
+  await assert.rejects(litebackup.databases.offload("x.db"), (error: unknown) => error instanceof LitebackupError && error.code === "http_426");
   for (const request of daemon.requests) {
     assert.equal(request.headers["x-litebackup-sdk-version"], `typescript/${sdkVersion}`);
   }
-  assert.equal(sdkVersion, "0.4.2");
+  assert.equal(sdkVersion, "0.5.0");
 });
 
 test("startBackup awaits the local rule and stop reports a pending lease", async (t) => {
   const daemon = await FakeDaemon.start(t);
   daemon.route("POST /v1/backup-rules/start", (req) => [200, { id: "rule", path: req.body!.path }]);
   daemon.route("POST /v1/backup-rules/stop", () => [200, { lease_pending: true }]);
-  const client = await Litebackup.connect({ socketPath: daemon.socketPath });
+  const client = new Litebackup({ socketPath: daemon.socketPath });
+  await client.connect();
   const source = { name: "My App.db", open: true, memory: false };
-  assert.equal((await client.startBackup(source, { prefix: "É/" })).id, "rule");
+  assert.equal((await client.backups.start(source, { prefix: "É/" })).id, "rule");
   assert.deepEqual(daemon.received("/v1/backup-rules/start")[0]!.body, { path: join(process.cwd(), source.name), prefix: "É/" });
-  assert.deepEqual(await client.stopBackup("É/My App.db"), { leasePending: true });
-  assert.deepEqual(await client.stopBackupRule("rule"), { leasePending: true });
+  assert.deepEqual(await client.backups.stop("É/My App.db"), { leasePending: true });
+  assert.deepEqual(await client.rules.stop("rule"), { leasePending: true });
   assert.deepEqual(
     daemon.received("/v1/backup-rules/stop").map((req) => req.body),
     [{ name: "É/My App.db" }, { rule_id: "rule" }],
   );
-  await assert.rejects(client.startBackup({ ...source, memory: true }), LitebackupError);
+  await assert.rejects(client.backups.start({ ...source, memory: true }), LitebackupError);
 });
 test("restore, versions, replicate, and acquire send the socket fields", async (t) => {
   const daemon = await FakeDaemon.start(t);
@@ -63,28 +65,29 @@ test("restore, versions, replicate, and acquire send the socket fields", async (
   daemon.route("POST /v1/replicas/start", () => [200, { database: databaseStatus("app/main.db", "replica", "syncing", 2, 2) }]);
   daemon.route("POST /v1/databases/acquire", () => [200, { database: databaseStatus("tenants/42.db", "origin", "syncing", 0, 0), outcome: "created" }]);
   daemon.route("GET /v1/databases/writer", () => [200, { name: "tenants/42.db", active: true, this_machine: true, machine: "web-1", lease_remaining_millis: 5000, lapsed: false }]);
-  const litebackup = await Litebackup.connect({ socketPath: daemon.socketPath });
+  const litebackup = new Litebackup({ socketPath: daemon.socketPath });
+  await litebackup.connect();
 
-  const listed = await litebackup.versions("app/main.db");
+  const listed = await litebackup.databases.versions("app/main.db");
   assert.deepEqual(listed, [
     { version: 1, stateDigest: "aa", time: "2026-11-15T09:30:00Z" },
     { version: 2, stateDigest: "bb", time: "2026-11-15T09:31:00Z" },
   ]);
   assert.equal(daemon.received("/v1/databases/versions")[1]!.query.get("after"), "1");
 
-  const restored = await litebackup.restore("app/main.db", { to: "/tmp/restored.db", time: new Date("2026-11-15T09:30:30Z") });
+  const restored = await litebackup.databases.restore("app/main.db", { to: "/tmp/restored.db", time: new Date("2026-11-15T09:30:30Z") });
   assert.equal(restored.pageSize, 4096);
   assert.deepEqual(daemon.received("/v1/databases/restore")[0]!.body, { name: "app/main.db", path: "/tmp/restored.db", time: "2026-11-15T09:30:30.000Z" });
-  assert.throws(() => litebackup.restore("app/main.db", { to: "/tmp/x.db", version: 1, time: "2026-11-15T09:30:30Z" }), LitebackupError);
+  await assert.rejects(litebackup.databases.restore("app/main.db", { to: "/tmp/x.db", version: 1, time: "2026-11-15T09:30:30Z" }), LitebackupError);
 
-  const replica = await litebackup.replicate("app/main.db", { to: "replica/main.db", writeProtection: "detect", timeout: "2m" });
+  const replica = await litebackup.replicas.start("app/main.db", { to: "replica/main.db", writeProtection: "detect", timeout: "2m" });
   assert.equal(replica.role, "replica");
   assert.deepEqual(daemon.received("/v1/replicas/start")[0]!.body, { name: "app/main.db", to: join(process.cwd(), "replica", "main.db"), write_protection: "detect", timeout_millis: 120000 });
 
-  const acquired = await litebackup.acquire("tenants/42.db", { to: "/var/lib/app/42.db", offload: "released", machineLabel: "worker-3", onLost: "block" });
+  const acquired = await litebackup.databases.acquire("tenants/42.db", { to: "/var/lib/app/42.db", offload: "released", machineLabel: "worker-3", onLost: "block" });
   assert.equal(acquired.outcome, "created");
   assert.deepEqual(daemon.received("/v1/databases/acquire")[0]!.body, { name: "tenants/42.db", path: "/var/lib/app/42.db", offload: "released", machine_label: "worker-3", on_lost: "block" });
-  const writer = await litebackup.writer("tenants/42.db");
+  const writer = await litebackup.databases.writer("tenants/42.db");
   assert.equal(writer.thisMachine, true);
   assert.equal(writer.leaseRemainingMillis, 5000);
 });
@@ -124,10 +127,11 @@ test("failover follows role_changed and conflict_saved events", async (t) => {
     },
   ]);
   daemon.route("POST /v1/backup-rules/stop", () => [200, {}]);
-  const litebackup = await Litebackup.connect({ socketPath: daemon.socketPath });
+  const litebackup = new Litebackup({ socketPath: daemon.socketPath });
+  await litebackup.connect();
   t.after(() => litebackup.close());
 
-  const failover = await litebackup.failover("/var/lib/app/main.db");
+  const failover = await litebackup.failovers.start("/var/lib/app/main.db");
   assert.deepEqual(daemon.received("/v1/failovers/start")[0]!.body, { path: "/var/lib/app/main.db" });
   assert.equal(failover.role, "replica");
   assert.equal(failover.isOrigin, false);
@@ -175,29 +179,20 @@ test("failover follows role_changed and conflict_saved events", async (t) => {
   assert.deepEqual(seen, ["origin", "replica"]);
   await failover.stop();
   assert.deepEqual(daemon.received("/v1/backup-rules/stop")[0]!.body, { name: "app/main.db" });
-  assert.equal(litebackup.failovers.size, 0, "stopping the failover ends its long-poll");
 });
 
-test("the package helpers share one client per token and session", async (t) => {
-  const daemon = await FakeDaemon.start(t, "helpers");
-  daemon.route("GET /v1/databases/versions", () => [200, { versions: [{ version: 1, state_digest: "aa", time: "2026-11-15T09:30:00Z" }] }]);
-  daemon.route("POST /v1/backup-rules/start", (request) => [
-    200,
-    { id: "b3", path: request.body!.path, name: "", prefix: "", watch: "inotify", maximum_local_databases: 0, failover: false, databases: [databaseStatus("main.db", "origin", "syncing", 1, 0)] },
-  ]);
-  const saved = { ...process.env };
-  t.after(() => {
-    process.env = saved;
-  });
-  process.env.XDG_RUNTIME_DIR = daemon.directory;
-  process.env.LITEBACKUP_SESSION = "helpers";
-  process.env.LITEBACKUP_TOKEN = "token@http://example";
-  assert.equal((await versions("main.db")).length, 1);
-  assert.equal((await versions("main.db", { token: "token@http://example" })).length, 1);
-  assert.equal((await startBackup("/var/lib/app/main.db")).id, "b3");
-  assert.equal(daemon.received("/v1/status/show").length, 1, "one client served every helper call");
-  await versions("main.db", { token: "other@http://example" });
-  assert.equal(daemon.received("/v1/status/show").length, 2, "another token gets its own client");
+test("concurrent first calls share a connection and failed connections can retry", async (t) => {
+  const daemon = await FakeDaemon.start(t);
+  let status = 503;
+  daemon.route("GET /v1/status/show", () => [status, {}]);
+  const client = new Litebackup({ socketPath: daemon.socketPath });
+  await assert.rejects(client.connect(), LitebackupError);
+  status = 200;
+  await Promise.all([client.connect(), client.connect()]);
+  assert.equal(daemon.received("/v1/status/show").length, 2);
+  await assert.rejects(client.backups.once("main.db"), { code: "invalid_argument" });
+  client.close();
+  await assert.rejects(client.connect(), { code: "closed" });
 });
 
 test("resolves the service socket where litebackup install service ran", async (t) => {
@@ -246,23 +241,33 @@ test("prefix replicas register a directory, preserve an empty prefix, and stop b
   const daemon = await FakeDaemon.start(t);
   daemon.route("POST /v1/replicas/start", (request) => [200, { prefix: { id: "p1", prefix: request.body!.prefix, to: request.body!.to, write_protection: "lock", databases: 0 } }]);
   daemon.route("POST /v1/replicas/stop", () => [200, {}]);
-  const client = await Litebackup.connect({ socketPath: daemon.socketPath });
-  const prefix = await client.replicatePrefix("tenants", { to: "replicas", writeProtection: "lock" });
+  const client = new Litebackup({ socketPath: daemon.socketPath });
+  await client.connect();
+  const prefix = await client.replicas.startPrefix("tenants", { to: "replicas", writeProtection: "lock" });
   assert.equal(prefix.id, "p1");
   assert.equal(prefix.writeProtection, "lock");
   assert.deepEqual(daemon.received("/v1/replicas/start")[0]!.body, { prefix: "tenants", to: join(process.cwd(), "replicas"), write_protection: "lock" });
   await client.replicas.stopPrefix("tenants", "replicas");
   assert.deepEqual(daemon.received("/v1/replicas/stop")[0]!.body, { prefix: "tenants", to: join(process.cwd(), "replicas") });
-  await client.replicatePrefix("", { to: "all" });
+  await client.replicas.startPrefix("", { to: "all" });
   assert.equal(daemon.received("/v1/replicas/start")[1]!.body!.prefix, "");
-  await assert.rejects(client.replicatePrefix("tenants", { to: "" }), (error: unknown) => error instanceof LitebackupError && error.code === "invalid_argument");
+  await assert.rejects(client.replicas.startPrefix("tenants", { to: "" }), (error: unknown) => error instanceof LitebackupError && error.code === "invalid_argument");
   await assert.rejects(client.replicas.stopPrefix("tenants", ""), LitebackupError);
   daemon.route("POST /v1/replicas/start", () => [200, {}]);
-  await assert.rejects(client.replicatePrefix("tenants", { to: "replicas" }), (error: unknown) => error instanceof LitebackupError && error.code === "invalid_response");
+  await assert.rejects(client.replicas.startPrefix("tenants", { to: "replicas" }), (error: unknown) => error instanceof LitebackupError && error.code === "invalid_response");
   daemon.route("POST /v1/replicas/start", () => [403, { code: "forbidden", message: "namespace not allowed" }]);
-  await assert.rejects(client.replicatePrefix("tenants", { to: "replicas" }), (error: unknown) => error instanceof LitebackupError && error.code === "forbidden");
+  await assert.rejects(client.replicas.startPrefix("tenants", { to: "replicas" }), (error: unknown) => error instanceof LitebackupError && error.code === "forbidden");
 });
 
 test("foreground backup rejects cancellation before launch", async () => {
-  await assert.rejects(backup("main.db", { signal: AbortSignal.abort() }), (e: unknown) => e instanceof LitebackupError && e.code === "cancelled");
+  await assert.rejects(new Litebackup().backups.once("main.db", { signal: AbortSignal.abort() }), (e: unknown) => e instanceof LitebackupError && e.code === "cancelled");
+});
+
+test("API keys are rejected without echoing the credential", async () => {
+  const token = "litebackup_example_private_value";
+  const client = new Litebackup({ token });
+  for (const call of [() => client.connect(), () => client.backups.once("main.sqlite")]) {
+    await assert.rejects(call(), (err: unknown) => err instanceof LitebackupError &&
+      err.code === "invalid_argument" && err.message.includes("Machines → Add machine") && !err.message.includes(token));
+  }
 });

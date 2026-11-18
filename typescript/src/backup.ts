@@ -25,8 +25,6 @@ export interface BackupOptions {
   wait?: Durability;
   timeout?: Duration;
   signal?: AbortSignal;
-  token?: string;
-  session?: string;
 }
 
 /** Reports whether a value looks like a better-sqlite3 Database. */
@@ -59,15 +57,11 @@ export function sourcePath(source: BackupSource): string {
 }
 
 /** Run one job and resolve after the foreground process has exited. */
-export function backup(source: BackupSource, options: BackupOptions = {}): Promise<void> {
-  return runBackup(source, options, process.env);
-}
-
-export async function runBackup(source: BackupSource, options: BackupOptions, environment: NodeJS.ProcessEnv): Promise<void> {
+export async function runBackup(source: BackupSource, options: BackupOptions, environment: NodeJS.ProcessEnv, session?: string): Promise<void> {
   const path = sourcePath(source);
   if (options.name !== undefined && options.prefix !== undefined) throw new LitebackupError("invalid_argument", "choose a name or a prefix", 0);
-  const args = ["backup", "--json-errors", "--wait", options.wait ?? "server"];
-  if (options.session) args.push("--session", options.session);
+  const args = ["backup", "--stdout-format", "json", "--wait", options.wait ?? "server"];
+  if (session) args.push("--session", session);
   if (options.timeout !== undefined) args.push("--timeout", milliseconds(options.timeout) + "ms");
   args.push("--", path);
   if (options.name !== undefined) {
@@ -76,7 +70,6 @@ export async function runBackup(source: BackupSource, options: BackupOptions, en
   }
   if (options.prefix) args.push(options.prefix.endsWith("/") ? options.prefix : options.prefix + "/");
   const env = { ...environment };
-  if (options.token) env.LITEBACKUP_TOKEN = options.token;
   const signal = options.signal;
   if (signal?.aborted) throw new LitebackupError("cancelled", "backup cancelled", 0);
   let binary: string;
@@ -87,29 +80,31 @@ export async function runBackup(source: BackupSource, options: BackupOptions, en
   }
   await new Promise<void>((resolve, reject) => {
     const child = spawn(binary, args, { env, stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "",
-      stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-      stdout = (stdout + chunk).slice(-65536);
-    });
+    let stderr = "";
+    child.stdout.resume();
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
       stderr = (stderr + chunk).slice(-65536);
     });
+    let killTimer: NodeJS.Timeout | undefined;
     const cancel = () => {
-      child.kill("SIGTERM");
+      if (child.kill("SIGTERM")) killTimer = setTimeout(() => child.kill("SIGKILL"), 15_000).unref();
     };
     signal?.addEventListener("abort", cancel, { once: true });
     child.once("error", (err) => reject(new LitebackupError("launch_failed", err.message, 0)));
     child.once("close", (code) => {
       signal?.removeEventListener("abort", cancel);
-      if (signal?.aborted) return reject(new LitebackupError("cancelled", "backup cancelled", 0));
+      clearTimeout(killTimer);
       if (code === 0) return resolve();
+      if (signal?.aborted) return reject(new LitebackupError("cancelled", "backup cancelled", 0));
       let failure = { code: "backup_failed", message: stderr.trim() || "foreground backup failed" };
-      try {
-        const parsed = JSON.parse(stdout);
-        if (typeof parsed?.code === "string" && typeof parsed.message === "string") failure = parsed;
-      } catch {
-        /* Startup failures may only have stderr. */
+      for (const line of stderr.trim().split("\n")) {
+        try {
+          const parsed = JSON.parse(line);
+          if (typeof parsed.code === "string" && typeof parsed.message === "string") {
+            failure = parsed;
+            break;
+          }
+        } catch { /* Logs can share stderr with structured errors. */ }
       }
       reject(new LitebackupError(failure.code, failure.message, 0));
     });

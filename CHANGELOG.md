@@ -1,4 +1,26 @@
-# 0.4.0
+# Changelog
+
+## 0.5.0
+
+Create a TypeScript client with `const litebackup = new Litebackup()`.
+Set `LITEBACKUP_TOKEN` to the value from **Machines → Add machine**, or pass
+`{ token }` to the constructor.
+
+| 0.4.x | 0.5.0 |
+| --- | --- |
+| `await Litebackup.connect(options)` | `new Litebackup(options)`, with optional `await litebackup.connect()` |
+| `startBackup(db)` | `litebackup.backups.start(db)` |
+| `backup(path, { wait: "cloud" })` | `litebackup.backups.once(path, { wait: "cloud" })` |
+| `stopBackup(name)`, `stopBackupRule(id)` | `litebackup.backups.stop(name)`, `litebackup.rules.stop(id)` |
+| `restore(name, { to })` | `litebackup.databases.restore(name, { to })` |
+| `replicate(name)`, `failover(path)` | `litebackup.replicas.start(name)`, `litebackup.failovers.start(path)` |
+
+Starting a rule acknowledges durable local registration. Discovery and upload
+continue after it returns. A one-shot job finishes after acknowledgement at
+the chosen destination and releases its writer lease. Fresh jobs join with a
+temporary key. Install the 0.5.0 server before upgrading clients.
+
+## 0.4.0
 
 **Breaking change.** `litebackup backup` now runs once in the foreground and waits for server acknowledgement. Existing scripts that need continuous backup must switch to `litebackup start`. Use `litebackup stop NAME` for a single-file backup, `litebackup stop --rule ID` for an entire backup rule, and `backup PATH --wait cloud` for a scheduled job that must reach the bucket.
 

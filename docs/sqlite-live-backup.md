@@ -16,9 +16,11 @@ litebackup start /var/lib/app/main.sqlite
 Or register it from your app:
 
 ```ts
-import { startBackup } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
 
-await startBackup("/var/lib/app/main.sqlite");
+const litebackup = new Litebackup();
+
+await litebackup.backups.start("/var/lib/app/main.sqlite");
 ```
 
 Your app keeps using its SQLite driver. Changes sync in the background;

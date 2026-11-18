@@ -19,9 +19,11 @@ for mounts and client state, or use the [Docker example](sqlite-docker.md).
 ## Start continuous backup
 
 ```ts
-import { startBackup } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
 
-await startBackup("/var/lib/app/main.sqlite");
+const litebackup = new Litebackup();
+
+await litebackup.backups.start("/var/lib/app/main.sqlite");
 ```
 
 ```sh

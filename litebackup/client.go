@@ -30,7 +30,7 @@ import (
 
 // SDKVersion is the version sent with every call. Daemons refuse SDKs older
 // than their minimum with sdk_unsupported.
-const SDKVersion = "0.4.2"
+const SDKVersion = "0.5.0"
 
 const (
 	sdkVersionHeader    = "X-Litebackup-SDK-Version"
@@ -73,9 +73,10 @@ type ConnectArgs struct {
 
 // Client talks to the daemon of one session.
 type Client struct {
-	session    string
-	socketPath string
-	http       *http.Client
+	customSocket bool
+	session      string
+	socketPath   string
+	http         *http.Client
 
 	mutex         sync.Mutex
 	clientVersion string
@@ -102,8 +103,9 @@ func Connect(ctx context.Context, args *ConnectArgs) (*Client, error) {
 		}
 	}
 	client := &Client{
-		session:    session,
-		socketPath: socket,
+		customSocket: args.SocketPath != "",
+		session:      session,
+		socketPath:   socket,
 		http: &http.Client{Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 				var dialer net.Dialer
@@ -368,10 +370,10 @@ type RestoreArgs struct {
 // Restore writes a version of a database to a new file and checks it.
 func (c *Client) Restore(ctx context.Context, name string, args *RestoreArgs) (*RestoreResult, error) {
 	if args == nil || args.To == "" {
-		return nil, errors.New("restore needs a path to write to")
+		return nil, &Error{Code: "invalid_argument", Message: "restore needs a path to write to"}
 	}
 	if args.Version != 0 && !args.Time.IsZero() {
-		return nil, errors.New("restore takes a version or a time, not both")
+		return nil, &Error{Code: "invalid_argument", Message: "restore takes a version or a time, not both"}
 	}
 	path, err := absolutePath(args.To)
 	if err != nil {

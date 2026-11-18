@@ -7,10 +7,12 @@ and move databases between machines. Your app keeps using its SQLite driver.
 
 ```ts
 import Database from "better-sqlite3";
-import { startBackup } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
+
+const litebackup = new Litebackup();
 
 const db = new Database("/var/lib/app/main.sqlite");
-await startBackup(db); // Continuous backup runs in the litebackup background process.
+await litebackup.backups.start(db); // Continuous backup runs in the litebackup background process.
 ```
 
 Or add backups to an existing app with the CLI:
@@ -72,7 +74,9 @@ The package includes the Linux and macOS client (x64 and arm64). It starts
 and joins automatically on first use. Keep npm optional dependencies enabled.
 
 `LITEBACKUP_TOKEN` is the **join token plus server address** from Machines →
-Add machine, not an API key. The client joins once and saves its own machine key.
+Add machine. A persistent session joins once and reuses its machine identity
+across restarts. A fresh foreground job uses a temporary identity for that run.
+See [agent fleets](docs/sqlite-fleet.md) and [serverless jobs](docs/sqlite-serverless.md).
 
 **CLI / Go**
 
@@ -93,7 +97,7 @@ The [client guide](docs/litebackup-client.md) also covers sessions, permissions,
 
 ## Back up without slowing startup
 
-Pass a path or a `better-sqlite3` handle to `await startBackup(db)`. It returns when the daemon saves the local rule. Discovery and uploads run in the background.
+Pass a path or a `better-sqlite3` handle to `await backups.start(db)`. It returns when the daemon saves the local rule. Discovery and uploads run in the background.
 
 The opening example uses `better-sqlite3` (`npm install better-sqlite3`);
 you can also pass a filename and use any SQLite driver. In Go:
@@ -120,9 +124,11 @@ remain available across restarts and redeploys.
 Keep customers in separate SQLite files and give their backups stable names:
 
 ```ts
-import { startBackup } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
 
-await startBackup("/var/lib/app/tenants/**/*.sqlite", { prefix: "tenants/" });
+const litebackup = new Litebackup();
+
+await litebackup.backups.start("/var/lib/app/tenants/**/*.sqlite", { prefix: "tenants/" });
 ```
 
 ```sh
@@ -144,14 +150,16 @@ the run finishes; the next machine acquires the latest released version.
 
 ```ts
 import { appendFile, mkdir } from "node:fs/promises";
-import { acquire, release } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
+
+const litebackup = new Litebackup();
 
 await mkdir("/var/lib/app/agents", { recursive: true });
 const path = "/var/lib/app/agents/42.sqlite";
 await appendFile(path, ""); // create the file if needed; keep existing contents
-await acquire("agents/42.sqlite", { to: path });
+await litebackup.databases.acquire("agents/42.sqlite", { to: path });
 // Run the agent with path using any SQLite driver, then close every connection.
-await release("agents/42.sqlite", { offload: true });
+await litebackup.databases.release("agents/42.sqlite", { offload: true });
 ```
 
 Wait for `acquire()` before writing. `release()` syncs the last changes to
@@ -164,9 +172,11 @@ the server; `offload: true` removes the local file once it's in your bucket.
 On a second machine joined to the same server:
 
 ```ts
-import { replicate } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
 
-await replicate("main.sqlite", { to: "/var/lib/app/reporting.sqlite" });
+const litebackup = new Litebackup();
+
+await litebackup.replicas.start("main.sqlite", { to: "/var/lib/app/reporting.sqlite" });
 // The first version is local. Open reporting.sqlite with your driver in readonly mode.
 ```
 
@@ -183,10 +193,12 @@ The replica keeps updating in the background and can be behind the writer.
 ## Restore a previous version
 
 ```ts
-import { restore, versions } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
 
-console.log(await versions("main.sqlite"));
-await restore("main.sqlite", {
+const litebackup = new Litebackup();
+
+console.log(await litebackup.databases.versions("main.sqlite"));
+await litebackup.databases.restore("main.sqlite", {
   to: "/tmp/main-restored.sqlite",
   time: new Date("2026-11-15T09:30:00Z"),
 });
@@ -204,16 +216,18 @@ settings determine which versions you can restore.
 
 ## Back up once, then finish
 
-Use foreground `backup` in scheduled jobs. It releases its writer lock after the server acknowledges the version. To wait for the bucket too:
+Use foreground `backup` in scheduled jobs. The job holds its writer lock until the selected destination acknowledges the version. To wait for the bucket:
 
 ```sh
 litebackup backup /var/lib/app/exports/main.sqlite scheduled/ --wait cloud
 ```
 
 ```ts
-import { backup } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
 
-await backup("/var/lib/app/exports/main.sqlite", { prefix: "scheduled/", wait: "cloud" });
+const litebackup = new Litebackup();
+
+await litebackup.backups.once("/var/lib/app/exports/main.sqlite", { prefix: "scheduled/", wait: "cloud" });
 ```
 
 [One-shot jobs and bounded waits →](docs/sqlite-backup-script.md) ·
@@ -249,12 +263,12 @@ for details.
 
 ### When should I wait for a backup?
 
-Foreground `backup` waits for the server. Pass `--wait cloud` to wait for bucket storage. Applications can await `startBackup` during startup and monitor upload progress through status.
+Foreground `backup` waits for the server. Pass `--wait cloud` to wait for bucket storage. Applications can await `backups.start` during startup and monitor upload progress through status.
 
 ### What is LITEBACKUP_TOKEN?
 
 A join token plus your server address (`JOIN_TOKEN@HOST`), used when the client
-first joins. The client then saves its own machine API key. See
+joins. Persistent sessions save their identity. Fresh foreground jobs use a temporary identity. See
 [join tokens and client credentials](docs/litebackup-client.md#join-and-register).
 
 ## Go further

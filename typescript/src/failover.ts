@@ -11,10 +11,6 @@ export interface FailoverOptions {
   name?: string;
   /** Bound on the first download of a replica. */
   timeout?: Duration;
-  /** Join token for the shared client; defaults to LITEBACKUP_TOKEN. Used only by the package-level failover(). */
-  token?: string;
-  /** Session for the shared client. Used only by the package-level failover(). */
-  session?: string;
 }
 
 /** How long one events long-poll waits. */
@@ -80,14 +76,14 @@ export class Failover {
     }
     // Events after the log's end as of now are this failover's, including
     // those the start request itself records.
-    const end = await client.eventPage({ after: -1 });
+    const end = await client.events.page({ after: -1 });
     const info = (await client.call("POST", "/v1/failovers/start", body)) as FailoverInfo;
     const failover = new Failover(client, info);
     if (client.closed) {
       failover.end();
       throw new LitebackupError("closed", "the client is closed", 0);
     }
-    client.failovers.add(failover);
+    client.watches.add(failover);
     void failover.follow(end.next);
     return failover;
   }
@@ -116,16 +112,16 @@ export class Failover {
 
   /** Which machine writes the database, when its lease runs out, and whether it ran out. */
   writer(): Promise<Writer> {
-    return this.client.writer(this.name);
+    return this.client.databases.writer(this.name);
   }
 
   /** Stops the failover and releases its write lock. The file stays. */
   async stop(): Promise<void> {
     try {
-      await this.client.stopBackup(this.name);
+      await this.client.backups.stop(this.name);
     } finally {
       this.end();
-      this.client.failovers.delete(this);
+      this.client.watches.delete(this);
     }
   }
 
@@ -159,7 +155,7 @@ export class Failover {
     let retry = 250;
     while (!signal.aborted) {
       try {
-        const page = await this.client.eventPage({ after: cursor, waitMillis: eventWaitMillis, limit: eventPage, signal });
+        const page = await this.client.events.page({ after: cursor, wait: eventWaitMillis, limit: eventPage, signal });
         retry = 250;
         for (const event of page.events) {
           cursor = Math.max(cursor, event.id);

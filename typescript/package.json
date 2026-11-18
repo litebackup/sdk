@@ -1,6 +1,6 @@
 {
   "name": "@litebackup/sdk",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Back up, replicate, and restore SQLite databases with Litebackup",
   "license": "UNLICENSED",
   "type": "module",
@@ -22,13 +22,13 @@
     "generate": "openapi-typescript ../client-openapi.yaml --output src/generated/client.ts",
     "build": "tsc --project tsconfig.json",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
-    "prepack": "npm run build"
+    "prepack": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\" && npm run build"
   },
   "optionalDependencies": {
-    "@litebackup/bin-darwin-arm64": "0.4.2",
-    "@litebackup/bin-darwin-x64": "0.4.2",
-    "@litebackup/bin-linux-arm64": "0.4.2",
-    "@litebackup/bin-linux-x64": "0.4.2"
+    "@litebackup/bin-darwin-arm64": "0.5.0",
+    "@litebackup/bin-darwin-x64": "0.5.0",
+    "@litebackup/bin-linux-arm64": "0.5.0",
+    "@litebackup/bin-linux-x64": "0.5.0"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

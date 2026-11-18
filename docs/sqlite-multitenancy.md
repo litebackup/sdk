@@ -7,9 +7,11 @@ individually. Litebackup gives each file a stable remote name. Complete
 ## Back up a directory
 
 ```ts
-import { startBackup } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
 
-await startBackup("/var/lib/app/tenants/*.sqlite", { prefix: "tenants/" });
+const litebackup = new Litebackup();
+
+await litebackup.backups.start("/var/lib/app/tenants/*.sqlite", { prefix: "tenants/" });
 ```
 
 ```sh
@@ -31,7 +33,9 @@ For applications that provision databases explicitly, register each new file:
 ```ts
 import { mkdir } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { startBackup } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
+
+const litebackup = new Litebackup();
 
 export async function createTenant(id: string): Promise<void> {
   if (!/^[0-9]+$/.test(id)) throw new Error("Expected a numeric tenant ID");
@@ -43,7 +47,7 @@ export async function createTenant(id: string): Promise<void> {
   } finally {
     db.close();
   }
-  await startBackup(path, { name: `tenants/${id}.sqlite` });
+  await litebackup.backups.start(path, { name: `tenants/${id}.sqlite` });
 }
 ```
 

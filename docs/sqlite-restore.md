@@ -13,11 +13,13 @@ perform the restore on another joined machine with suitable permissions.
 ## List versions and restore
 
 ```ts
-import { restore, versions } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
 
-const available = await versions("main.sqlite");
+const litebackup = new Litebackup();
+
+const available = await litebackup.databases.versions("main.sqlite");
 console.log(available);
-await restore("main.sqlite", { to: "/tmp/main-restored.sqlite" });
+await litebackup.databases.restore("main.sqlite", { to: "/tmp/main-restored.sqlite" });
 ```
 
 ```sh
@@ -33,7 +35,10 @@ part of a more extensive restore drill.
 ## Select a time or version
 
 ```ts
-await restore("main.sqlite", {
+import { Litebackup } from "@litebackup/sdk";
+
+const litebackup = new Litebackup();
+await litebackup.databases.restore("main.sqlite", {
   to: "/tmp/main-before-migration.sqlite",
   time: "2026-11-15T09:30:00Z",
 });

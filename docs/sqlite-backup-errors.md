@@ -39,7 +39,7 @@ and `sudo journalctl -u litebackup -f`. On macOS, the service logs to
 | `sdk_unsupported` | Upgrade the SDK to match the client/server; update the server before installed clients |
 | Cloud wait times out | Check server archive delay, bucket health, network, disk space, and per-database `lastError` |
 
-Awaiting `startBackup` reports registration errors. It does not monitor
+Awaiting `backups.start` reports registration errors. It does not monitor
 future sync failures. Log `lastError` and `lastErrorTime`, compare server and
 cloud versions, and alert if successful syncs stop advancing while writes
 continue. A new empty file can remain at version zero until data is written.

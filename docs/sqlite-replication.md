@@ -16,10 +16,12 @@ join token where possible and create a writable destination directory.
 ```ts
 import { mkdir } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { replicate } from "@litebackup/sdk";
+import { Litebackup } from "@litebackup/sdk";
+
+const litebackup = new Litebackup();
 
 await mkdir("/var/lib/app/reporting", { recursive: true });
-await replicate("main.sqlite", { to: "/var/lib/app/reporting/main.sqlite", timeout: "2m" });
+await litebackup.replicas.start("main.sqlite", { to: "/var/lib/app/reporting/main.sqlite", timeout: "2m" });
 const db = new DatabaseSync("/var/lib/app/reporting/main.sqlite", { readOnly: true });
 try {
   console.log(db.prepare("PRAGMA quick_check").get());
@@ -42,8 +44,8 @@ Follow all databases under a prefix, including new ones:
 ```ts
 import { Litebackup } from "@litebackup/sdk";
 
-const client = await Litebackup.connect();
-await client.replicatePrefix("tenants", { to: "/var/lib/app/reporting" });
+const client = new Litebackup();
+await client.replicas.startPrefix("tenants", { to: "/var/lib/app/reporting" });
 // tenants/42.sqlite lands at /var/lib/app/reporting/42.sqlite.
 console.log(await client.replicas.list());
 client.close(); // replicas keep streaming in the daemon
@@ -82,7 +84,9 @@ as a way to send writes upstream.
 ## Stop replication
 
 ```ts
-const client = await Litebackup.connect();
+import { Litebackup } from "@litebackup/sdk";
+
+const client = new Litebackup();
 await client.replicas.stop("main.sqlite");
 await client.replicas.stopPrefix("tenants", "/var/lib/app/reporting");
 client.close();

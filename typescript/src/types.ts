@@ -22,7 +22,7 @@ export type Conflict = Camelize<Schemas["Conflict"]>;
 export type AcquireResult = Camelize<Schemas["AcquireResult"]>;
 export type ReleaseResult = Camelize<Schemas["ReleaseResult"]>;
 export type Writer = Camelize<Schemas["Writer"]>;
-/** A backup or failover running on this machine, as backups.list() returns it. */
+/** A backup or failover running on this machine, as rules.list() returns it. */
 export type BackupInfo = Camelize<Schemas["BackupRule"]>;
 /** A failover as the daemon reports it. */
 export type FailoverInfo = Camelize<Schemas["Failover"]>;
@@ -33,7 +33,7 @@ export type EventList = Camelize<Schemas["EventList"]>;
 export type ShutdownResult = Camelize<Schemas["ShutdownResult"]>;
 
 /** The SDK version sent with every call. */
-export const sdkVersion = "0.4.2";
+export const sdkVersion = "0.5.0";
 
 /** An error the Litebackup daemon answered with, carrying its code. */
 export class LitebackupError extends Error {
