@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -224,8 +226,12 @@ test("names the install command when no binary is found, and finds a user instal
   assert.equal(litebackupBinary({ LITEBACKUP_PATH: "/opt/litebackup" }), "/opt/litebackup");
   const home = await mkdtemp(join(tmpdir(), "litebackup-home-"));
   t.after(() => rm(home, { recursive: true, force: true }));
-  if (process.platform === "linux" || process.platform === "darwin") {
-    // The platform package is not installed in a development tree.
+  // When this platform's optional binary package is installed, it comes before
+  // PATH and ~/.local/bin.
+  const packageBinary = platformBinary();
+  if (packageBinary) {
+    assert.equal(litebackupBinary({ PATH: "/nonexistent", HOME: home }), packageBinary);
+  } else if (process.platform === "linux" || process.platform === "darwin") {
     assert.throws(() => litebackupBinary({ PATH: "/nonexistent", HOME: home }), (error: unknown) => error instanceof Error && error.message.includes(installCommand()));
   }
   assert.equal(installCommand(), "curl -fsSL https://litebackup.com/cli.sh | bash");
@@ -233,7 +239,7 @@ test("names the install command when no binary is found, and finds a user instal
   await mkdir(dirname(local), { recursive: true });
   await writeFile(local, "#!/bin/sh\n", { mode: 0o755 });
   if (process.platform === "linux" || process.platform === "darwin") {
-    assert.equal(litebackupBinary({ PATH: "/nonexistent", HOME: home }), local);
+    assert.equal(litebackupBinary({ PATH: "/nonexistent", HOME: home }), packageBinary ?? local);
   }
 });
 
@@ -271,3 +277,14 @@ test("API keys are rejected without echoing the credential", async () => {
       err.code === "invalid_argument" && err.message.includes("Machines → Add machine") && !err.message.includes(token));
   }
 });
+
+/** The binary of this platform's optional npm package, when it is installed. */
+function platformBinary(): string | undefined {
+  try {
+    const require = createRequire(import.meta.url);
+    const binaryPath = join(dirname(require.resolve(`@litebackup/bin-${process.platform}-${process.arch}/package.json`)), "bin", "litebackup");
+    return existsSync(binaryPath) ? binaryPath : undefined;
+  } catch {
+    return undefined;
+  }
+}

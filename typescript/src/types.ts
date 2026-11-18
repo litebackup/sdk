@@ -6,7 +6,7 @@ type Schemas = components["schemas"];
 /** What this machine does with a database. */
 export type Role = "origin" | "replica";
 /** Where a database stands on this machine; waiting means another machine is the origin. */
-export type State = "syncing" | "synced" | "waiting" | "offloaded" | "stopped" | "conflicted" | "error";
+export type State = "syncing" | "retrying" | "synced" | "waiting" | "offloaded" | "stopped" | "conflicted" | "error";
 /** How far a version must reach: the server's acknowledgement, or the bucket too. */
 export type Durability = "server" | "cloud";
 /** How a replica keeps app writes out. */

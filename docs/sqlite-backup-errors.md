@@ -34,6 +34,7 @@ and `sudo journalctl -u litebackup -f`. On macOS, the service logs to
 | `not_found` | Check exact remote name and prefix; a new acquired database needs an existing local file, even if empty |
 | `still_open` | Close every SQLite connection and other process holding the acquired file, then retry release |
 | `exists` on restore | Choose a new file in an existing directory |
+| `retrying` state | An origin's syncs fail and run again at `nextRetryTime`; `lastError` says why |
 | `conflicted` | Inspect the preserved conflict copy; choose an application-specific recovery path |
 | `SQLITE_BUSY` writing a replica | Use a readonly connection or route the write to the origin |
 | `sdk_unsupported` | Upgrade the SDK to match the client/server; update the server before installed clients |
@@ -41,8 +42,8 @@ and `sudo journalctl -u litebackup -f`. On macOS, the service logs to
 
 Awaiting `backups.start` reports registration errors. It does not monitor
 future sync failures. Log `lastError` and `lastErrorTime`, compare server and
-cloud versions, and alert if successful syncs stop advancing while writes
-continue. A new empty file can remain at version zero until data is written.
+cloud versions, and alert when `firstUnsyncedChangeTime` is older than you can
+afford to lose. A new empty file can remain at version zero until data is written.
 
 ## Avoid silent scheduled failures
 

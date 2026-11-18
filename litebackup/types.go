@@ -18,6 +18,9 @@ type State string
 const (
 	// StateSyncing means changes stream to the server.
 	StateSyncing State = "syncing"
+	// StateRetrying means an origin's syncs fail; LastError says why, and
+	// NextRetryTime when the next attempt runs.
+	StateRetrying State = "retrying"
 	// StateSynced means a released database's last version is on the server.
 	StateSynced State = "synced"
 	// StateWaiting means another machine is the origin.
@@ -28,7 +31,9 @@ const (
 	StateStopped State = "stopped"
 	// StateConflicted means another machine wrote while this copy had changes.
 	StateConflicted State = "conflicted"
-	// StateError means syncing failed; LastError says why.
+	// StateError means the database is not synced and will not be retried,
+	// such as a replica past the server's lock cap; LastError says why.
+	// Failing syncs that are retried are StateRetrying.
 	StateError State = "error"
 )
 
@@ -81,9 +86,15 @@ type DatabaseStatus struct {
 	Writer             string      `json:"writer,omitempty"`
 	LastError          string      `json:"last_error,omitempty"`
 	LastErrorTime      *time.Time  `json:"last_error_time,omitempty"`
-	MachineLabel       string      `json:"machine_label,omitempty"`
-	Maintenance        bool        `json:"maintenance,omitempty"`
-	Offload            string      `json:"offload,omitempty"`
+	// FirstUnsyncedChangeTime is when the first change the server lacks was
+	// seen; nil when the server has every change seen. It may be earlier than
+	// the real first change, never later.
+	FirstUnsyncedChangeTime *time.Time `json:"first_unsynced_change_time,omitempty"`
+	// NextRetryTime is when a failed sync runs again; nil when none is scheduled.
+	NextRetryTime *time.Time `json:"next_retry_time,omitempty"`
+	MachineLabel  string     `json:"machine_label,omitempty"`
+	Maintenance   bool       `json:"maintenance,omitempty"`
+	Offload       string     `json:"offload,omitempty"`
 }
 
 // DatabasePage contains the matching databases and a cursor when more follow.

@@ -395,10 +395,10 @@ export interface components {
              */
             role: "origin" | "replica";
             /**
-             * @description syncing while changes stream; synced once a released database's last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the bucket holds it; stopped for a stopped replica; conflicted when another machine wrote while this copy had changes; error with last_error
+             * @description syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced once a released database's last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the bucket holds it; stopped for a stopped replica; conflicted when another machine wrote while this copy had changes; error with last_error
              * @enum {string}
              */
-            state: "syncing" | "synced" | "waiting" | "offloaded" | "stopped" | "conflicted" | "error";
+            state: "syncing" | "retrying" | "synced" | "waiting" | "offloaded" | "stopped" | "conflicted" | "error";
             /** @description the database is acquired and released by a worker rather than backed up continuously */
             acquired: boolean;
             /** @description the database belongs to a failover and changes role when the origin does */
@@ -419,6 +419,16 @@ export interface components {
             last_error?: string;
             /** Format: date-time */
             last_error_time?: string;
+            /**
+             * Format: date-time
+             * @description when the first change the server lacks was seen; absent when the server has every change seen. It survives restarts and may be earlier than the real first change, never later.
+             */
+            first_unsynced_change_time?: string;
+            /**
+             * Format: date-time
+             * @description when the next attempt of a failed sync runs; absent when none is scheduled
+             */
+            next_retry_time?: string;
             /** @description what other machines see as the writer while this machine writes */
             machine_label?: string;
             maintenance?: boolean;

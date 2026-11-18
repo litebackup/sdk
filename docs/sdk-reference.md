@@ -124,10 +124,14 @@ the namespace's downloads. See [replicas](sqlite-replication.md).
 
 `DatabaseStatus` has `role`, `state`, `syncedServer`, `syncedCloud`,
 `localChanged`, `acquired`, and diagnostics such as `lastError`.
-Roles are `origin` and `replica`. States are `syncing`, `synced`, `waiting`,
-`offloaded`, `stopped`, `conflicted`, and `error`. The counters tell you which
-version reached the server or bucket. An active origin can stay in `syncing`
-while it continues backing up changes.
+Roles are `origin` and `replica`. States are `syncing`, `retrying`, `synced`,
+`waiting`, `offloaded`, `stopped`, `conflicted`, and `error`. The counters tell
+you which version reached the server or bucket. An active origin can stay in
+`syncing` while it continues backing up changes. An origin whose syncs fail
+is `retrying`: `lastError` says why and `nextRetryTime` says when the next
+attempt runs. `firstUnsyncedChangeTime` is when the first change the server
+lacks was seen; it is absent when the server has every change seen, survives
+restarts, and may be earlier than the real first change, never later.
 
 ```ts
 import { Litebackup, LitebackupError } from "@litebackup/sdk";
