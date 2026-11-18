@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+The same SDK as 0.6.0, released with Litebackup 0.6.1.
+
 ## 0.6.0
 
 This release needs Litebackup server 0.6.0, so upgrade the server before

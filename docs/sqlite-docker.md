@@ -25,7 +25,7 @@ Build the [standalone example](../examples/docker/cli.Dockerfile) with those two
 
 ```sh
 docker build -f examples/docker/cli.Dockerfile --platform linux/amd64 \
-  --build-arg LITEBACKUP_VERSION=0.6.0 \
+  --build-arg LITEBACKUP_VERSION=0.6.1 \
   --build-arg LITEBACKUP_SHA256=762d9cc3fc11248629bbd3c59d1d68827a7a164de5f80ed02a5c53940bcfcf35 \
   -t litebackup-cli:pinned .
 docker run --rm litebackup-cli:pinned litebackup version

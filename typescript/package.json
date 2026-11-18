@@ -1,6 +1,6 @@
 {
   "name": "@litebackup/sdk",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Back up, replicate, and restore SQLite databases with Litebackup",
   "license": "UNLICENSED",
   "type": "module",
@@ -25,10 +25,10 @@
     "prepack": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\" && npm run build"
   },
   "optionalDependencies": {
-    "@litebackup/bin-darwin-arm64": "0.6.0",
-    "@litebackup/bin-darwin-x64": "0.6.0",
-    "@litebackup/bin-linux-arm64": "0.6.0",
-    "@litebackup/bin-linux-x64": "0.6.0"
+    "@litebackup/bin-darwin-arm64": "0.6.1",
+    "@litebackup/bin-darwin-x64": "0.6.1",
+    "@litebackup/bin-linux-arm64": "0.6.1",
+    "@litebackup/bin-linux-x64": "0.6.1"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

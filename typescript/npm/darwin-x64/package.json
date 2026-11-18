@@ -1,6 +1,6 @@
 {
   "name": "@litebackup/bin-darwin-x64",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "The litebackup binary for darwin x64, installed by @litebackup/sdk",
   "license": "UNLICENSED",
   "os": [
