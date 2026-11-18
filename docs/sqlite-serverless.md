@@ -2,8 +2,9 @@
 
 Give the worker access to the SQLite file and its WAL, writable temporary
 storage, network access to the server, and the value of `LITEBACKUP_TOKEN`
-from **Machines → Add machine**. Use a token with enough uses for the jobs
-you intend to run. Await the upload before the invocation returns.
+from **Machines → Add machine**. Select **Multiple machines** for recurring
+jobs and allow enough uses for each call and any retries that enroll.
+Await the upload before the invocation returns.
 
 ```ts
 import { Litebackup } from "@litebackup/sdk";

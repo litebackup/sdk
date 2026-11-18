@@ -24,6 +24,8 @@ const litebackup = new Litebackup();
 await litebackup.backups.once("./export.sqlite", { wait: "cloud" });
 ```
 
-A fresh worker uses a temporary machine identity. A joined session reuses its
-saved identity. See the [SDK reference](https://github.com/litebackup/sdk/blob/main/docs/sdk-reference.md)
+A fresh worker spends one token use on each call to `backups.once()`, including
+retry attempts that enroll. For a recurring job, select **Multiple machines**
+in **Machines → Add machine** and set the use limit and expiry for the schedule.
+A joined session reuses its saved identity. See the [SDK reference](https://github.com/litebackup/sdk/blob/main/docs/sdk-reference.md)
 and [migration notes](https://github.com/litebackup/sdk/blob/main/CHANGELOG.md).

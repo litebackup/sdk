@@ -114,11 +114,23 @@ func runBackup(ctx context.Context, session, path string, args *BackupArgs) erro
 	}
 	var exited *exec.ExitError
 	if errors.As(err, &exited) {
+		var firstMessage string
+		var outcome *Error
 		for line := range bytes.Lines(exited.Stderr) {
 			var failure Error
-			if json.Unmarshal(line, &failure) == nil && failure.Code != "" {
-				return &failure
+			if json.Unmarshal(line, &failure) == nil && failure.Code != "" && failure.Message != "" {
+				if outcome == nil {
+					firstMessage = failure.Message
+				}
+				outcome = &failure
 			}
+		}
+		if outcome != nil {
+			// Keep one file diagnostic alongside the final job outcome.
+			if firstMessage != outcome.Message {
+				outcome.Message += "\n" + firstMessage
+			}
+			return outcome
 		}
 	}
 	return err

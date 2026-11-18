@@ -699,7 +699,7 @@ func TestForegroundJobs(t *testing.T) {
 	}
 	err = Backup(ctx, server.path("exports", "**", "*.sqlite"), &BackupArgs{Prefix: "租户/", Wait: DurabilityServer})
 	var failure *Error
-	if !errors.As(err, &failure) || !strings.Contains(failure.Message, "Broken.sqlite") {
+	if !errors.As(err, &failure) || !strings.Contains(failure.Message, "file failures reported") || !strings.Contains(failure.Message, "Broken.sqlite") {
 		t.Fatalf("partial failure: %v", err)
 	}
 	for _, name := range []string{"租户/My DB.sqlite", "租户/Å Team/42.sqlite"} {

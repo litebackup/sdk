@@ -97,14 +97,19 @@ export async function runBackup(source: BackupSource, options: BackupOptions, en
       if (code === 0) return resolve();
       if (signal?.aborted) return reject(new LitebackupError("cancelled", "backup cancelled", 0));
       let failure = { code: "backup_failed", message: stderr.trim() || "foreground backup failed" };
+      let firstMessage: string | undefined;
       for (const line of stderr.trim().split("\n")) {
         try {
           const parsed = JSON.parse(line);
           if (typeof parsed.code === "string" && typeof parsed.message === "string") {
+            firstMessage ??= parsed.message;
             failure = parsed;
-            break;
           }
         } catch { /* Logs can share stderr with structured errors. */ }
+      }
+      // The CLI reports file errors before the final job outcome.
+      if (firstMessage && firstMessage !== failure.message) {
+        failure.message += "\n" + firstMessage;
       }
       reject(new LitebackupError(failure.code, failure.message, 0));
     });

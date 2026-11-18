@@ -216,6 +216,11 @@ settings determine which versions you can restore.
 
 ## Back up once, then finish
 
+For recurring jobs on fresh workers, choose **Multiple machines** in
+**Machines → Add machine**. Each foreground command or `backups.once()` call
+that enrolls spends one use, including retries. A single glob can back up
+many files with one enrollment. A previously joined session reuses its identity.
+
 Use foreground `backup` in scheduled jobs. The job holds its writer lock until the selected destination acknowledges the version. To wait for the bucket:
 
 ```sh

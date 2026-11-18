@@ -52,6 +52,10 @@ export async function backupDatabases(paths: string[]): Promise<void> {
 }
 ```
 
+For fresh workers, choose **Multiple machines** in **Machines → Add machine**.
+Each path in this Activity makes a separate foreground call and spends one token
+use when it enrolls. Allow enough uses for scheduled runs and Activity retries.
+
 Heartbeats let Temporal detect an unavailable Worker and deliver cancellation.
 The Activity succeeds after all files reach the bucket and their writer locks are released. A retry can back up already completed files again, possibly with newer
 writes.

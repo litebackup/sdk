@@ -9,6 +9,11 @@ For apps that stay up, consider [continuous backup](sqlite-backup.md).
 
 Install a [server](litebackup-server.md) and the CLI. Give the job access to the database directory and set `LITEBACKUP_TOKEN` in its environment. An existing joined session can reuse its machine identity.
 
+For disposable workers, select **Multiple machines** in **Machines → Add machine**.
+Each foreground command that enrolls spends one token use. The script below runs
+one command per path, so two paths on an hourly schedule need 48 uses per day,
+plus any retries that enroll. Set an expiry covering the schedule.
+
 ```sh
 litebackup backup ./main.sqlite scheduled/ --wait cloud
 ```

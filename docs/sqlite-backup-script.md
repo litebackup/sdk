@@ -2,6 +2,11 @@
 
 Run the foreground command on the host that holds the SQLite files, using the same credentials as the scheduled task.
 
+For a recurring schedule on fresh workers, choose **Multiple machines** in
+**Machines → Add machine**. A successful enrollment spends one token use for
+the entire glob, even if a file later fails. A previously joined session
+reuses its saved identity.
+
 ```sh
 litebackup backup '/data/exports/**/*.sqlite' scheduled/ --wait cloud --timeout 30m
 ```

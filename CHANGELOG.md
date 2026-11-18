@@ -14,6 +14,20 @@ Set `LITEBACKUP_TOKEN` to the value from **Machines → Add machine**, or pass
 | `stopBackup(name)`, `stopBackupRule(id)` | `litebackup.backups.stop(name)`, `litebackup.rules.stop(id)` |
 | `restore(name, { to })` | `litebackup.databases.restore(name, { to })` |
 | `replicate(name)`, `failover(path)` | `litebackup.replicas.start(name)`, `litebackup.failovers.start(path)` |
+| `replicatePrefix(prefix, options)` | `litebackup.replicas.startPrefix(prefix, options)` |
+| `acquire`, `release`, `offload`, `writer`, `versions` | Same method on `litebackup.databases` |
+| `client.backups.list()` | `litebackup.rules.list()` |
+| `client.database(name)`, `client.databases()`, `client.sync(name)` | `litebackup.databases.get(name)`, `litebackup.databases.list()`, `litebackup.databases.sync(name)` |
+| `client.databasesPage(after, limit)` | `litebackup.databases.page({ after, limit })` |
+| `client.status(after, limit)`, `client.shutdown(options)` | `litebackup.session.status({ after, limit })`, `litebackup.session.shutdown(options)` |
+| `client.eventPage({ after, waitMillis })`, `client.events(options)` | `litebackup.events.page({ after, wait: waitMillis })`, `litebackup.events.watch(options)` |
+| `await sharedClient(options)`, `ConnectOptions`, `SharedClientOptions` | Create and retain one `new Litebackup(options)`. Its configuration type is `LitebackupOptions`. |
+| `client.session` (session name) | `(await litebackup.session.status()).session` |
+
+Pass the session, token, environment, or socket path to the constructor. Keep
+an explicit socket path in your configuration if you need to read it back.
+The package exports `Failover` as a TypeScript type. Get its instance from
+`await litebackup.failovers.start(path)`.
 
 Starting a rule acknowledges durable local registration. Discovery and upload
 continue after it returns. A one-shot job finishes after acknowledgement at

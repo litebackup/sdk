@@ -419,7 +419,7 @@ test("foreground recursive backup reports bad files and preserves relative names
   await writeFile(join(root, "invalid.sqlite"), "invalid");
   await assert.rejects(
     worker.backups.once(join(rootLink, "**", "*.sqlite"), { prefix: "租户/" }),
-    (err: unknown) => err instanceof LitebackupError && err.message.includes("invalid.sqlite"),
+    (err: unknown) => err instanceof LitebackupError && err.message.includes("file failures reported") && err.message.includes("invalid.sqlite"),
   );
   for (const name of ["租户/Équipe/42.sqlite", "租户/Main.sqlite"]) {
     assert.equal((await reader.databases.versions(name)).length, 1);

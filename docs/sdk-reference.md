@@ -34,6 +34,12 @@ or strings such as `"5s"` and `"2m"`; Go uses `time.Duration`.
 Create one TypeScript client for the session. Socket operations connect on first use.
 Call `await client.connect()` for an explicit startup check. Foreground backup
 runs the CLI directly and requires a session selected by name or environment.
+The TypeScript client keeps the environment it resolves on first use. Retry a
+transient connection failure on the same client. If you correct the session
+or token in the process environment, create a new client to pick up the change.
+On a fresh Go worker, set `LITEBACKUP_TOKEN` and call the package function
+`litebackup.Backup(ctx, path, nil)` directly. Calling `litebackup.Connect`
+first starts or connects to a persistent session by default.
 
 ## Operations
 
@@ -73,6 +79,11 @@ helpers for backup, replication, failover, restore, and version listing.
 ## Release compatibility
 
 Use version 0.5.0 of the SDK, CLI and server for these examples. See the [breaking change in the release notes](../CHANGELOG.md). Releases through 0.3.32 use the earlier continuous `backup` behavior.
+
+If you override the bundled CLI with `LITEBACKUP_PATH` or install the CLI for
+Go, check `litebackup --version` on the worker. The 0.4.2 foreground command
+enrolls a fresh worker as a persistent machine. Temporary enrollment requires
+both the CLI and the server to support it.
 
 ## Backup options
 
