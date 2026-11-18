@@ -3,6 +3,7 @@ package litebackup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -74,7 +75,7 @@ func startDevelopmentServer(t *testing.T) *developmentServer {
 		// Stop the daemons before the server, because their shutdown ends their sessions on it.
 		for _, client := range server.clients {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			if _, err := client.Shutdown(ctx, ShutdownOptions{Wait: DurabilityNone}); err != nil {
+			if _, err := client.Shutdown(ctx, &ShutdownArgs{Wait: DurabilityNone}); err != nil {
 				t.Logf("shutting down %s: %v", client.Session(), err)
 			}
 			cancel()
@@ -187,7 +188,7 @@ func (s *developmentServer) connect(session string) *Client {
 	if err != nil {
 		s.t.Fatal(err)
 	}
-	client, err := Connect(s.t.Context(), Options{Token: token, Session: session})
+	client, err := Connect(s.t.Context(), &ConnectArgs{Token: token, Session: session})
 	if err != nil {
 		s.t.Fatalf("connecting %s: %v", session, err)
 	}
@@ -199,7 +200,7 @@ func (s *developmentServer) connect(session string) *Client {
 func (s *developmentServer) reconnect(session string) *Client {
 	s.t.Helper()
 	session = s.session(session)
-	client, err := Connect(s.t.Context(), Options{Session: session})
+	client, err := Connect(s.t.Context(), &ConnectArgs{Session: session})
 	if err != nil {
 		s.t.Fatalf("reconnecting %s: %v", session, err)
 	}
@@ -307,23 +308,23 @@ func TestIntegration(t *testing.T) {
 	// Backups and name collisions.
 	mainPath := server.path("web-1", "main.db")
 	addRows(t, mainPath, 10)
-	backup, err := web1.Backup(ctx, mainPath, BackupOptions{Wait: DurabilityServer})
+	backup, err := web1.StartBackup(ctx, mainPath, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if backup.Name != "main.db" {
 		t.Fatalf("backup name %q", backup.Name)
 	}
-	if err := backup.Wait(ctx, DurabilityCloud); err != nil {
+	if _, err := web1.Sync(ctx, backup.Name); err != nil {
 		t.Fatal(err)
 	}
 	otherPath := server.path("web-2", "main.db")
 	addRows(t, otherPath, 3)
-	_, err = web2.Backup(ctx, otherPath, BackupOptions{})
-	if !IsCode(err, "name_in_use") {
-		t.Fatalf("a second machine backing up main.db got %v, want name_in_use", err)
+	err = web2.Backup(ctx, otherPath, nil)
+	if !IsCode(err, "busy") {
+		t.Fatalf("a second machine backing up main.db got %v, want busy", err)
 	}
-	prefixed, err := web2.Backup(ctx, otherPath, BackupOptions{Prefix: "web-2/", Wait: DurabilityServer})
+	prefixed, err := web2.StartBackup(ctx, otherPath, &StartBackupArgs{Prefix: "web-2/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,10 +341,10 @@ func TestIntegration(t *testing.T) {
 
 	// Versions and restore.
 	addRows(t, mainPath, 5)
-	if err := backup.Wait(ctx, DurabilityServer); err != nil {
+	if _, err := web1.Sync(ctx, backup.Name); err != nil {
 		t.Fatal(err)
 	}
-	versions, err := web1.Versions(ctx, "main.db", VersionsOptions{})
+	versions, err := web1.Versions(ctx, "main.db", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,28 +352,28 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("versions %+v", versions)
 	}
 	restoredPath := server.path("restored", "main.db")
-	restored, err := web2.Restore(ctx, "main.db", RestoreOptions{To: restoredPath, Version: versions[0].Version})
+	restored, err := web2.Restore(ctx, "main.db", &RestoreArgs{To: restoredPath, Version: versions[0].Version})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if restored.Version != versions[0].Version || countRows(t, restoredPath) != 10 {
 		t.Fatalf("restored %+v with %d rows", restored, countRows(t, restoredPath))
 	}
-	_, err = web2.Restore(ctx, "main.db", RestoreOptions{To: restoredPath})
+	_, err = web2.Restore(ctx, "main.db", &RestoreArgs{To: restoredPath})
 	if !IsCode(err, "exists") {
 		t.Fatalf("restoring over a file got %v, want exists", err)
 	}
 	headPath := server.path("restored", "head.db")
 	// The package functions share a client of LITEBACKUP_SESSION.
 	t.Setenv(SessionEnvironment, server.session("web-2"))
-	headVersions, err := Versions(ctx, "main.db", VersionsOptions{})
+	headVersions, err := Versions(ctx, "main.db", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(headVersions) != len(versions) {
 		t.Fatalf("package Versions %d, client Versions %d", len(headVersions), len(versions))
 	}
-	if _, err := Restore(ctx, "main.db", RestoreOptions{To: headPath, Time: time.Now()}); err != nil {
+	if _, err := Restore(ctx, "main.db", &RestoreArgs{To: headPath, Time: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if countRows(t, headPath) != 15 {
@@ -381,7 +382,7 @@ func TestIntegration(t *testing.T) {
 
 	// A replica on a readonly machine.
 	replicaPath := server.path("reader", "main.db")
-	replica, err := reader.Replicate(ctx, "main.db", ReplicateOptions{To: replicaPath})
+	replica, err := reader.Replicate(ctx, "main.db", &ReplicateArgs{To: replicaPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +410,7 @@ func TestIntegration(t *testing.T) {
 	// Acquire and release move a database between machines.
 	tenantPath := server.path("web-1", "42.db")
 	addRows(t, tenantPath, 4)
-	acquired, err := web1.Acquire(ctx, "tenants/42.db", AcquireOptions{To: tenantPath, Maintenance: true})
+	acquired, err := web1.Acquire(ctx, "tenants/42.db", &AcquireArgs{To: tenantPath, Maintenance: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +425,7 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("writer %+v", writer)
 	}
 	addRows(t, tenantPath, 2)
-	released, err := web1.Release(ctx, "tenants/42.db", ReleaseOptions{Wait: DurabilityServer})
+	released, err := web1.Release(ctx, "tenants/42.db", &ReleaseArgs{Wait: DurabilityServer})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,14 +433,14 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("released %+v", released)
 	}
 	movedPath := server.path("web-2", "42.db")
-	moved, err := web2.Acquire(ctx, "tenants/42.db", AcquireOptions{To: movedPath})
+	moved, err := web2.Acquire(ctx, "tenants/42.db", &AcquireArgs{To: movedPath})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if moved.Outcome != "downloaded" || countRows(t, movedPath) != 6 {
 		t.Fatalf("moved %+v with %d rows", moved, countRows(t, movedPath))
 	}
-	if _, err := web2.Release(ctx, "tenants/42.db", ReleaseOptions{Wait: DurabilityServer}); err != nil {
+	if _, err := web2.Release(ctx, "tenants/42.db", &ReleaseArgs{Wait: DurabilityServer}); err != nil {
 		t.Fatal(err)
 	}
 	conflicts, err := web2.Conflicts(ctx)
@@ -465,7 +466,7 @@ func TestIntegrationFailover(t *testing.T) {
 
 	firstPath := server.path("first", "shared.db")
 	addRows(t, firstPath, 5)
-	firstFailover, err := first.Failover(ctx, firstPath, FailoverOptions{Name: name})
+	firstFailover, err := first.Failover(ctx, firstPath, &FailoverArgs{Name: name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +477,7 @@ func TestIntegrationFailover(t *testing.T) {
 		t.Fatal(err)
 	}
 	roles := make(chan Role, 8)
-	secondFailover, err := second.Failover(ctx, server.path("second", "shared.db"), FailoverOptions{
+	secondFailover, err := second.Failover(ctx, server.path("second", "shared.db"), &FailoverArgs{
 		Name:         name,
 		OnRoleChange: func(role Role) { roles <- role },
 	})
@@ -484,7 +485,7 @@ func TestIntegrationFailover(t *testing.T) {
 		t.Fatal(err)
 	}
 	thirdPath := server.path("third", "shared.db")
-	thirdFailover, err := third.Failover(ctx, thirdPath, FailoverOptions{
+	thirdFailover, err := third.Failover(ctx, thirdPath, &FailoverArgs{
 		Name:         name,
 		OnRoleChange: func(role Role) { roles <- role },
 	})
@@ -528,14 +529,14 @@ func TestIntegrationFailover(t *testing.T) {
 
 	// The first machine comes back: its writes are saved as a conflict and it follows the new origin.
 	restarted := server.reconnect("first")
-	comeback, err := restarted.Failover(ctx, firstPath, FailoverOptions{Name: name})
+	comeback, err := restarted.Failover(ctx, firstPath, &FailoverArgs{Name: name})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The restarted daemon resumes the failover rule on its own and may set
 	// the writes aside before this Failover call; its event log has them.
 	eventually(t, 60*time.Second, func() error {
-		page, err := restarted.Events(ctx, EventsOptions{Limit: 10000})
+		page, err := restarted.Events(ctx, &EventsArgs{Limit: 10000})
 		if err != nil {
 			return err
 		}
@@ -584,7 +585,7 @@ func TestIntegrationPrefixReplica(t *testing.T) {
 	reader := server.connect("prefix-reader")
 	firstPath := server.path("prefix-origin", "first.db")
 	addRows(t, firstPath, 2)
-	_, err := origin.Backup(ctx, firstPath, BackupOptions{Prefix: "tenants/", Wait: DurabilityServer})
+	_, err := origin.StartBackup(ctx, firstPath, &StartBackupArgs{Prefix: "tenants/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -592,7 +593,7 @@ func TestIntegrationPrefixReplica(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, err = reader.ReplicatePrefix(ctx, "tenants", ReplicatePrefixOptions{To: directory})
+	_, err = reader.ReplicatePrefix(ctx, "tenants", &ReplicatePrefixArgs{To: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,11 +616,45 @@ func TestIntegrationPrefixReplica(t *testing.T) {
 	waitRows(filepath.Join(directory, "first.db"), 2)
 	secondPath := server.path("prefix-origin", "second.db")
 	addRows(t, secondPath, 3)
-	_, err = origin.Backup(ctx, secondPath, BackupOptions{Prefix: "tenants/", Wait: DurabilityServer})
+	_, err = origin.StartBackup(ctx, secondPath, &StartBackupArgs{Prefix: "tenants/"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitRows(filepath.Join(directory, "second.db"), 3)
+
+	page, err := origin.StatusPage(ctx, "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Databases) != 1 || page.Next != "tenants/first.db" {
+		t.Fatalf("first page: %+v", page)
+	}
+	last, err := origin.DatabasesPage(ctx, page.Next, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(last.Databases) != 1 || last.Databases[0].Name != "tenants/second.db" || last.Next != "" {
+		t.Fatalf("last page: %+v", last)
+	}
+	// Names and rule IDs keep their meaning even after a source is renamed.
+	rules, err := origin.Backups(ctx)
+	if err != nil || len(rules) != 2 {
+		t.Fatalf("backup rules: %v %v", rules, err)
+	}
+	if err := os.Rename(firstPath, firstPath+".moved"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := origin.StopBackup(ctx, "tenants/first.db"); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := origin.Backups(ctx)
+	if err != nil || len(remaining) != 1 || remaining[0].Name != "tenants/second.db" {
+		t.Fatalf("remaining rule: %v %v", remaining, err)
+	}
+	if _, err := origin.StopBackupRule(ctx, remaining[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := reader.StopReplicaPrefix(ctx, "tenants", directory); err != nil {
 		t.Fatal(err)
 	}
@@ -633,5 +668,97 @@ func TestIntegrationPrefixReplica(t *testing.T) {
 	output, err := sqlite(t, filepath.Join(directory, "first.db"), "INSERT INTO items (body) VALUES ('local after stop')")
 	if err != nil {
 		t.Fatalf("writing stopped replica: %v %s", err, output)
+	}
+}
+
+// TestForegroundJobs exercises the package-level entry point on a machine with
+// credentials but no daemon. The reader uses an independent machine identity.
+func TestForegroundJobs(t *testing.T) {
+	server := startDevelopmentServer(t)
+	reader := server.connect("verify")
+	session := server.session("cron")
+	token, err := server.joinToken(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(TokenEnvironment, token)
+	t.Setenv(SessionEnvironment, session)
+	source := server.path("exports", "Å Team", "42.sqlite")
+	addRows(t, source, 2)
+	top := server.path("exports", "My DB.sqlite")
+	addRows(t, top, 1)
+	bad := server.path("exports", "Broken.sqlite")
+	if err := os.WriteFile(bad, []byte("broken sqlite"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	var missing *Error
+	err = Backup(ctx, server.path("exports", "*.absent"), nil)
+	if !errors.As(err, &missing) || missing.Code != "invalid_argument" {
+		t.Fatalf("empty selection: %v", err)
+	}
+	err = Backup(ctx, server.path("exports", "**", "*.sqlite"), &BackupArgs{Prefix: "租户/", Wait: DurabilityServer})
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Message, "Broken.sqlite") {
+		t.Fatalf("partial failure: %v", err)
+	}
+	for _, name := range []string{"租户/My DB.sqlite", "租户/Å Team/42.sqlite"} {
+		versions, err := reader.Versions(ctx, name, nil)
+		if err != nil || len(versions) != 1 {
+			t.Fatalf("%s versions %v: %v", name, versions, err)
+		}
+	}
+	link := server.path("exports", "Linked.db")
+	if err := os.Symlink(top, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := Backup(ctx, link, nil); err != nil {
+		t.Fatal(err)
+	}
+	if versions, err := reader.Versions(ctx, "Linked.db", nil); err != nil || len(versions) != 1 {
+		t.Fatalf("link versions %v: %v", versions, err)
+	}
+	job, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	const exact = "Tenant/ E\u0301.sqlite "
+	go func() { done <- Backup(job, source, &BackupArgs{Name: exact, Wait: DurabilityCloud}) }()
+	eventually(t, 3*time.Second, func() error {
+		writer, err := reader.Writer(ctx, exact)
+		if err != nil {
+			return err
+		}
+		if !writer.Active {
+			return fmt.Errorf("waiting for writer")
+		}
+		return nil
+	})
+	if err := Backup(ctx, top, &BackupArgs{Name: exact}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("overlap: %v", err)
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel: %v", err)
+	}
+	writer, err := reader.Writer(ctx, exact)
+	if err != nil || writer.Active {
+		t.Fatalf("writer after cancellation %v: %v", writer, err)
+	}
+	if err := reader.Backup(ctx, top, &BackupArgs{Name: exact, Wait: DurabilityCloud}); err != nil {
+		t.Fatal(err)
+	}
+	restored := server.path("restored", "exact.sqlite")
+	if _, err := reader.Restore(ctx, exact, &RestoreArgs{To: restored}); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := sqlite(t, restored, "SELECT COUNT(*) FROM items"); err != nil || count != "1" {
+		t.Fatalf("replacement contains %q rows: %v", count, err)
+	}
+	_, socket, err := SessionSocket(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(socket); !os.IsNotExist(err) {
+		t.Fatalf("foreground session left socket: %v", err)
 	}
 }

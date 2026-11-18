@@ -16,7 +16,7 @@ const client = await Litebackup.connect({
 ```
 
 ```go
-client, err := litebackup.Connect(ctx, litebackup.Options{
+client, err := litebackup.Connect(ctx, &litebackup.ConnectArgs{
     Token: os.Getenv("LITEBACKUP_TOKEN"), Session: "default",
 })
 ```
@@ -26,71 +26,69 @@ API key. It is only used when the local client first joins; see
 [client credentials](litebackup-client.md#join-and-register).
 
 Omit token and session to use the environment. TypeScript also supports
-`environment`, `launch: false`, and `socketPath`. Go supports `Options.SocketPath` for an existing daemon. A socket override
+`environment`, `launch: false`, and `socketPath`. Go supports `ConnectArgs.SocketPath` for an existing daemon. A socket override
 connects without launching.
-Go callers pass a context to operations. TypeScript durations are milliseconds
+Go callers pass a context and a pointer to the operation’s `Args` struct. Pass `nil` to use defaults. Restore and prefix replication require a destination. TypeScript durations are milliseconds
 or strings such as `"5s"` and `"2m"`; Go uses `time.Duration`.
 
-Package-level helpers connect lazily and share a client per token and session.
-TypeScript exports `sharedClient()`; Go exposes `Default(ctx)`.
+Foreground backup runs the CLI directly. Socket helpers connect on first use.
+TypeScript's `sharedClient()` shares connections by token and session. Go's
+`Default(ctx)` keeps one shared client for the process.
 
 ## Operations
 
-Methods below are on a connected client unless identified as package helpers.
-`backup`, `replicate`, `replicatePrefix`, `restore`, `versions`,
-`acquire`, `release`, `offload`, and `writer` also have package-level helpers
-with their corresponding Go names.
+Both SDKs provide package-level helpers for `startBackup`, `stopBackup`,
+`stopBackupRule`, `backup`, `failover`, `replicate`, `replicatePrefix`,
+`restore`, and `versions`. Go capitalizes each helper name. For `acquire`,
+`release`, `offload`, and `writer`, TypeScript also exports package-level
+helpers. In Go, call these methods on a connected client.
 
 | TypeScript | Go | Returns when / result |
 | --- | --- | --- |
-| `backup(pathOrHandle, options?)` | `Backup(ctx, path, options)` | `Backup` handle immediately in TS; `*BackupRun, error` after registration in Go |
-| `run.ready` | `Backup` return | Backup registered; optional start wait can change the boundary |
-| `run.wait("server" \| "cloud", { signal }?)` | `run.Wait(ctx, durability)` | Sync before returning; cloud also waits for bucket |
-| `run.stop()` | `run.Stop(ctx)` | Stop this backup; no final sync implied |
-| `replicate(name, options?)` | `Replicate(ctx, name, options)` | First local version available |
-| `replicatePrefix(prefix, { to, writeProtection? })` | `ReplicatePrefix(ctx, prefix, options)` | Namespace registered; files download in background |
-| `restore(name, { to, version?, time? })` | `Restore(ctx, name, options)` | New file materialized and checked |
-| `versions(name, { after?, limit? }?)` | `Versions(ctx, name, options)` | Retained restorable versions, oldest first; SDK follows pagination |
-| `acquire(name, options?)` | `Acquire(ctx, name, options)` | Ownership obtained, local file current |
-| `release(name, options?)` | `Release(ctx, name, options)` | Final sync and ownership released |
+| `await startBackup(pathOrHandle, options?)` | `StartBackup(ctx, path, *StartBackupArgs)` | Durable local rule acknowledgement |
+| `await stopBackup(name)` | `StopBackup(ctx, name)` | Stop a single-file backup on this machine by remote name |
+| `await stopBackupRule(rule.id)` | `StopBackupRule(ctx, rule.ID)` | Stop a whole backup rule, including future matches |
+| `await backup(pathOrHandle, options?)` | `Backup(ctx, path, *BackupArgs)` | Foreground job acknowledged and locks released |
+| `replicate(name, options?)` | `Replicate(ctx, name, *ReplicateArgs)` | First local version available |
+| `replicatePrefix(prefix, { to, writeProtection? })` | `ReplicatePrefix(ctx, prefix, *ReplicatePrefixArgs)` | Namespace registered; files download in background |
+| `restore(name, { to, version?, time? })` | `Restore(ctx, name, *RestoreArgs)` | New file materialized and checked |
+| `versions(name, { after?, limit? }?)` | `Versions(ctx, name, *VersionsArgs)` | Retained restorable versions, oldest first; SDK follows pagination |
+| `acquire(name, options?)` | `Acquire(ctx, name, *AcquireArgs)` | Ownership obtained, local file current |
+| `release(name, options?)` | `Release(ctx, name, *ReleaseArgs)` | Final sync and ownership released |
 | `offload(name)` | `Offload(ctx, name)` | Remove released local file after bucket durability |
 | `writer(name)` | `Writer(ctx, name)` | Writer machine and lease |
-| `status()` | `Status(ctx)` | Session and database status |
+| `status(after?, limit?)` | `StatusPage(ctx, after, limit)` | Session and database status |
 | `database(name, { signal }?)` | `Database(ctx, name)` | One local database's status |
-| `databases()` | `Databases(ctx)` | Local database list |
+| `databasesPage(after, limit)` | `DatabasesPage(ctx, after, limit)` | Returns databases and `next`. Pass that cursor as `after` until it is absent. |
 | `sync(name, { signal }?)` | `Sync(ctx, name)` | Explicit server acknowledgement |
 | `backups.list({ signal }?)` | `Backups(ctx)` | Registered backups |
-| `backups.stop({ id } \| { name } \| { path })` | `StopBackup(ctx, StopBackupOptions)` | Stop matching backup |
 | `replicas.list()` | `Replicas(ctx)` | Prefix rules and replicas |
 | `replicas.stop(name)` | `StopReplica(ctx, name)` | Stop one replica; file stays |
 | `replicas.stopPrefix(prefix, to)` | `StopReplicaPrefix(ctx, prefix, to)` | Stop prefix and replicas; files stay |
 | `conflicts.list()` / `conflicts.delete(id)` | `Conflicts(ctx)` / `DeleteConflict(ctx, id)` | Inspect / remove divergent saved copies |
-| `events({ after?, wait?, signal? }?)` | `Events(ctx, EventsOptions)` | TS async iterator; Go one page with `Next` cursor |
-| `eventPage({ after?, waitMillis?, limit?, signal? }?)` | `Events(ctx, EventsOptions)` | One event page |
+| `events({ after?, wait?, signal? }?)` | `Events(ctx, *EventsArgs)` | TS async iterator; Go one page with `Next` cursor |
+| `eventPage({ after?, waitMillis?, limit?, signal? }?)` | `Events(ctx, *EventsArgs)` | One event page |
 | `close()` | `Close()` | Close SDK connection and watchers; daemon stays |
-| `shutdown({ wait?, timeout? }?)` | `Shutdown(ctx, ShutdownOptions)` | Drain and stop the whole session |
+| `shutdown({ wait?, timeout? }?)` | `Shutdown(ctx, *ShutdownArgs)` | Drain and stop the whole session |
 
 ## Release compatibility
 
-Namespace replication and cancellation of in-flight wait requests are not in
-the published 0.3.30 SDK. Build this source or use a release containing these
-changes. Older SDKs support single-file replicas and only cancel cloud waits
-between status requests.
+Use Litebackup CLI and SDK 0.4.0 or newer for the explicit backup commands. See the [breaking change in the release notes](../CHANGELOG.md). Releases through 0.3.32 use the earlier continuous `backup` behavior.
 
 ## Backup options
 
 | TypeScript | Go | Meaning |
 | --- | --- | --- |
 | `name` | `Name` | Exact remote database name |
-| `prefix` | `Prefix` | Prefix before normalized basename |
-| `wait: "none" \| "server" \| "cloud"` | `Wait: DurabilityNone / DurabilityServer / DurabilityCloud` | Optional initial durability wait; leave unset for app startup |
-| `timeout` | `Timeout` | Bounds the initial wait |
+| `prefix` | `Prefix` | Prefix before relative path |
+| `wait: "server" \| "cloud"` | `Wait: DurabilityServer / DurabilityCloud` | Foreground durability, default server |
+| `timeout` | `Timeout` | Bounds the foreground job |
 | `maximumLocalDatabases` | `MaximumLocalDatabases` | Offload idle files above a positive count once bucket-safe |
 | `token`, `session` | Select through `Connect` / `Default` | Shared-client choice for package-level TS helper |
 
 TypeScript accepts a path or a duck-typed `better-sqlite3` handle. The handle
 supplies `name`, `memory`, and `open`. In-memory handles are rejected.
-Globs apply to the final path segment. See [backup semantics](sqlite-backup.md).
+Recursive globs use **. See [backup semantics](sqlite-backup.md).
 
 ## Acquire and release options
 

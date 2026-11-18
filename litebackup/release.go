@@ -76,8 +76,8 @@ type packageMetadata struct {
 	} `json:"packages"`
 }
 
-// FindReleaseOptions selects a release from package metadata.
-type FindReleaseOptions struct {
+// FindReleaseArgs selects a release from package metadata.
+type FindReleaseArgs struct {
 	// Package is the package slug; CommandPackage when empty.
 	Package string
 	// Version is the release to find; the release on Channel when empty.
@@ -92,16 +92,19 @@ type FindReleaseOptions struct {
 // serves it, and returns the selected release taken from its signed
 // document, never the unsigned listing. A release whose signature does not
 // verify returns ErrSignature.
-func FindRelease(metadata []byte, options FindReleaseOptions) (*Release, error) {
-	slug := options.Package
+func FindRelease(metadata []byte, args *FindReleaseArgs) (*Release, error) {
+	if args == nil {
+		args = &FindReleaseArgs{}
+	}
+	slug := args.Package
 	if slug == "" {
 		slug = CommandPackage
 	}
-	channel := options.Channel
+	channel := args.Channel
 	if channel == "" {
 		channel = StableChannel
 	}
-	keys := options.Keys
+	keys := args.Keys
 	if keys == nil {
 		keys = ReleaseKeys
 	}
@@ -114,8 +117,8 @@ func FindRelease(metadata []byte, options FindReleaseOptions) (*Release, error) 
 			continue
 		}
 		for _, candidate := range listed.Releases {
-			matches := candidate.Version == options.Version
-			if options.Version == "" {
+			matches := candidate.Version == args.Version
+			if args.Version == "" {
 				matches = slices.Contains(candidate.Channels, channel)
 			}
 			if !matches {
@@ -131,8 +134,8 @@ func FindRelease(metadata []byte, options FindReleaseOptions) (*Release, error) 
 			release.Channels = candidate.Channels
 			return release, nil
 		}
-		if options.Version != "" {
-			return nil, fmt.Errorf("package %s has no release %s", slug, options.Version)
+		if args.Version != "" {
+			return nil, fmt.Errorf("package %s has no release %s", slug, args.Version)
 		}
 		return nil, fmt.Errorf("package %s has no release on %s", slug, channel)
 	}

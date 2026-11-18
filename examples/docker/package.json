@@ -6,6 +6,6 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@litebackup/sdk": "0.3.30"
+    "@litebackup/sdk": "file:../../typescript"
   }
 }

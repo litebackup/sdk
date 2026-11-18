@@ -5,10 +5,38 @@ in the same container as your app. The app writes locally while the client
 syncs in the background. The volume keeps those files available across
 container replacements.
 
+## Install a pinned CLI in your own Dockerfile
+
+Use the following Dockerfile for a Linux image, or copy the three `ARG` lines, `ADD`, and `RUN` into your application's image stage. BuildKit sets `TARGETARCH` to `amd64` or `arm64`. Pin the exact release version and the SHA-256 of its plain Linux executable for that architecture in your build configuration. The signed CLI release metadata lists the executable checksum as `artifacts[].sha256`. The build fails if the downloaded bytes differ. [Release metadata](https://litebackup.com/pkg/metadata)
+
+```dockerfile
+# syntax=docker/dockerfile:1.10
+FROM debian:bookworm-slim
+ARG TARGETARCH
+ARG LITEBACKUP_VERSION
+ARG LITEBACKUP_SHA256
+ADD --chmod=0755 --checksum=sha256:${LITEBACKUP_SHA256} \
+    https://litebackup-cdn.com/litebackup/${LITEBACKUP_VERSION}/litebackup-linux-${TARGETARCH} \
+    /usr/local/bin/litebackup
+RUN litebackup version
+```
+
+Build the [standalone example](../examples/docker/cli.Dockerfile) with those two values. For a multi-platform release, supply the matching checksum in each platform's build.
+
+```sh
+docker build -f examples/docker/cli.Dockerfile --platform linux/amd64 \
+  --build-arg LITEBACKUP_VERSION=0.4.0 \
+  --build-arg LITEBACKUP_SHA256=d961d6679dde34b30b098a6e40c1c06b91ea433da61fc26df7a340462122703d \
+  -t litebackup-cli:pinned .
+docker run --rm litebackup-cli:pinned litebackup version
+```
+
+Supply `LITEBACKUP_TOKEN` at container runtime. A scheduled container can run `litebackup backup /data/main.sqlite --wait cloud` as its command. Applications can register continuous backup with the matching SDK as shown below.
+
 ## Run the example app
 
 [Install a Litebackup server](litebackup-server.md) and copy a join token from
-**Machines → Add machine**. From this repository's root:
+**Machines → Add machine**. Build `litebackup-cli:pinned` as above using a CLI release matching the SDK. From the SDK repository root, run
 
 ```sh
 export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
@@ -22,8 +50,8 @@ a GET returns the count. It binds the host port to localhost. You can set
 `APP_PORT` if port 3000 is already in use.
 
 The [app](../examples/docker/app.mjs) uses Node's SQLite driver and registers
-the file with `backup()`. Its [Dockerfile](../examples/docker/Dockerfile)
-installs the SDK with its optional binary package and runs as `node` (UID 1000).
+the file with `startBackup()`. Its [Dockerfile](../examples/docker/Dockerfile)
+builds the SDK from this checkout, copies the matching Linux CLI, and runs as `node` (UID 1000).
 [Compose](../examples/docker/compose.yaml) starts the container again after a
 host reboot. The join token is only needed for the client's first join.
 

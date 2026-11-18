@@ -33,12 +33,12 @@ import (
 func main() {
     ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer cancel()
-    client, err := litebackup.Connect(ctx, litebackup.Options{})
+    client, err := litebackup.Connect(ctx, nil)
     if err != nil {
         log.Fatal(err)
     }
     defer client.Close()
-    _, err = client.Backup(ctx, "/var/lib/app/main.sqlite", litebackup.BackupOptions{})
+    _, err = client.StartBackup(ctx, "/var/lib/app/main.sqlite", nil)
     if err != nil {
         log.Fatal(err)
     }
@@ -53,18 +53,14 @@ Use a [service install](litebackup-client.md) for daemon restart and reboot hand
 For tenants, change the registration to a glob:
 
 ```go
-_, err = client.Backup(ctx, "/var/lib/app/tenants/*.sqlite", litebackup.BackupOptions{
+_, err = client.StartBackup(ctx, "/var/lib/app/tenants/*.sqlite", &litebackup.StartBackupArgs{
     Prefix: "tenants/",
 })
 ```
 
 ## One-shot backup
 
-Save this as a command, run it with a list of existing paths, and reserve its
-`scheduled/` namespace for that command. Use files not covered by a running
-backup, as in the [one-shot guide](sqlite-backup-script.md). It bounds each wait with a context
-and performs cleanup with a separate context, so cancellation does not skip
-stopping a successfully registered backup.
+Run the foreground backup with a context or timeout for scheduled jobs.
 
 ```go
 package main
@@ -80,32 +76,14 @@ import (
     "github.com/litebackup/sdk/litebackup"
 )
 
-func backupFile(ctx context.Context, client *litebackup.Client, path string) (result error) {
-    run, err := client.Backup(ctx, path, litebackup.BackupOptions{Prefix: "scheduled/"})
-    if err != nil {
-        return err
-    }
-    defer func() {
-        cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-        defer cancel()
-        result = errors.Join(result, run.Stop(cleanup))
-    }()
-    return run.Wait(ctx, litebackup.DurabilityCloud)
-}
-
 func run() error {
     if len(os.Args) < 2 {
         return errors.New("provide at least one SQLite path")
     }
     ctx := context.Background()
-    client, err := litebackup.Connect(ctx, litebackup.Options{})
-    if err != nil {
-        return err
-    }
-    defer client.Close()
     for _, path := range os.Args[1:] {
         wait, cancel := context.WithTimeout(ctx, 30*time.Minute)
-        err := backupFile(wait, client, path)
+        err := litebackup.Backup(wait, path, &litebackup.BackupArgs{Prefix: "scheduled/", Wait: litebackup.DurabilityCloud})
         cancel()
         if err != nil {
             return fmt.Errorf("backup %s: %w", path, err)
@@ -147,14 +125,14 @@ func runAgent(ctx context.Context, client *litebackup.Client, work func(string) 
     if err := file.Close(); err != nil {
         return err
     }
-    _, err = client.Acquire(ctx, name, litebackup.AcquireOptions{To: path})
+    _, err = client.Acquire(ctx, name, &litebackup.AcquireArgs{To: path})
     if err != nil {
         return err
     }
     workErr := work(path)
     cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
     defer cancel()
-    _, releaseErr := client.Release(cleanup, name, litebackup.ReleaseOptions{
+    _, releaseErr := client.Release(cleanup, name, &litebackup.ReleaseArgs{
         Wait: litebackup.DurabilityCloud, Offload: true, Timeout: 30 * time.Minute,
     })
     return errors.Join(workErr, releaseErr)
@@ -170,13 +148,13 @@ concurrency, lost leases, and offloading.
 With a connected `client`, a joined machine, and an existing remote backup:
 
 ```go
-_, err = client.Replicate(ctx, "main.sqlite", litebackup.ReplicateOptions{
+_, err = client.Replicate(ctx, "main.sqlite", &litebackup.ReplicateArgs{
     To: "/var/lib/app/reporting.sqlite",
 })
 if err != nil {
     return err
 }
-_, err = client.Restore(ctx, "main.sqlite", litebackup.RestoreOptions{
+_, err = client.Restore(ctx, "main.sqlite", &litebackup.RestoreArgs{
     To: "/tmp/main-restored.sqlite",
 })
 return err

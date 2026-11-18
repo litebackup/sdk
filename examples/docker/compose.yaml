@@ -2,6 +2,8 @@ services:
   app:
     build:
       context: ../..
+      additional_contexts:
+        cli: docker-image://litebackup-cli:pinned
       dockerfile: examples/docker/Dockerfile
     restart: unless-stopped
     environment:

@@ -39,7 +39,7 @@ Use `wait: "cloud"` when the machine may disappear after the run. On a
 persistent machine, `wait: "server"` returns sooner. Either way, offloading
 only removes the local file after the bucket has it.
 
-Do not also register a continuous `backup()` for an acquired database. The
+Do not also register a continuous `startBackup()` for an acquired database. The
 acquisition already syncs while you write.
 
 ## CLI equivalent

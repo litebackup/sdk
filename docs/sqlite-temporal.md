@@ -21,8 +21,7 @@ npm install --save-dev typescript @types/node
 ```
 
 These files use strict TypeScript, NodeNext modules, and ES2023. See the
-[API release note](sdk-reference.md#release-compatibility) for cancellation support in
-older SDKs.
+[API release note](sdk-reference.md#release-compatibility) for compatible CLI and SDK versions.
 
 ## Activity: back up the files on this host
 
@@ -38,18 +37,12 @@ export async function backupDatabases(paths: string[]): Promise<void> {
   for (const path of paths) {
     const heartbeat = setInterval(() => context.heartbeat({ path }), 10_000);
     try {
-      const run = backup(path, { prefix: "scheduled/" });
-      await run.ready;
-      try {
-        await run.wait("cloud", {
-          signal: AbortSignal.any([
-            context.cancellationSignal,
-            AbortSignal.timeout(30 * 60_000),
-          ]),
-        });
-      } finally {
-        await run.stop();
-      }
+      await backup(path, {
+        prefix: "scheduled/",
+        wait: "cloud",
+        timeout: "30m",
+        signal: context.cancellationSignal,
+      });
     } finally {
       clearInterval(heartbeat);
     }
@@ -58,8 +51,7 @@ export async function backupDatabases(paths: string[]): Promise<void> {
 ```
 
 Heartbeats let Temporal detect an unavailable Worker and deliver cancellation.
-The Activity succeeds after all files reach the bucket and their backup rules
-stop. A retry can back up already completed files again, possibly with newer
+The Activity succeeds after all files reach the bucket and their writer locks are released. A retry can back up already completed files again, possibly with newer
 writes.
 
 ## Workflow: call the Activity

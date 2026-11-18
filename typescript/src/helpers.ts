@@ -1,4 +1,4 @@
-import { Backup, type BackupOptions, type BackupSource } from "./backup.js";
+import { type StartBackupOptions, type BackupSource } from "./backup.js";
 import { Litebackup, type AcquireOptions, type ReleaseOptions, type ReplicateOptions, type ReplicatePrefixOptions, type RestoreOptions, type VersionsOptions } from "./client.js";
 import type { Failover, FailoverOptions } from "./failover.js";
 import { tokenEnvironment } from "./launch.js";
@@ -46,12 +46,16 @@ export async function sharedClient(options: SharedClientOptions = {}): Promise<L
   }
 }
 
-/**
- * Backs up a database, given as a path or a better-sqlite3 handle, and keeps
- * syncing it. Returns a Backup at once; `await backup.wait()` for durability.
- */
-export function backup(source: BackupSource, options: BackupOptions = {}): Backup {
-  return new Backup(sharedClient(options), source, options);
+export async function startBackup(source: BackupSource, options: StartBackupOptions & SharedClientOptions = {}) {
+  return (await sharedClient(options)).startBackup(source, options);
+}
+
+export async function stopBackup(name: string, options: SharedClientOptions = {}) {
+  return (await sharedClient(options)).stopBackup(name);
+}
+
+export async function stopBackupRule(ruleId: string, options: SharedClientOptions = {}) {
+  return (await sharedClient(options)).stopBackupRule(ruleId);
 }
 
 /** Runs a database on several identical machines; see Litebackup.failover. */

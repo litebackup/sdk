@@ -11,7 +11,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Session, server, and every database on this machine with its role and state. */
+        /** @description Session, server, and a page of databases on this machine with its role and state. */
         get: operations["showStatus"];
         put?: never;
         post?: never;
@@ -28,7 +28,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Every database on this machine with its role and state. */
+        /** @description A page of databases on this machine with its role and state. */
         get: operations["listDatabases"];
         put?: never;
         post?: never;
@@ -174,7 +174,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/backups/start": {
+    "/v1/backup-rules/start": {
         parameters: {
             query?: never;
             header?: never;
@@ -183,7 +183,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Back up a database, or every database matching a glob, and keep syncing it. The name is the file name, lowercased with other characters turned into -, after an optional prefix; name sets it outright. When another machine already writes that name the call fails with 409 name_in_use, and nothing is overwritten. With wait, the call returns once the server or the bucket holds the first version. */
+        /** @description Persist a continuous backup rule. Matching and uploading happen in the background. */
         post: operations["startBackup"];
         delete?: never;
         options?: never;
@@ -191,14 +191,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/backups/list": {
+    "/v1/backup-rules/list": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** @description Every backup and failover on this machine with how many databases each syncs. */
+        /** @description Registered continuous backup and failover rules. */
         get: operations["listBackups"];
         put?: never;
         post?: never;
@@ -208,7 +208,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/backups/stop": {
+    "/v1/backup-rules/stop": {
         parameters: {
             query?: never;
             header?: never;
@@ -217,7 +217,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Stop a backup or failover (failovers stop here too), named by its ID, its database name, or its path, and release its write locks. The files stay. */
+        /** @description Stop a single-file backup by remote name or an entire local rule by ID. A name matched by a group returns its owning rule ID in the error message. Offline releases are retried. */
         post: operations["stopBackup"];
         delete?: never;
         options?: never;
@@ -365,6 +365,20 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        Event: {
+            /** Format: int64 */
+            id: number;
+            /** Format: date-time */
+            time: string;
+            name?: string;
+            /** @description such as role_changed (message is origin or replica), conflict_saved (path names the conflict copy), discovery_failed (path names the failed match), synced, downloaded */
+            type: string;
+            message: string;
+            /** @description for role_changed, the new role */
+            role?: string;
+            /** @description for conflict_saved, the conflict copy */
+            path?: string;
+        };
         /** @description A version the server acknowledged. Clients decide what durability is enough. */
         SyncedState: {
             /** Format: int64 */
@@ -412,6 +426,8 @@ export interface components {
             offload?: "never" | "released";
         };
         Status: {
+            /** @description Pass this name as after to read the next page. Omitted on the last page. */
+            next?: string;
             session: string;
             server: string;
             client_version: string;
@@ -419,14 +435,18 @@ export interface components {
             /** Format: date-time */
             lease_expires?: string;
             watch: string;
+            /** @description Most recent file discovery failures. The events API provides the paginated history. */
+            recent_discovery_errors?: components["schemas"]["Event"][];
             databases: components["schemas"]["DatabaseStatus"][];
         };
         Error: {
-            /** @description such as name_in_use (another machine backs up that name), exists (a restore target exists), in_use (another machine writes the database), not_found, still_open, invalid_argument, timeout */
+            /** @description such as exists (a restore target exists), in_use (another machine writes the database), not_found, still_open, invalid_argument, timeout */
             code: string;
             message: string;
         };
         DatabaseStatusList: {
+            /** @description Pass this name as after to read the next page. Omitted on the last page. */
+            next?: string;
             databases: components["schemas"]["DatabaseStatus"][];
         };
         RestorableVersion: {
@@ -564,11 +584,11 @@ export interface components {
             lapsed: boolean;
         };
         BackupRequest: {
-            /** @description absolute path, or a glob in the last path segment */
+            /** @description absolute file, directory, or glob with optional ** segments */
             path: string;
             /** @description the database name for a single path; must already be a valid name */
             name?: string;
-            /** @description name prefix such as app/ (a trailing / is added when missing); names are the prefix plus the normalized file name */
+            /** @description name prefix such as app/ (a trailing / is added when missing); names are the prefix plus the relative file path */
             prefix?: string;
             /** @enum {string} */
             watch?: "inotify" | "poll";
@@ -577,46 +597,35 @@ export interface components {
              * @description when positive, offload the least recently changed idle databases past this count once the bucket holds them
              */
             maximum_local_databases?: number;
-            /**
-             * @description return once the server, or the bucket, holds the first version of every matching database
-             * @enum {string}
-             */
-            wait?: "none" | "server" | "cloud";
-            /**
-             * Format: int64
-             * @description bound on wait
-             */
-            timeout_millis?: number;
         };
-        Backup: {
+        BackupRule: {
             id: string;
             /** @description the path or glob */
             path: string;
-            /** @description the name set for a single path, or empty */
+            /** @description the resolved remote name for a single file, or empty for a directory or glob */
             name: string;
             prefix: string;
             watch: string;
             /** Format: int64 */
             maximum_local_databases: number;
             failover: boolean;
-            databases: components["schemas"]["DatabaseStatus"][];
         };
         BackupList: {
-            backups: components["schemas"]["Backup"][];
+            backups: components["schemas"]["BackupRule"][];
         };
-        /** @description One of id, name, or path. */
         StopBackupRequest: {
-            id?: string;
-            /** @description the name of a database the backup syncs */
+            /** @description Exact remote name of a database with its own backup rule on this machine. */
             name?: string;
-            /** @description the path or glob the backup was started with, or a file it syncs */
-            path?: string;
+            /** @description ID returned by start or listed by rules. Stops the whole rule, including future matches. */
+            rule_id?: string;
         };
-        Empty: Record<string, never>;
+        StopBackupResult: {
+            lease_pending: boolean;
+        };
         FailoverRequest: {
             /** @description absolute path of the database, the same on every machine */
             path: string;
-            /** @description the database name; defaults to the normalized file name */
+            /** @description the database name; defaults to the relative file path */
             name?: string;
             /**
              * Format: int64
@@ -673,25 +682,12 @@ export interface components {
             prefix?: string;
             to?: string;
         };
+        Empty: Record<string, never>;
         ConflictList: {
             conflicts: components["schemas"]["Conflict"][];
         };
         IDRequest: {
             id: string;
-        };
-        Event: {
-            /** Format: int64 */
-            id: number;
-            /** Format: date-time */
-            time: string;
-            name?: string;
-            /** @description such as role_changed (message is origin or replica), conflict_saved (path names the conflict copy), synced, downloaded */
-            type: string;
-            message: string;
-            /** @description for role_changed, the new role */
-            role?: string;
-            /** @description for conflict_saved, the conflict copy */
-            path?: string;
         };
         EventList: {
             events: components["schemas"]["Event"][];
@@ -723,7 +719,11 @@ export type $defs = Record<string, never>;
 export interface operations {
     showStatus: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Return names after this cursor in binary sort order. */
+                after?: string;
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -752,7 +752,11 @@ export interface operations {
     };
     listDatabases: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Return names after this cursor in binary sort order. */
+                after?: string;
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1266,7 +1270,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Backup"];
+                    "application/json": components["schemas"]["BackupRule"];
                 };
             };
             /** @description error */
@@ -1355,7 +1359,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Empty"];
+                    "application/json": components["schemas"]["StopBackupResult"];
                 };
             };
             /** @description error */

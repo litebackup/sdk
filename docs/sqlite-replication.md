@@ -5,7 +5,7 @@ Keep a local copy for reporting or search indexing. Install a
 register an existing file:
 
 ```sh
-litebackup backup /var/lib/app/main.sqlite
+litebackup start /var/lib/app/main.sqlite
 ```
 
 The default remote name is `main.sqlite`. On a second machine, use a readonly
@@ -50,7 +50,7 @@ client.close(); // replicas keep streaming in the daemon
 ```
 
 ```go
-rule, err := client.ReplicatePrefix(ctx, "tenants", litebackup.ReplicatePrefixOptions{
+rule, err := client.ReplicatePrefix(ctx, "tenants", &litebackup.ReplicatePrefixArgs{
     To: "/var/lib/app/reporting",
 })
 if err != nil {

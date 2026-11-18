@@ -7,23 +7,17 @@ For apps that stay up, consider [continuous backup](sqlite-backup.md).
 
 ## Prepare the database host
 
-Install a [server](litebackup-server.md) and the [client](litebackup-client.md), then install the
-client as a service under your app's OS user (`app` here):
+Install a [server](litebackup-server.md) and the CLI, then join once as the OS user that runs the job.
 
 ```sh
-export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
-sudo litebackup install service --user app --join "$LITEBACKUP_TOKEN"
+litebackup up "$LITEBACKUP_TOKEN"
+litebackup backup ./main.sqlite scheduled/ --wait cloud
 ```
-
-Run the crontab as `app`. The service uses a fixed socket path, so cron and
-your login shell reach the same client even if `XDG_RUNTIME_DIR` differs.
-Confirm `sudo -u app litebackup status` works. The client stores its join
-credentials; you don't need the token in the crontab.
 
 ## Back up a list with the CLI
 
 The [script](../examples/cron/backup-sqlite.sh) backs up each path, waits for
-the bucket, and stops the backup, including on failure. Install it somewhere
+the bucket, and releases its writer lock. Install it somewhere
 the cron user can run it, such as `/opt/app/backup-sqlite.sh`.
 
 ```sh
@@ -52,9 +46,7 @@ job monitoring to alert on failures and on missing successful runs. Cron's
 schedule uses the host's timezone unless you configure it otherwise.
 
 The script allows 30 minutes per file and 75 minutes for the two-file job.
-The default archive delay is 15 minutes; leave time for uploads too. A forced
-kill can prevent cleanup: inspect `litebackup backup list` before the next run. A registered
-backup can keep syncing after its scheduling process exits.
+The default archive delay is 15 minutes; leave time for uploads too. A forced kill may leave the remote lease active until expiry.
 
 The [TypeScript runner](sqlite-backup-script.md) works with the same cron setup.
 
@@ -66,11 +58,11 @@ appropriate volume. Check PVC access modes and placement: a `ReadWriteOnce`
 volume may prevent a separate job from mounting while the app runs elsewhere.
 Using the app's existing client on its host can be simpler.
 
-Build the example image from the repository root and publish it to a registry
-you control:
+Build the [pinned CLI image](sqlite-docker.md#install-a-pinned-cli-in-your-own-dockerfile) for the target architecture and matching SDK version, then use that image to build the job from the SDK repository root.
 
 ```sh
-docker build -f examples/cron/Dockerfile -t YOUR_REGISTRY/litebackup-job:latest .
+docker build --build-context cli=docker-image://litebackup-cli:pinned \
+  -f examples/cron/Dockerfile -t YOUR_REGISTRY/litebackup-job:latest .
 # Push the image to your registry before applying the manifest.
 ```
 
@@ -131,9 +123,7 @@ export files before this job runs.
 
 `Forbid` only prevents overlap within this CronJob. It does not coordinate
 other CronJobs or writers using the same backup names. The persistent client
-state keeps the joined machine identity across pods. Do not run multiple pods
-against that same client state concurrently. A successful pod has waited for
-the bucket before its local daemon disappears.
+state keeps the joined machine identity across pods. Each foreground job has its own writer session. A successful pod has waited for the bucket and released its locks.
 
 Kubernetes schedules are approximate and Jobs may be retried. Keep the job
 idempotent, use stable names, and alert on failed Jobs. See the

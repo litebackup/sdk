@@ -7,7 +7,7 @@ import { LitebackupError, type FailoverInfo, type LitebackupEvent, type Role, ty
 
 /** Options for failover. */
 export interface FailoverOptions {
-  /** The database name; defaults to the normalized file name. */
+  /** The database name; defaults to the file name. */
   name?: string;
   /** Bound on the first download of a replica. */
   timeout?: Duration;
@@ -122,7 +122,7 @@ export class Failover {
   /** Stops the failover and releases its write lock. The file stays. */
   async stop(): Promise<void> {
     try {
-      await this.client.backups.stop({ name: this.name });
+      await this.client.stopBackup(this.name);
     } finally {
       this.end();
       this.client.failovers.delete(this);

@@ -7,16 +7,16 @@ and move databases between machines. Your app keeps using its SQLite driver.
 
 ```ts
 import Database from "better-sqlite3";
-import { backup } from "@litebackup/sdk";
+import { startBackup } from "@litebackup/sdk";
 
 const db = new Database("/var/lib/app/main.sqlite");
-backup(db); // Continuous backup runs in the litebackup background process.
+await startBackup(db); // Continuous backup runs in the litebackup background process.
 ```
 
 Or add backups to an existing app with the CLI:
 
 ```sh
-litebackup backup /var/lib/app/main.sqlite
+litebackup start /var/lib/app/main.sqlite
 ```
 
 https://github.com/user-attachments/assets/0a48622a-4a70-4f28-a99f-5cfa109ce421
@@ -91,8 +91,7 @@ The [client guide](docs/litebackup-client.md) also covers sessions, permissions,
 
 ## Back up without slowing startup
 
-Pass a path or a `better-sqlite3` handle. `backup()` returns immediately;
-`ready` confirms the local client has started the backup, without waiting for an upload.
+Pass a path or a `better-sqlite3` handle to `await startBackup(db)`. It returns when the daemon saves the local rule. Discovery and uploads run in the background.
 
 The opening example uses `better-sqlite3` (`npm install better-sqlite3`);
 you can also pass a filename and use any SQLite driver. In Go:
@@ -101,7 +100,7 @@ you can also pass a filename and use any SQLite driver. In Go:
 import "github.com/litebackup/sdk/litebackup"
 
 // ctx is your application's context; the SQLite file already exists.
-_, err := litebackup.Backup(ctx, "/var/lib/app/main.sqlite", litebackup.BackupOptions{})
+_, err := litebackup.StartBackup(ctx, "/var/lib/app/main.sqlite", nil)
 if err != nil {
     return err
 }
@@ -109,9 +108,7 @@ if err != nil {
 
 Your app writes to its local SQLite files as usual, and Litebackup syncs changes
 in the background. Keep those files on a persistent disk or volume so they
-remain available across restarts and redeploys. Use `wait("server")` or
-`wait("cloud")` when a script or handoff should finish after its changes
-reach the server or bucket.
+remain available across restarts and redeploys.
 
 [Continuous backup, globs, and durability →](docs/sqlite-backup.md)
 [Complete Go examples →](docs/sqlite-go.md)
@@ -121,19 +118,20 @@ reach the server or bucket.
 Keep customers in separate SQLite files and give their backups stable names:
 
 ```ts
-import { backup } from "@litebackup/sdk";
+import { startBackup } from "@litebackup/sdk";
 
-const tenants = backup("/var/lib/app/tenants/*.sqlite", { prefix: "tenants/" });
-void tenants.ready.catch(console.error);
+await startBackup("/var/lib/app/tenants/**/*.sqlite", { prefix: "tenants/" });
 ```
 
 ```sh
-litebackup backup '/var/lib/app/tenants/*.sqlite' --prefix tenants/
+litebackup start '/var/lib/app/tenants/**/*.sqlite' tenants/
 ```
+
+Use `litebackup rules` to find the saved backup rule. Run `litebackup stop --rule ID` to stop the entire glob, including future matches. For a file registered individually, use its remote name, such as `litebackup stop main.sqlite`.
 
 `42.sqlite` becomes `tenants/42.sqlite`; new matching files are picked up too.
 Each name has one writer. Use a prefix per shard; a second machine trying
-to back up the same name gets `name_in_use`.
+to back up the same name reports `busy` in status.
 
 [Tenant routing, naming, and moving a tenant between machines →](docs/sqlite-multitenancy.md)
 
@@ -204,26 +202,17 @@ settings determine which versions you can restore.
 
 ## Back up once, then finish
 
-In a script or scheduled job, wait for the bucket before reporting success,
-then stop the backup. Local files and remote backups stay.
+Use foreground `backup` in scheduled jobs. It releases its writer lock after the server acknowledges the version. To wait for the bucket too:
+
+```sh
+litebackup backup /var/lib/app/exports/main.sqlite scheduled/ --wait cloud
+```
 
 ```ts
 import { backup } from "@litebackup/sdk";
 
-for (const path of ["/var/lib/app/exports/main.sqlite", "/var/lib/app/exports/audit.sqlite"]) {
-  const run = backup(path, { prefix: "scheduled/" });
-  await run.ready;
-  try {
-    await run.wait("cloud", { signal: AbortSignal.timeout(30 * 60_000) });
-  } finally {
-    await run.stop();
-  }
-}
+await backup("/var/lib/app/exports/main.sqlite", { prefix: "scheduled/", wait: "cloud" });
 ```
-
-Use files not covered by a running backup, such as these exports. If your app
-already backs up a file, wait on its existing handle and leave it running.
-Each file is backed up separately; the list isn't one atomic snapshot.
 
 [One-shot jobs and bounded waits →](docs/sqlite-backup-script.md) ·
 [Cron and Kubernetes CronJob →](docs/sqlite-cron-backup.md) ·
@@ -258,10 +247,7 @@ for details.
 
 ### When should I wait for a backup?
 
-Use `wait("server")` or `wait("cloud")` before finishing a script or handing off
-work that needs to be on your server or in your bucket. Normal app startup
-doesn't need either wait. Keep SQLite files on a persistent disk or volume;
-Litebackup syncs changes in the background.
+Foreground `backup` waits for the server. Pass `--wait cloud` to wait for bucket storage. Applications can await `startBackup` during startup and monitor upload progress through status.
 
 ### What is LITEBACKUP_TOKEN?
 
@@ -275,7 +261,7 @@ first joins. The client then saves its own machine API key. See
 | --- | --- |
 | [Live SQLite backup](docs/sqlite-live-backup.md) | Back up a running database and handle WAL files |
 | [Recover deleted rows](docs/sqlite-deleted-rows.md) | Restore selected records without replacing the whole database |
-| [SQLite in Docker](docs/sqlite-docker.md) | Persistent volumes, client state, and a runnable Compose example |
+| [SQLite in Docker](docs/sqlite-docker.md) | Pinned CLI installation in a Dockerfile, persistent volumes, and a runnable Compose example |
 | [API reference](docs/sdk-reference.md) | TypeScript and Go operations, options, errors, and status |
 | [Client runtime](docs/litebackup-client.md) | Sessions, credentials, service installs, Docker, shutdown |
 | [Storage providers](docs/sqlite-cloud-backup.md) | S3, R2, GCS, and other S3-compatible buckets |

@@ -7,7 +7,20 @@ paths:
   /v1/status/show:
     get:
       operationId: showStatus
-      description: Session, server, and every database on this machine with its role and state.
+      description: Session, server, and a page of databases on this machine with its role and state.
+      parameters:
+        - in: query
+          name: after
+          schema:
+            type: string
+          description: Return names after this cursor in binary sort order.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
       responses:
         '200':
           description: success
@@ -24,7 +37,20 @@ paths:
   /v1/databases/list:
     get:
       operationId: listDatabases
-      description: Every database on this machine with its role and state.
+      description: A page of databases on this machine with its role and state.
+      parameters:
+        - in: query
+          name: after
+          schema:
+            type: string
+          description: Return names after this cursor in binary sort order.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
       responses:
         '200':
           description: success
@@ -372,17 +398,17 @@ paths:
           required: true
           schema:
             type: string
-  /v1/backups/start:
+  /v1/backup-rules/start:
     post:
       operationId: startBackup
-      description: Back up a database, or every database matching a glob, and keep syncing it. The name is the file name, lowercased with other characters turned into -, after an optional prefix; name sets it outright. When another machine already writes that name the call fails with 409 name_in_use, and nothing is overwritten. With wait, the call returns once the server or the bucket holds the first version.
+      description: Persist a continuous backup rule. Matching and uploading happen in the background.
       responses:
         '200':
           description: success
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Backup'
+                $ref: '#/components/schemas/BackupRule'
         '400':
           description: error
           content:
@@ -413,10 +439,10 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/BackupRequest'
-  /v1/backups/list:
+  /v1/backup-rules/list:
     get:
       operationId: listBackups
-      description: Every backup and failover on this machine with how many databases each syncs.
+      description: Registered continuous backup and failover rules.
       responses:
         '200':
           description: success
@@ -430,17 +456,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /v1/backups/stop:
+  /v1/backup-rules/stop:
     post:
       operationId: stopBackup
-      description: Stop a backup or failover (failovers stop here too), named by its ID, its database name, or its path, and release its write locks. The files stay.
+      description: Stop a single-file backup by remote name or an entire local rule by ID. A name matched by a group returns its owning rule ID in the error message. Offline releases are retried.
       responses:
         '200':
           description: success
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Empty'
+                $ref: '#/components/schemas/StopBackupResult'
         '400':
           description: error
           content:
@@ -713,6 +739,33 @@ paths:
               $ref: '#/components/schemas/ShutdownRequest'
 components:
   schemas:
+    Event:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        time:
+          type: string
+          format: date-time
+        name:
+          type: string
+        type:
+          type: string
+          description: such as role_changed (message is origin or replica), conflict_saved (path names the conflict copy), discovery_failed (path names the failed match), synced, downloaded
+        message:
+          type: string
+        role:
+          type: string
+          description: for role_changed, the new role
+        path:
+          type: string
+          description: for conflict_saved, the conflict copy
+      required:
+        - id
+        - time
+        - type
+        - message
     SyncedState:
       type: object
       properties:
@@ -809,6 +862,9 @@ components:
     Status:
       type: object
       properties:
+        next:
+          type: string
+          description: Pass this name as after to read the next page. Omitted on the last page.
         session:
           type: string
         server:
@@ -822,6 +878,11 @@ components:
           format: date-time
         watch:
           type: string
+        recent_discovery_errors:
+          description: Most recent file discovery failures. The events API provides the paginated history.
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
         databases:
           type: array
           items:
@@ -838,7 +899,7 @@ components:
       properties:
         code:
           type: string
-          description: such as name_in_use (another machine backs up that name), exists (a restore target exists), in_use (another machine writes the database), not_found, still_open, invalid_argument, timeout
+          description: such as exists (a restore target exists), in_use (another machine writes the database), not_found, still_open, invalid_argument, timeout
         message:
           type: string
       required:
@@ -847,6 +908,9 @@ components:
     DatabaseStatusList:
       type: object
       properties:
+        next:
+          type: string
+          description: Pass this name as after to read the next page. Omitted on the last page.
         databases:
           type: array
           items:
@@ -1090,13 +1154,13 @@ components:
       properties:
         path:
           type: string
-          description: absolute path, or a glob in the last path segment
+          description: absolute file, directory, or glob with optional ** segments
         name:
           type: string
           description: the database name for a single path; must already be a valid name
         prefix:
           type: string
-          description: name prefix such as app/ (a trailing / is added when missing); names are the prefix plus the normalized file name
+          description: name prefix such as app/ (a trailing / is added when missing); names are the prefix plus the relative file path
         watch:
           type: string
           enum:
@@ -1106,20 +1170,9 @@ components:
           type: integer
           format: int64
           description: when positive, offload the least recently changed idle databases past this count once the bucket holds them
-        wait:
-          type: string
-          enum:
-            - none
-            - server
-            - cloud
-          description: return once the server, or the bucket, holds the first version of every matching database
-        timeout_millis:
-          type: integer
-          format: int64
-          description: bound on wait
       required:
         - path
-    Backup:
+    BackupRule:
       type: object
       properties:
         id:
@@ -1129,7 +1182,7 @@ components:
           description: the path or glob
         name:
           type: string
-          description: the name set for a single path, or empty
+          description: the resolved remote name for a single file, or empty for a directory or glob
         prefix:
           type: string
         watch:
@@ -1139,10 +1192,6 @@ components:
           format: int64
         failover:
           type: boolean
-        databases:
-          type: array
-          items:
-            $ref: '#/components/schemas/DatabaseStatus'
       required:
         - id
         - path
@@ -1151,32 +1200,37 @@ components:
         - watch
         - maximum_local_databases
         - failover
-        - databases
     BackupList:
       type: object
       properties:
         backups:
           type: array
           items:
-            $ref: '#/components/schemas/Backup'
+            $ref: '#/components/schemas/BackupRule'
       required:
         - backups
     StopBackupRequest:
       type: object
-      description: One of id, name, or path.
+      minProperties: 1
+      maxProperties: 1
+      additionalProperties: false
       properties:
-        id:
-          type: string
         name:
           type: string
-          description: the name of a database the backup syncs
-        path:
+          minLength: 1
+          description: Exact remote name of a database with its own backup rule on this machine.
+        rule_id:
           type: string
-          description: the path or glob the backup was started with, or a file it syncs
-    Empty:
+          minLength: 1
+          x-go-name: RuleID
+          description: ID returned by start or listed by rules. Stops the whole rule, including future matches.
+    StopBackupResult:
       type: object
-      properties: {}
-      required: []
+      required:
+        - lease_pending
+      properties:
+        lease_pending:
+          type: boolean
     FailoverRequest:
       type: object
       properties:
@@ -1185,7 +1239,7 @@ components:
           description: absolute path of the database, the same on every machine
         name:
           type: string
-          description: the database name; defaults to the normalized file name
+          description: the database name; defaults to the relative file path
         timeout_millis:
           type: integer
           format: int64
@@ -1289,6 +1343,10 @@ components:
           type: string
         to:
           type: string
+    Empty:
+      type: object
+      properties: {}
+      required: []
     ConflictList:
       type: object
       properties:
@@ -1305,33 +1363,6 @@ components:
           type: string
       required:
         - id
-    Event:
-      type: object
-      properties:
-        id:
-          type: integer
-          format: int64
-        time:
-          type: string
-          format: date-time
-        name:
-          type: string
-        type:
-          type: string
-          description: such as role_changed (message is origin or replica), conflict_saved (path names the conflict copy), synced, downloaded
-        message:
-          type: string
-        role:
-          type: string
-          description: for role_changed, the new role
-        path:
-          type: string
-          description: for conflict_saved, the conflict copy
-      required:
-        - id
-        - time
-        - type
-        - message
     EventList:
       type: object
       properties:

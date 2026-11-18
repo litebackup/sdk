@@ -17,9 +17,9 @@ const (
 	maximumRetryDelay = 10 * time.Second
 )
 
-// FailoverOptions configures a failover.
-type FailoverOptions struct {
-	// Name is the database name; the normalized file name when empty.
+// FailoverArgs configures a failover.
+type FailoverArgs struct {
+	// Name is the database name; the file name when empty.
 	Name string
 	// Timeout bounds the first download of a replica.
 	Timeout time.Duration
@@ -37,11 +37,11 @@ type FailoverOptions struct {
 // Each replica asks for the write lock about once a second, so one of them
 // takes over once the origin's lease runs out.
 type FailoverRun struct {
-	client  *Client
-	options FailoverOptions
-	name    string
-	path    string
-	cancel  context.CancelFunc
+	client *Client
+	args   FailoverArgs
+	name   string
+	path   string
+	cancel context.CancelFunc
 
 	mutex   sync.Mutex
 	role    Role
@@ -51,7 +51,10 @@ type FailoverRun struct {
 // Failover starts a failover of the database at path, the same path on every
 // machine, and returns once this machine is the origin or holds a replica.
 // Callbacks run on one goroutine per failover, in event order.
-func (c *Client) Failover(ctx context.Context, path string, options FailoverOptions) (*FailoverRun, error) {
+func (c *Client) Failover(ctx context.Context, path string, args *FailoverArgs) (*FailoverRun, error) {
+	if args == nil {
+		args = &FailoverArgs{}
+	}
 	if path == "" {
 		return nil, errors.New("failover needs a path")
 	}
@@ -61,23 +64,23 @@ func (c *Client) Failover(ctx context.Context, path string, options FailoverOpti
 	}
 	// Events after the log's end as of now are this failover's, including
 	// those the start request itself records.
-	end, err := c.Events(ctx, EventsOptions{After: -1})
+	end, err := c.Events(ctx, &EventsArgs{After: -1})
 	if err != nil {
 		return nil, err
 	}
 	body := map[string]any{"path": absolute}
-	if options.Name != "" {
-		body["name"] = options.Name
+	if args.Name != "" {
+		body["name"] = args.Name
 	}
-	if options.Timeout > 0 {
-		body["timeout_millis"] = millis(options.Timeout)
+	if args.Timeout > 0 {
+		body["timeout_millis"] = millis(args.Timeout)
 	}
 	var info FailoverInfo
 	if err := c.call(ctx, http.MethodPost, "/v1/failovers/start", body, &info); err != nil {
 		return nil, err
 	}
 	watchContext, cancel := context.WithCancel(context.Background())
-	failover := &FailoverRun{client: c, options: options, name: info.Name, path: info.Path, role: info.Role, cancel: cancel}
+	failover := &FailoverRun{client: c, args: *args, name: info.Name, path: info.Path, role: info.Role, cancel: cancel}
 	if !c.addFailover(failover) {
 		cancel()
 		return nil, errors.New("the client is closed")
@@ -109,7 +112,7 @@ func (f *FailoverRun) Writer(ctx context.Context) (*Writer, error) {
 
 // Stop stops the failover and releases its write lock. The file stays.
 func (f *FailoverRun) Stop(ctx context.Context) error {
-	err := f.client.StopBackup(ctx, StopBackupOptions{Name: f.name})
+	_, err := f.client.StopBackup(ctx, f.name)
 	f.end()
 	f.client.removeFailover(f)
 	return err
@@ -132,8 +135,8 @@ func (f *FailoverRun) changeRole(role Role) {
 	changed := f.role != role && !f.stopped
 	f.role = role
 	f.mutex.Unlock()
-	if changed && f.options.OnRoleChange != nil {
-		f.options.OnRoleChange(role)
+	if changed && f.args.OnRoleChange != nil {
+		f.args.OnRoleChange(role)
 	}
 }
 
@@ -154,8 +157,8 @@ func (f *FailoverRun) handle(event *Event) {
 		f.mutex.Lock()
 		stopped := f.stopped
 		f.mutex.Unlock()
-		if !stopped && f.options.OnConflictSaved != nil {
-			f.options.OnConflictSaved(path)
+		if !stopped && f.args.OnConflictSaved != nil {
+			f.args.OnConflictSaved(path)
 		}
 	}
 }
@@ -165,13 +168,13 @@ func (f *FailoverRun) handle(event *Event) {
 func (f *FailoverRun) follow(ctx context.Context, cursor int64) {
 	delay := 250 * time.Millisecond
 	for ctx.Err() == nil {
-		page, err := f.client.Events(ctx, EventsOptions{After: cursor, Wait: eventWait, Limit: eventPage})
+		page, err := f.client.Events(ctx, &EventsArgs{After: cursor, Wait: eventWait, Limit: eventPage})
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			if f.options.OnError != nil {
-				f.options.OnError(err)
+			if f.args.OnError != nil {
+				f.args.OnError(err)
 			}
 			if IsCode(err, "sdk_unsupported") {
 				return

@@ -10,15 +10,15 @@ creates a local snapshot when you need one file.
 then point Litebackup at the file:
 
 ```sh
-litebackup backup /var/lib/app/main.sqlite
+litebackup start /var/lib/app/main.sqlite
 ```
 
 Or register it from your app:
 
 ```ts
-import { backup } from "@litebackup/sdk";
+import { startBackup } from "@litebackup/sdk";
 
-backup("/var/lib/app/main.sqlite");
+await startBackup("/var/lib/app/main.sqlite");
 ```
 
 Your app keeps using its SQLite driver. Changes sync in the background;

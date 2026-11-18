@@ -17,7 +17,7 @@ import (
 const (
 	// TokenEnvironment holds the join token, TOKEN@HOST, a daemon joins with on its first start.
 	TokenEnvironment = "LITEBACKUP_TOKEN"
-	// SessionEnvironment names the session when Options.Session is empty.
+	// SessionEnvironment names the session when ConnectArgs.Session is empty.
 	SessionEnvironment = "LITEBACKUP_SESSION"
 	// BinaryPathEnvironment overrides the litebackup binary the SDK starts.
 	BinaryPathEnvironment = "LITEBACKUP_PATH"

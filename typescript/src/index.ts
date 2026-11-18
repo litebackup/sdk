@@ -1,4 +1,4 @@
-export { acquire, backup, failover, offload, release, replicate, replicatePrefix, restore, versions, writer, sharedClient } from "./helpers.js";
+export { acquire, startBackup, stopBackup, stopBackupRule, failover, offload, release, replicate, replicatePrefix, restore, versions, writer, sharedClient } from "./helpers.js";
 export type { SharedClientOptions } from "./helpers.js";
 export { Litebackup } from "./client.js";
 export type {
@@ -10,11 +10,10 @@ export type {
   ReplicatePrefixOptions,
   RestoreOptions,
   ShutdownOptions,
-  StopBackupTarget,
   VersionsOptions,
 } from "./client.js";
-export { Backup } from "./backup.js";
-export type { BackupOptions, BackupSource, SQLiteHandle } from "./backup.js";
+export { backup } from "./backup.js";
+export type { BackupOptions, StartBackupOptions, BackupSource, SQLiteHandle } from "./backup.js";
 export { Failover } from "./failover.js";
 export type { FailoverEvents, FailoverOptions } from "./failover.js";
 export { LitebackupError, sdkVersion } from "./types.js";
@@ -22,6 +21,7 @@ export type {
   AcquireResult,
   BackupInfo,
   Conflict,
+  DatabasePage,
   DatabaseStatus,
   Durability,
   EventList,

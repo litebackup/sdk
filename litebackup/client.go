@@ -5,8 +5,7 @@
 //
 // The everyday calls are package functions over a shared client:
 //
-//	backup, err := litebackup.Backup(ctx, "/var/lib/app/main.db", litebackup.BackupOptions{})
-//	err = backup.Wait(ctx, litebackup.DurabilityServer)
+//	_, err := litebackup.StartBackup(ctx, "/var/lib/app/main.db", nil)
 //
 // Connect returns a Client for everything else.
 package litebackup
@@ -31,7 +30,7 @@ import (
 
 // SDKVersion is the version sent with every call. Daemons refuse SDKs older
 // than their minimum with sdk_unsupported.
-const SDKVersion = "0.3.32"
+const SDKVersion = "0.4.0"
 
 const (
 	sdkVersionHeader    = "X-Litebackup-SDK-Version"
@@ -42,7 +41,7 @@ const (
 
 // Error is an error the daemon answered with.
 type Error struct {
-	// Code is such as name_in_use, exists, in_use, not_found, still_open, timeout, or sdk_unsupported.
+	// Code is such as busy, exists, in_use, not_found, still_open, timeout, or sdk_unsupported.
 	Code    string
 	Message string
 	// Status is the HTTP status of the answer.
@@ -60,8 +59,8 @@ func IsCode(err error, code string) bool {
 	return errors.As(err, &answered) && answered.Code == code
 }
 
-// Options selects the session a Client talks to.
-type Options struct {
+// ConnectArgs selects the session a Client talks to.
+type ConnectArgs struct {
 	// Token is the join token, TOKEN@HOST, the daemon joins with on its first
 	// start. It overrides LITEBACKUP_TOKEN. A daemon that already joined
 	// keeps its join.
@@ -86,16 +85,19 @@ type Client struct {
 
 // Connect connects to a session's daemon, starting it like the litebackup
 // command does when nothing listens on its socket.
-func Connect(ctx context.Context, options Options) (*Client, error) {
-	session := options.Session
-	socket := options.SocketPath
+func Connect(ctx context.Context, args *ConnectArgs) (*Client, error) {
+	if args == nil {
+		args = &ConnectArgs{}
+	}
+	session := args.Session
+	socket := args.SocketPath
 	if socket == "" {
-		resolved, path, err := SessionSocket(options.Session)
+		resolved, path, err := SessionSocket(args.Session)
 		if err != nil {
 			return nil, err
 		}
 		session, socket = resolved, path
-		if err := launchDaemon(ctx, session, socket, options.Token); err != nil {
+		if err := launchDaemon(ctx, session, socket, args.Token); err != nil {
 			return nil, err
 		}
 	}
@@ -110,9 +112,13 @@ func Connect(ctx context.Context, options Options) (*Client, error) {
 			MaxIdleConns: 4,
 		}},
 	}
-	if _, err := client.Status(ctx); err != nil {
+	status, err := client.Status(ctx)
+	if err != nil {
 		client.http.CloseIdleConnections()
 		return nil, err
+	}
+	if client.session == "" {
+		client.session = status.Session
 	}
 	return client, nil
 }
@@ -251,24 +257,44 @@ func millis(duration time.Duration) int64 {
 	return duration.Milliseconds()
 }
 
-// Status returns the session, its server, and every database on this machine.
+// Status returns the session, its server, and the first page of databases on this machine.
 func (c *Client) Status(ctx context.Context) (*Status, error) {
+	return c.StatusPage(ctx, "", 100)
+}
+
+// StatusPage returns up to limit databases whose names sort after the cursor.
+func (c *Client) StatusPage(ctx context.Context, after string, limit int) (*Status, error) {
 	var status Status
-	if err := c.call(ctx, http.MethodGet, "/v1/status/show", nil, &status); err != nil {
+	if err := c.call(ctx, http.MethodGet, "/v1/status/show?"+url.Values{"after": {after}, "limit": {strconv.Itoa(limit)}}.Encode(), nil, &status); err != nil {
 		return nil, err
 	}
 	return &status, nil
 }
 
-// Databases returns every database on this machine with its role and state.
+// Databases returns every database. Use DatabasesPage for bounded memory.
 func (c *Client) Databases(ctx context.Context) ([]DatabaseStatus, error) {
-	var list struct {
-		Databases []DatabaseStatus `json:"databases"`
+	var result []DatabaseStatus
+	after := ""
+	for {
+		page, err := c.DatabasesPage(ctx, after, 100)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, page.Databases...)
+		if page.Next == "" {
+			return result, nil
+		}
+		after = page.Next
 	}
-	if err := c.call(ctx, http.MethodGet, "/v1/databases/list", nil, &list); err != nil {
+}
+
+// DatabasesPage returns one page. Pass Next as after to continue.
+func (c *Client) DatabasesPage(ctx context.Context, after string, limit int) (*DatabasePage, error) {
+	var page DatabasePage
+	if err := c.call(ctx, http.MethodGet, "/v1/databases/list?"+url.Values{"after": {after}, "limit": {strconv.Itoa(limit)}}.Encode(), nil, &page); err != nil {
 		return nil, err
 	}
-	return list.Databases, nil
+	return &page, nil
 }
 
 // Database returns one database's role, state, and synced versions.
@@ -289,8 +315,8 @@ func (c *Client) Sync(ctx context.Context, name string) (*DatabaseStatus, error)
 	return &status, nil
 }
 
-// VersionsOptions pages through versions.
-type VersionsOptions struct {
+// VersionsArgs pages through versions.
+type VersionsArgs struct {
 	// After skips versions up to and including this one.
 	After int64
 	// Limit returns at most this many versions; every version when 0.
@@ -298,16 +324,19 @@ type VersionsOptions struct {
 }
 
 // Versions lists the versions of a database the server can restore, oldest first.
-func (c *Client) Versions(ctx context.Context, name string, options VersionsOptions) ([]Version, error) {
+func (c *Client) Versions(ctx context.Context, name string, args *VersionsArgs) ([]Version, error) {
+	if args == nil {
+		args = &VersionsArgs{}
+	}
 	versions := []Version{}
-	after := options.After
+	after := args.After
 	for {
 		query := url.Values{"name": {name}}
 		if after > 0 {
 			query.Set("after", strconv.FormatInt(after, 10))
 		}
-		if options.Limit > 0 {
-			query.Set("limit", strconv.Itoa(options.Limit-len(versions)))
+		if args.Limit > 0 {
+			query.Set("limit", strconv.Itoa(args.Limit-len(versions)))
 		}
 		var page struct {
 			Versions []Version `json:"versions"`
@@ -317,15 +346,15 @@ func (c *Client) Versions(ctx context.Context, name string, options VersionsOpti
 			return nil, err
 		}
 		versions = append(versions, page.Versions...)
-		if page.Next == 0 || page.Next <= after || len(page.Versions) == 0 || options.Limit > 0 && len(versions) >= options.Limit {
+		if page.Next == 0 || page.Next <= after || len(page.Versions) == 0 || args.Limit > 0 && len(versions) >= args.Limit {
 			return versions, nil
 		}
 		after = page.Next
 	}
 }
 
-// RestoreOptions picks the file and the version a restore writes.
-type RestoreOptions struct {
+// RestoreArgs picks the file and the version a restore writes.
+type RestoreArgs struct {
 	// To is the new file; relative paths resolve against the working
 	// directory. Its directory must exist, and an existing file is never
 	// overwritten (exists).
@@ -337,23 +366,23 @@ type RestoreOptions struct {
 }
 
 // Restore writes a version of a database to a new file and checks it.
-func (c *Client) Restore(ctx context.Context, name string, options RestoreOptions) (*RestoreResult, error) {
-	if options.To == "" {
+func (c *Client) Restore(ctx context.Context, name string, args *RestoreArgs) (*RestoreResult, error) {
+	if args == nil || args.To == "" {
 		return nil, errors.New("restore needs a path to write to")
 	}
-	if options.Version != 0 && !options.Time.IsZero() {
+	if args.Version != 0 && !args.Time.IsZero() {
 		return nil, errors.New("restore takes a version or a time, not both")
 	}
-	path, err := absolutePath(options.To)
+	path, err := absolutePath(args.To)
 	if err != nil {
 		return nil, err
 	}
 	body := map[string]any{"name": name, "path": path}
-	if options.Version != 0 {
-		body["version"] = options.Version
+	if args.Version != 0 {
+		body["version"] = args.Version
 	}
-	if !options.Time.IsZero() {
-		body["time"] = options.Time.UTC().Format(time.RFC3339Nano)
+	if !args.Time.IsZero() {
+		body["time"] = args.Time.UTC().Format(time.RFC3339Nano)
 	}
 	var result RestoreResult
 	if err := c.call(ctx, http.MethodPost, "/v1/databases/restore", body, &result); err != nil {
@@ -362,8 +391,8 @@ func (c *Client) Restore(ctx context.Context, name string, options RestoreOption
 	return &result, nil
 }
 
-// AcquireOptions configures an acquired database.
-type AcquireOptions struct {
+// AcquireArgs configures an acquired database.
+type AcquireArgs struct {
 	// To is the local file; the path this machine already uses when empty,
 	// which brings an offloaded database back.
 	To string
@@ -382,8 +411,11 @@ type AcquireOptions struct {
 
 // Acquire takes the write lock on a database and makes the local file the
 // server's head, for worker pools that move databases between machines.
-func (c *Client) Acquire(ctx context.Context, name string, options AcquireOptions) (*AcquireResult, error) {
-	path, err := absolutePath(options.To)
+func (c *Client) Acquire(ctx context.Context, name string, args *AcquireArgs) (*AcquireResult, error) {
+	if args == nil {
+		args = &AcquireArgs{}
+	}
+	path, err := absolutePath(args.To)
 	if err != nil {
 		return nil, err
 	}
@@ -391,20 +423,20 @@ func (c *Client) Acquire(ctx context.Context, name string, options AcquireOption
 	if path != "" {
 		body["path"] = path
 	}
-	if options.Maintenance {
+	if args.Maintenance {
 		body["maintenance"] = true
 	}
-	if options.OffloadReleased {
+	if args.OffloadReleased {
 		body["offload"] = "released"
 	}
-	if options.MachineLabel != "" {
-		body["machine_label"] = options.MachineLabel
+	if args.MachineLabel != "" {
+		body["machine_label"] = args.MachineLabel
 	}
-	if options.BlockOnLost {
+	if args.BlockOnLost {
 		body["on_lost"] = "block"
 	}
-	if options.Timeout > 0 {
-		body["timeout_millis"] = millis(options.Timeout)
+	if args.Timeout > 0 {
+		body["timeout_millis"] = millis(args.Timeout)
 	}
 	var result AcquireResult
 	if err := c.call(ctx, http.MethodPost, "/v1/databases/acquire", body, &result); err != nil {
@@ -413,8 +445,8 @@ func (c *Client) Acquire(ctx context.Context, name string, options AcquireOption
 	return &result, nil
 }
 
-// ReleaseOptions configures a release.
-type ReleaseOptions struct {
+// ReleaseArgs configures a release.
+type ReleaseArgs struct {
 	// Wait is server or cloud; the daemon's default when empty.
 	Wait Durability
 	// Offload removes the local file once the bucket holds the released version.
@@ -425,16 +457,19 @@ type ReleaseOptions struct {
 
 // Release syncs an acquired database a final time, runs its maintenance, and
 // releases its write lock.
-func (c *Client) Release(ctx context.Context, name string, options ReleaseOptions) (*ReleaseResult, error) {
-	body := map[string]any{"name": name}
-	if options.Wait != "" && options.Wait != DurabilityNone {
-		body["wait"] = options.Wait
+func (c *Client) Release(ctx context.Context, name string, args *ReleaseArgs) (*ReleaseResult, error) {
+	if args == nil {
+		args = &ReleaseArgs{}
 	}
-	if options.Offload {
+	body := map[string]any{"name": name}
+	if args.Wait != "" && args.Wait != DurabilityNone {
+		body["wait"] = args.Wait
+	}
+	if args.Offload {
 		body["offload"] = true
 	}
-	if options.Timeout > 0 {
-		body["timeout_millis"] = millis(options.Timeout)
+	if args.Timeout > 0 {
+		body["timeout_millis"] = millis(args.Timeout)
 	}
 	var result ReleaseResult
 	if err := c.call(ctx, http.MethodPost, "/v1/databases/release", body, &result); err != nil {
@@ -463,44 +498,37 @@ func (c *Client) Writer(ctx context.Context, name string) (*Writer, error) {
 }
 
 // Backups lists every backup and failover on this machine.
-func (c *Client) Backups(ctx context.Context) ([]BackupInfo, error) {
+func (c *Client) Backups(ctx context.Context) ([]BackupRule, error) {
 	var list struct {
-		Backups []BackupInfo `json:"backups"`
+		Backups []BackupRule `json:"backups"`
 	}
-	if err := c.call(ctx, http.MethodGet, "/v1/backups/list", nil, &list); err != nil {
+	if err := c.call(ctx, http.MethodGet, "/v1/backup-rules/list", nil, &list); err != nil {
 		return nil, err
 	}
 	return list.Backups, nil
 }
 
-// StopBackupOptions names the backup or failover to stop by one of its ID,
-// a database name it syncs, or its path.
-type StopBackupOptions struct {
-	ID   string
-	Name string
-	// Path is the path or glob the backup was started with, or a file it syncs.
-	Path string
+// StopBackupResult reports whether a remote release remains pending.
+type StopBackupResult struct {
+	LeasePending bool `json:"lease_pending"`
 }
 
-// StopBackup stops a backup or failover and releases its write locks. The
-// files stay.
-func (c *Client) StopBackup(ctx context.Context, options StopBackupOptions) error {
-	body := map[string]string{}
-	switch {
-	case options.ID != "":
-		body["id"] = options.ID
-	case options.Name != "":
-		body["name"] = options.Name
-	case options.Path != "":
-		path, err := absolutePath(options.Path)
-		if err != nil {
-			return err
-		}
-		body["path"] = path
-	default:
-		return errors.New("stopping a backup needs its ID, a name, or a path")
+// StopBackup stops the single-file backup for an exact remote name on this machine.
+func (c *Client) StopBackup(ctx context.Context, name string) (*StopBackupResult, error) {
+	return c.stopBackup(ctx, map[string]string{"name": name})
+}
+
+// StopBackupRule stops a whole rule and future discovery using its saved ID.
+func (c *Client) StopBackupRule(ctx context.Context, id string) (*StopBackupResult, error) {
+	return c.stopBackup(ctx, map[string]string{"rule_id": id})
+}
+
+func (c *Client) stopBackup(ctx context.Context, selector map[string]string) (*StopBackupResult, error) {
+	var result StopBackupResult
+	if err := c.call(ctx, http.MethodPost, "/v1/backup-rules/stop", selector, &result); err != nil {
+		return nil, err
 	}
-	return c.call(ctx, http.MethodPost, "/v1/backups/stop", body, nil)
+	return &result, nil
 }
 
 // Replicas lists prefix replicas and every replica on this machine.
@@ -512,8 +540,8 @@ func (c *Client) Replicas(ctx context.Context) (*ReplicaList, error) {
 	return &list, nil
 }
 
-// ReplicateOptions configures a replica.
-type ReplicateOptions struct {
+// ReplicateArgs configures a replica.
+type ReplicateArgs struct {
 	// To is the replica file; the path this machine uses when empty.
 	To string
 	// WriteProtection is lock (the daemon's default), detect, or none.
@@ -524,8 +552,11 @@ type ReplicateOptions struct {
 
 // Replicate keeps a live readonly replica of a database that streams from
 // the server, and returns once its first version is local.
-func (c *Client) Replicate(ctx context.Context, name string, options ReplicateOptions) (*DatabaseStatus, error) {
-	path, err := absolutePath(options.To)
+func (c *Client) Replicate(ctx context.Context, name string, args *ReplicateArgs) (*DatabaseStatus, error) {
+	if args == nil {
+		args = &ReplicateArgs{}
+	}
+	path, err := absolutePath(args.To)
 	if err != nil {
 		return nil, err
 	}
@@ -533,11 +564,11 @@ func (c *Client) Replicate(ctx context.Context, name string, options ReplicateOp
 	if path != "" {
 		body["to"] = path
 	}
-	if options.WriteProtection != "" {
-		body["write_protection"] = options.WriteProtection
+	if args.WriteProtection != "" {
+		body["write_protection"] = args.WriteProtection
 	}
-	if options.Timeout > 0 {
-		body["timeout_millis"] = millis(options.Timeout)
+	if args.Timeout > 0 {
+		body["timeout_millis"] = millis(args.Timeout)
 	}
 	var result struct {
 		Database *DatabaseStatus `json:"database"`
@@ -556,8 +587,8 @@ func (c *Client) StopReplica(ctx context.Context, name string) error {
 	return c.call(ctx, http.MethodPost, "/v1/replicas/stop", map[string]string{"name": name}, nil)
 }
 
-// ReplicatePrefixOptions configures live replicas of a namespace.
-type ReplicatePrefixOptions struct {
+// ReplicatePrefixArgs configures live replicas of a namespace.
+type ReplicatePrefixArgs struct {
 	// To is the directory receiving each database at its name relative to the prefix.
 	To string
 	// WriteProtection is lock (the daemon's default), detect, or none.
@@ -567,17 +598,17 @@ type ReplicatePrefixOptions struct {
 // ReplicatePrefix registers live readonly replicas of current and future
 // databases under prefix. An empty prefix follows all databases. Downloads
 // happen in the background; returning does not mean every replica is local.
-func (c *Client) ReplicatePrefix(ctx context.Context, prefix string, options ReplicatePrefixOptions) (*PrefixReplica, error) {
-	if options.To == "" {
+func (c *Client) ReplicatePrefix(ctx context.Context, prefix string, args *ReplicatePrefixArgs) (*PrefixReplica, error) {
+	if args == nil || args.To == "" {
 		return nil, &Error{Code: "invalid_argument", Message: "replicating a prefix needs a directory"}
 	}
-	path, err := absolutePath(options.To)
+	path, err := absolutePath(args.To)
 	if err != nil {
 		return nil, err
 	}
 	body := map[string]any{"prefix": prefix, "to": path}
-	if options.WriteProtection != "" {
-		body["write_protection"] = options.WriteProtection
+	if args.WriteProtection != "" {
+		body["write_protection"] = args.WriteProtection
 	}
 	var result struct {
 		Prefix *PrefixReplica `json:"prefix"`
@@ -620,8 +651,8 @@ func (c *Client) DeleteConflict(ctx context.Context, id string) error {
 	return c.call(ctx, http.MethodPost, "/v1/conflicts/delete", map[string]string{"id": id}, nil)
 }
 
-// EventsOptions selects a page of events.
-type EventsOptions struct {
+// EventsArgs selects a page of events.
+type EventsArgs struct {
 	// After returns events with IDs greater than this one; -1 returns no
 	// events and, as Next, where the log ends, to follow events from now on.
 	After int64
@@ -633,16 +664,19 @@ type EventsOptions struct {
 
 // Events returns one page of events, oldest first, waiting up to Wait for
 // the first new one.
-func (c *Client) Events(ctx context.Context, options EventsOptions) (*EventList, error) {
+func (c *Client) Events(ctx context.Context, args *EventsArgs) (*EventList, error) {
+	if args == nil {
+		args = &EventsArgs{}
+	}
 	query := url.Values{}
-	if options.After != 0 {
-		query.Set("after", strconv.FormatInt(options.After, 10))
+	if args.After != 0 {
+		query.Set("after", strconv.FormatInt(args.After, 10))
 	}
-	if options.Wait > 0 {
-		query.Set("wait_millis", strconv.FormatInt(millis(options.Wait), 10))
+	if args.Wait > 0 {
+		query.Set("wait_millis", strconv.FormatInt(millis(args.Wait), 10))
 	}
-	if options.Limit > 0 {
-		query.Set("limit", strconv.Itoa(options.Limit))
+	if args.Limit > 0 {
+		query.Set("limit", strconv.Itoa(args.Limit))
 	}
 	path := "/v1/events/list"
 	if len(query) > 0 {
@@ -655,8 +689,8 @@ func (c *Client) Events(ctx context.Context, options EventsOptions) (*EventList,
 	return &list, nil
 }
 
-// ShutdownOptions configures a shutdown.
-type ShutdownOptions struct {
+// ShutdownArgs configures a shutdown.
+type ShutdownArgs struct {
 	// Wait is how far every final sync must reach.
 	Wait Durability
 	// Timeout bounds the shutdown.
@@ -665,13 +699,16 @@ type ShutdownOptions struct {
 
 // Shutdown syncs every database a final time, releases every write lock,
 // ends the session, and stops the daemon.
-func (c *Client) Shutdown(ctx context.Context, options ShutdownOptions) (*ShutdownResult, error) {
-	body := map[string]any{}
-	if options.Wait != "" {
-		body["wait"] = options.Wait
+func (c *Client) Shutdown(ctx context.Context, args *ShutdownArgs) (*ShutdownResult, error) {
+	if args == nil {
+		args = &ShutdownArgs{}
 	}
-	if options.Timeout > 0 {
-		body["timeout_millis"] = millis(options.Timeout)
+	body := map[string]any{}
+	if args.Wait != "" {
+		body["wait"] = args.Wait
+	}
+	if args.Timeout > 0 {
+		body["timeout_millis"] = millis(args.Timeout)
 	}
 	var result ShutdownResult
 	if err := c.call(ctx, http.MethodPost, "/v1/session/shutdown", body, &result); err != nil {

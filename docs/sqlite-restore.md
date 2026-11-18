@@ -4,7 +4,7 @@ Restore into a new file, inspect it, and then plan the app's cutover. Install a
 [server](litebackup-server.md), join the [client](litebackup-client.md), and first register a backup:
 
 ```sh
-litebackup backup /var/lib/app/main.sqlite
+litebackup start /var/lib/app/main.sqlite
 ```
 
 Allow a sync to complete before expecting a restorable version. You can

@@ -7,14 +7,13 @@ individually. Litebackup gives each file a stable remote name. Complete
 ## Back up a directory
 
 ```ts
-import { backup } from "@litebackup/sdk";
+import { startBackup } from "@litebackup/sdk";
 
-const tenants = backup("/var/lib/app/tenants/*.sqlite", { prefix: "tenants/" });
-void tenants.ready.catch(console.error);
+await startBackup("/var/lib/app/tenants/*.sqlite", { prefix: "tenants/" });
 ```
 
 ```sh
-litebackup backup '/var/lib/app/tenants/*.sqlite' --prefix tenants/
+litebackup start '/var/lib/app/tenants/*.sqlite' tenants/
 ```
 
 The existing directory contains files such as `42.sqlite` and `73.sqlite`.
@@ -23,8 +22,7 @@ matching files without waiting on each tenant's first upload. Open those files
 with your SQLite driver as usual.
 
 Use application-generated, validated tenant IDs for filenames. Do not derive
-paths directly from request input. Default name normalization lowercases
-filenames, so `ACME.sqlite` and `acme.sqlite` are not distinct backup names.
+paths directly from request input. Case is preserved, so `ACME.sqlite` and `acme.sqlite` are distinct backup names.
 
 ## Add tenants from code
 
@@ -33,7 +31,7 @@ For applications that provision databases explicitly, register each new file:
 ```ts
 import { mkdir } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { backup } from "@litebackup/sdk";
+import { startBackup } from "@litebackup/sdk";
 
 export async function createTenant(id: string): Promise<void> {
   if (!/^[0-9]+$/.test(id)) throw new Error("Expected a numeric tenant ID");
@@ -45,8 +43,7 @@ export async function createTenant(id: string): Promise<void> {
   } finally {
     db.close();
   }
-  const run = backup(path, { name: `tenants/${id}.sqlite` });
-  void run.ready.catch((error) => console.error(`Tenant ${id} backup failed`, error));
+  await startBackup(path, { name: `tenants/${id}.sqlite` });
 }
 ```
 
@@ -65,7 +62,7 @@ A database name has one writer. Either:
   as in the [agent example](sqlite-agent-state.md).
 
 Do not start the same directory backup on multiple machines with independent
-copies and expect them to merge. The second origin receives `name_in_use`.
+copies and expect them to merge. The second origin receives `busy`.
 Do not use a different name merely to hide an ownership error.
 
 For a planned migration, stop accepting writes, close the database, wait for

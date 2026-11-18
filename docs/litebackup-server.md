@@ -101,7 +101,7 @@ machine that holds your SQLite file:
 curl -fsSL https://litebackup.com/cli.sh | sudo bash
 export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
 litebackup up "$LITEBACKUP_TOKEN"
-litebackup backup /var/lib/app/main.sqlite
+litebackup start /var/lib/app/main.sqlite
 litebackup status
 ```
 

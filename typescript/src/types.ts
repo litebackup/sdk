@@ -14,6 +14,7 @@ export type WriteProtection = "lock" | "detect" | "none";
 
 export type SyncedState = Camelize<Schemas["SyncedState"]>;
 export type DatabaseStatus = Camelize<Schemas["DatabaseStatus"]>;
+export type DatabasePage = Camelize<Schemas["DatabaseStatusList"]>;
 export type Status = Camelize<Schemas["Status"]>;
 export type Version = Camelize<Schemas["RestorableVersion"]>;
 export type RestoreResult = Camelize<Schemas["RestoreResult"]>;
@@ -22,7 +23,7 @@ export type AcquireResult = Camelize<Schemas["AcquireResult"]>;
 export type ReleaseResult = Camelize<Schemas["ReleaseResult"]>;
 export type Writer = Camelize<Schemas["Writer"]>;
 /** A backup or failover running on this machine, as backups.list() returns it. */
-export type BackupInfo = Camelize<Schemas["Backup"]>;
+export type BackupInfo = Camelize<Schemas["BackupRule"]>;
 /** A failover as the daemon reports it. */
 export type FailoverInfo = Camelize<Schemas["Failover"]>;
 export type PrefixReplica = Camelize<Schemas["PrefixReplica"]>;
@@ -32,11 +33,11 @@ export type EventList = Camelize<Schemas["EventList"]>;
 export type ShutdownResult = Camelize<Schemas["ShutdownResult"]>;
 
 /** The SDK version sent with every call. */
-export const sdkVersion = "0.3.32";
+export const sdkVersion = "0.4.0";
 
 /** An error the Litebackup daemon answered with, carrying its code. */
 export class LitebackupError extends Error {
-  /** Such as name_in_use, exists, in_use, not_found, still_open, timeout, or sdk_unsupported. */
+  /** Such as busy, exists, in_use, not_found, still_open, timeout, or sdk_unsupported. */
   readonly code: string;
   /** The HTTP status of the answer, or 0 for errors the SDK raised itself. */
   readonly status: number;

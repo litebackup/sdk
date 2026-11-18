@@ -86,15 +86,23 @@ type DatabaseStatus struct {
 	Offload            string      `json:"offload,omitempty"`
 }
 
-// Status is the session, its server, and every database on this machine.
+// DatabasePage contains the matching databases and a cursor when more follow.
+type DatabasePage struct {
+	Databases []DatabaseStatus `json:"databases"`
+	Next      string           `json:"next,omitempty"`
+}
+
+// Status is the session, its server, and a page of databases on this machine.
 type Status struct {
-	Session       string           `json:"session"`
-	Server        string           `json:"server"`
-	ClientVersion string           `json:"client_version"`
-	SessionID     string           `json:"session_id"`
-	LeaseExpires  *time.Time       `json:"lease_expires,omitempty"`
-	Watch         string           `json:"watch"`
-	Databases     []DatabaseStatus `json:"databases"`
+	Next                  string           `json:"next,omitempty"`
+	RecentDiscoveryErrors []Event          `json:"recent_discovery_errors,omitempty"`
+	Session               string           `json:"session"`
+	Server                string           `json:"server"`
+	ClientVersion         string           `json:"client_version"`
+	SessionID             string           `json:"session_id"`
+	LeaseExpires          *time.Time       `json:"lease_expires,omitempty"`
+	Watch                 string           `json:"watch"`
+	Databases             []DatabaseStatus `json:"databases"`
 }
 
 // Version is a version of a database the server can restore.
@@ -159,17 +167,16 @@ type Writer struct {
 	Lapsed bool `json:"lapsed"`
 }
 
-// BackupInfo is a backup or failover running on this machine.
-type BackupInfo struct {
+// BackupRule is a backup or failover running on this machine.
+type BackupRule struct {
 	ID string `json:"id"`
 	// Path is the path or glob the backup was started with.
-	Path                  string           `json:"path"`
-	Name                  string           `json:"name"`
-	Prefix                string           `json:"prefix"`
-	Watch                 string           `json:"watch"`
-	MaximumLocalDatabases int64            `json:"maximum_local_databases"`
-	Failover              bool             `json:"failover"`
-	Databases             []DatabaseStatus `json:"databases"`
+	Path                  string `json:"path"`
+	Name                  string `json:"name"`
+	Prefix                string `json:"prefix"`
+	Watch                 string `json:"watch"`
+	MaximumLocalDatabases int64  `json:"maximum_local_databases"`
+	Failover              bool   `json:"failover"`
 }
 
 // FailoverInfo is a failover as the daemon reports it.

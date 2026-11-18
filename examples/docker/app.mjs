@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { backup } from "@litebackup/sdk";
+import { startBackup } from "@litebackup/sdk";
 
 const db = new DatabaseSync("/data/main.sqlite");
 db.exec("CREATE TABLE IF NOT EXISTS visits (id INTEGER PRIMARY KEY)");
@@ -17,6 +17,6 @@ const server = createServer((request, response) => {
   }
 });
 
-backup("/data/main.sqlite").ready.catch((error) => console.error("Backup could not start", error));
+await startBackup("/data/main.sqlite");
 server.listen(Number(process.env.PORT ?? 3000), "0.0.0.0");
 process.on("SIGTERM", () => server.close(() => db.close()));

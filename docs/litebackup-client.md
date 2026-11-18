@@ -25,7 +25,7 @@ With a join token from **Machines → Add machine**:
 curl -fsSL https://litebackup.com/cli.sh | sudo bash
 export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
 litebackup up "$LITEBACKUP_TOKEN"
-litebackup backup '/var/lib/app/*.sqlite' --prefix app/
+litebackup start '/var/lib/app/*.sqlite' app/
 ```
 
 `LITEBACKUP_TOKEN` and the SDK's `token` option accept a join token and server
@@ -43,7 +43,7 @@ For the service install, use an existing OS user that can read your app files:
 
 ```sh
 sudo litebackup install service --user app --join "$LITEBACKUP_TOKEN"
-sudo litebackup backup '/var/lib/app/*.sqlite' --prefix app/
+sudo litebackup start '/var/lib/app/*.sqlite' app/
 sudo systemctl status litebackup
 sudo journalctl -u litebackup -f
 ```
@@ -67,8 +67,9 @@ replica, acquire, and offload also need directory write permissions.
 
 A TypeScript `token` or `session` option overrides the environment. Use
 `Litebackup.connect({ token, session })` for an explicit client; Go uses
-`litebackup.Connect(ctx, litebackup.Options{Token: token, Session: session})`.
-Package helpers share a client per token and session.
+`litebackup.Connect(ctx, &litebackup.ConnectArgs{Token: token, Session: session})`.
+TypeScript's socket helpers share a client per token and session. Go's socket
+helpers use a single process-wide client.
 
 Session names use `[a-z0-9._-]` and start with a letter or digit. SDKs start
 `litebackup launch --session NAME` when the socket is absent. A launch lock prevents concurrent processes from
@@ -81,15 +82,11 @@ application or shard when they represent different databases.
 ## App exit and reboot
 
 `close()` / `Close()` closes this SDK connection and stops its event watchers.
-The daemon keeps running and syncing after your app exits. Use `wait()` when
-a script needs to confirm its changes have reached the server or bucket.
+The daemon keeps running and syncing after your app exits.
 
-`backup.stop()` / `BackupRun.Stop()` stops that registered backup and releases
-its write locks. It keeps local files and remote backups. It does not perform
-a final durability wait; use `wait()` first for a [one-shot job](sqlite-backup-script.md).
+Use `stopBackup(name)` or Go `StopBackup(ctx, name)` for a single database by remote name. Use `stopBackupRule(id)` or `StopBackupRule(ctx, id)` to remove a whole backup rule. The files and retained versions stay available. A scheduled job can call foreground `backup` with a server or cloud wait.
 
-`release()` is for databases obtained with `acquire()`. Close every SQLite
-connection before releasing. Use the background backup's `stop()` for backups.
+Use `release()` for databases obtained with `acquire()`. Close every SQLite connection before releasing.
 
 `shutdown()` / `Shutdown()` drains and stops the entire session. Only use it
 when your process owns that session; another app can be sharing it. A service

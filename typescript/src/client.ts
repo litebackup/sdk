@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from "node:path";
 
-import { Backup, type BackupOptions, type BackupSource } from "./backup.js";
+import { runBackup, sourcePath, type StartBackupOptions, type BackupOptions, type BackupSource } from "./backup.js";
 import { camelize } from "./case.js";
 import { milliseconds, type Duration } from "./duration.js";
 import { Failover, type FailoverOptions } from "./failover.js";
@@ -15,6 +15,7 @@ import {
   type BackupInfo,
   type Conflict,
   type DatabaseStatus,
+  type DatabasePage,
   type Durability,
   type EventList,
   type LitebackupEvent,
@@ -127,9 +128,6 @@ export interface ShutdownOptions {
   timeout?: Duration;
 }
 
-/** Names a backup or failover to stop by one of its ID, a database name, or its path. */
-export type StopBackupTarget = { id: string } | { name: string } | { path: string };
-
 /** Resolves a path against the working directory; the daemon needs absolute paths. */
 export function absolutePath(path: string): string {
   return isAbsolute(path) ? resolve(path) : resolve(process.cwd(), path);
@@ -137,7 +135,8 @@ export function absolutePath(path: string): string {
 
 /** Talks to the Litebackup daemon of one session over its unix socket. */
 export class Litebackup {
-  readonly session: string;
+  private sessionName: string;
+  get session(): string { return this.sessionName; }
   readonly socketPath: string;
   /** The daemon's version, known after the first call. */
   clientVersion = "";
@@ -145,7 +144,6 @@ export class Litebackup {
   /** Backups and failovers running on this machine. */
   readonly backups: {
     list(options?: { signal?: AbortSignal }): Promise<BackupInfo[]>;
-    stop(target: StopBackupTarget): Promise<void>;
   };
   /** Prefix replicas and replicas on this machine. */
   readonly replicas: {
@@ -166,15 +164,11 @@ export class Litebackup {
   closed = false;
 
   /** Use Litebackup.connect, which starts the daemon when needed. */
-  private constructor(session: string, socketPath: string) {
-    this.session = session;
+  private constructor(session: string, socketPath: string, private readonly environment: NodeJS.ProcessEnv) {
+    this.sessionName = session;
     this.socketPath = socketPath;
     this.backups = {
-      list: async (options = {}) => (await this.call<Schemas["BackupList"]>("GET", "/v1/backups/list", undefined, options.signal)).backups,
-      stop: async (target) => {
-        const body = "path" in target ? { path: absolutePath(target.path) } : target;
-        await this.call("POST", "/v1/backups/stop", body);
-      },
+      list: async (options = {}) => (await this.call<Schemas["BackupList"]>("GET", "/v1/backup-rules/list", undefined, options.signal)).backups,
     };
     this.replicas = {
       list: () => this.call("GET", "/v1/replicas/list"),
@@ -209,8 +203,9 @@ export class Litebackup {
         await launchDaemon({ session, socketPath, environment, token: options.token });
       }
     }
-    const litebackup = new Litebackup(session, socketPath);
-    await litebackup.status();
+    const litebackup = new Litebackup(session, socketPath, environment);
+    const status = await litebackup.status();
+    if (!session) litebackup.sessionName = status.session;
     return litebackup;
   }
 
@@ -244,12 +239,28 @@ export class Litebackup {
     return camelize(JSON.parse(response.body) as T);
   }
 
-  /**
-   * Backs up a database, given as a path or a better-sqlite3 handle, and
-   * keeps syncing it. Returns at once; see Backup for how failures surface.
-   */
-  backup(source: BackupSource, options: BackupOptions = {}): Backup {
-    return new Backup(Promise.resolve(this), source, options);
+  /** Persist a continuous rule. Discovery runs in the daemon. */
+  async startBackup(source: BackupSource, options: StartBackupOptions = {}): Promise<BackupInfo> {
+    return this.call("POST", "/v1/backup-rules/start", {
+      path: sourcePath(source),
+      name: options.name,
+      prefix: options.prefix,
+      maximum_local_databases: options.maximumLocalDatabases,
+    });
+  }
+
+  /** Stop a single-file backup on this machine by its exact remote database name. */
+  stopBackup(name: string): Promise<{ leasePending: boolean }> {
+    return this.call("POST", "/v1/backup-rules/stop", { name });
+  }
+
+  /** Stop the whole backup rule, including future matches, using the ID returned by startBackup. */
+  stopBackupRule(ruleId: string): Promise<{ leasePending: boolean }> {
+    return this.call("POST", "/v1/backup-rules/stop", { rule_id: ruleId });
+  }
+
+  backup(source: BackupSource, options: BackupOptions = {}): Promise<void> {
+    return runBackup(source, { ...options, session: this.session }, this.environment);
   }
 
   /**
@@ -380,14 +391,26 @@ export class Litebackup {
     return this.call("GET", `/v1/databases/writer?${new URLSearchParams({ name })}`);
   }
 
-  /** The session, its server, and every database on this machine. */
-  status(): Promise<Status> {
-    return this.call("GET", "/v1/status/show");
+  /** The session, its server, and one page of databases. */
+  status(after = "", limit = 100): Promise<Status> {
+    return this.call("GET", `/v1/status/show?${new URLSearchParams({ after, limit: String(limit) })}`);
   }
 
-  /** Every database on this machine with its role and state. */
+  /** Lists all databases. Use databasesPage() to process one page at a time. */
   async databases(): Promise<DatabaseStatus[]> {
-    return ((await this.call("GET", "/v1/databases/list")) as { databases: DatabaseStatus[] }).databases;
+    const databases: DatabaseStatus[] = [];
+    let after = "";
+    do {
+      const page = await this.databasesPage(after);
+      databases.push(...page.databases);
+      after = page.next ?? "";
+    } while (after);
+    return databases;
+  }
+
+  /** Pass the returned next cursor as after to continue. */
+  databasesPage(after = "", limit = 100): Promise<DatabasePage> {
+    return this.call("GET", `/v1/databases/list?${new URLSearchParams({ after, limit: String(limit) })}`);
   }
 
   /** One database: its role, state, and the versions the server and the bucket hold. */

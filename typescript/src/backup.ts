@@ -1,10 +1,8 @@
-import { basename } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
-
-import { absolutePath, type Litebackup } from "./client.js";
+import { spawn } from "node:child_process";
+import { absolutePath } from "./client.js";
+import { litebackupBinary } from "./launch.js";
 import { milliseconds, type Duration } from "./duration.js";
-import type { components } from "./generated/client.js";
-import { LitebackupError, type BackupInfo, type Durability } from "./types.js";
+import { LitebackupError, type Durability } from "./types.js";
 
 /** A better-sqlite3 Database, read by duck typing; the SDK never imports better-sqlite3. */
 export interface SQLiteHandle {
@@ -16,36 +14,31 @@ export interface SQLiteHandle {
 /** A database path, relative or absolute, or a better-sqlite3 handle. */
 export type BackupSource = string | SQLiteHandle;
 
-/** Options for backup. */
-export interface BackupOptions {
-  /** Sets the database name outright; it must be a valid name. */
+export interface StartBackupOptions {
   name?: string;
-  /** Goes before the normalized file name, such as "app/". */
   prefix?: string;
-  /** Makes the start request itself wait until the server, or the bucket, holds the first version; ready resolves then. */
-  wait?: "none" | Durability;
-  /** Bound on that wait. */
-  timeout?: Duration;
-  /** When positive, offload the least recently changed idle databases past this count once the bucket holds them. */
   maximumLocalDatabases?: number;
-  /** Join token for the shared client; defaults to LITEBACKUP_TOKEN. Used only by the package-level backup(). */
-  token?: string;
-  /** Session for the shared client. Used only by the package-level backup(). */
-  session?: string;
 }
-
-/** How often wait("cloud") reads a database's status. */
-let durabilityPoll = 500;
-
-/** Sets how often wait("cloud") polls, for tests. @internal */
-export function setDurabilityPoll(interval: number): void {
-  durabilityPoll = interval;
+export interface BackupOptions {
+  name?: string;
+  prefix?: string;
+  wait?: Durability;
+  timeout?: Duration;
+  signal?: AbortSignal;
+  token?: string;
+  session?: string;
 }
 
 /** Reports whether a value looks like a better-sqlite3 Database. */
 function isSQLiteHandle(value: unknown): value is SQLiteHandle {
   const candidate = value as Partial<SQLiteHandle> | null;
-  return typeof candidate === "object" && candidate !== null && typeof candidate.name === "string" && typeof candidate.memory === "boolean" && typeof candidate.open === "boolean";
+  return (
+    typeof candidate === "object" &&
+    candidate !== null &&
+    typeof candidate.name === "string" &&
+    typeof candidate.memory === "boolean" &&
+    typeof candidate.open === "boolean"
+  );
 }
 
 /** Turns a backup source into the absolute path the daemon needs. */
@@ -65,115 +58,60 @@ export function sourcePath(source: BackupSource): string {
   return absolutePath(source.name);
 }
 
-/** The name the daemon gives a single file: the file name, lowercased with other characters turned into -, after the prefix. */
-export function expectedName(path: string, options: Pick<BackupOptions, "name" | "prefix">): string {
-  if (options.name) {
-    return options.name;
-  }
-  if (/[*?[]/.test(basename(path))) {
-    return "";
-  }
-  // The daemon ends a prefix with / when it lacks one.
-  let prefix = options.prefix ?? "";
-  if (prefix && !prefix.endsWith("/")) {
-    prefix += "/";
-  }
-  return prefix + basename(path).toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+/** Run one job and resolve after the foreground process has exited. */
+export function backup(source: BackupSource, options: BackupOptions = {}): Promise<void> {
+  return runBackup(source, options, process.env);
 }
 
-/**
- * A running backup. backup() returns it at once; the start request runs in
- * the background. `ready` resolves with the daemon's answer, or rejects with
- * its error, such as name_in_use. wait() and stop() await `ready` first, so
- * they reject with the same error. Nothing swallows a failed start: when no
- * code awaits `ready`, wait(), or stop(), Node reports the rejection as
- * unhandled.
- */
-export class Backup {
-  /** The database name: the expected name until ready resolves, then the daemon's. Empty for a glob. */
-  name: string;
-  /** The absolute path or glob. */
-  readonly path: string;
-  /** The backup's ID on this machine, once ready resolved. */
-  id: string | undefined;
-  /** Resolves once the daemon started the backup. */
-  readonly ready: Promise<BackupInfo>;
-  /** @internal */
-  private readonly client: Promise<Litebackup>;
-
-  /** Use backup(); it starts the backup. */
-  constructor(client: Promise<Litebackup>, source: BackupSource, options: BackupOptions) {
-    this.path = sourcePath(source);
-    this.name = expectedName(this.path, options);
-    this.client = client;
-    const body: components["schemas"]["BackupRequest"] = { path: this.path };
-    if (options.name) {
-      body.name = options.name;
-    }
-    if (options.prefix) {
-      body.prefix = options.prefix;
-    }
-    if (options.wait) {
-      body.wait = options.wait;
-    }
-    if (options.timeout !== undefined) {
-      body.timeout_millis = milliseconds(options.timeout);
-    }
-    if (options.maximumLocalDatabases !== undefined) {
-      body.maximum_local_databases = options.maximumLocalDatabases;
-    }
-    this.ready = client.then(async (litebackup) => {
-      const info = (await litebackup.call("POST", "/v1/backups/start", body)) as BackupInfo;
-      this.id = info.id;
-      if (info.name) {
-        this.name = info.name;
-      } else if (info.databases.length === 1 && this.name) {
-        this.name = info.databases[0]!.name;
-      }
-      return info;
+export async function runBackup(source: BackupSource, options: BackupOptions, environment: NodeJS.ProcessEnv): Promise<void> {
+  const path = sourcePath(source);
+  if (options.name !== undefined && options.prefix !== undefined) throw new LitebackupError("invalid_argument", "choose a name or a prefix", 0);
+  const args = ["backup", "--json-errors", "--wait", options.wait ?? "server"];
+  if (options.session) args.push("--session", options.session);
+  if (options.timeout !== undefined) args.push("--timeout", milliseconds(options.timeout) + "ms");
+  args.push("--", path);
+  if (options.name !== undefined) {
+    if (!options.name || options.name.endsWith("/")) throw new LitebackupError("invalid_argument", "expected an exact name", 0);
+    args.push(options.name);
+  }
+  if (options.prefix) args.push(options.prefix.endsWith("/") ? options.prefix : options.prefix + "/");
+  const env = { ...environment };
+  if (options.token) env.LITEBACKUP_TOKEN = options.token;
+  const signal = options.signal;
+  if (signal?.aborted) throw new LitebackupError("cancelled", "backup cancelled", 0);
+  let binary: string;
+  try {
+    binary = litebackupBinary(env);
+  } catch (err) {
+    throw new LitebackupError("launch_failed", String(err), 0);
+  }
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(binary, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "",
+      stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      stdout = (stdout + chunk).slice(-65536);
     });
-  }
-
-  /**
-   * Resolves once every change written before the call is on the server
-   * ("server", the default) or in the bucket too ("cloud"). Rejects with the
-   * start error when the backup never started.
-   */
-  async wait(durability: Durability = "server", options: { signal?: AbortSignal } = {}): Promise<void> {
-    if (durability !== "server" && durability !== "cloud") {
-      throw new LitebackupError("invalid_argument", `wait for server or cloud, not ${JSON.stringify(durability)}`, 0);
-    }
-    options.signal?.throwIfAborted();
-    const started = await this.ready;
-    options.signal?.throwIfAborted();
-    const litebackup = await this.client;
-    const listed = (await litebackup.backups.list(options)).find((backup) => backup.id === started.id);
-    const names = (listed ?? started).databases.map((database) => database.name);
-    if (names.length === 0 && this.name) {
-      names.push(this.name);
-    }
-    for (const name of names) {
-      const synced = await litebackup.sync(name, options);
-      if (durability === "cloud") {
-        for (;;) {
-          options.signal?.throwIfAborted();
-          const status = await litebackup.database(name, options);
-          if (status.syncedCloud.version >= synced.syncedServer.version) {
-            break;
-          }
-          if (status.state === "error" && status.lastError) {
-            throw new LitebackupError("sync_failed", status.lastError, 0);
-          }
-          await delay(durabilityPoll, undefined, { signal: options.signal });
-        }
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr = (stderr + chunk).slice(-65536);
+    });
+    const cancel = () => {
+      child.kill("SIGTERM");
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+    child.once("error", (err) => reject(new LitebackupError("launch_failed", err.message, 0)));
+    child.once("close", (code) => {
+      signal?.removeEventListener("abort", cancel);
+      if (signal?.aborted) return reject(new LitebackupError("cancelled", "backup cancelled", 0));
+      if (code === 0) return resolve();
+      let failure = { code: "backup_failed", message: stderr.trim() || "foreground backup failed" };
+      try {
+        const parsed = JSON.parse(stdout);
+        if (typeof parsed?.code === "string" && typeof parsed.message === "string") failure = parsed;
+      } catch {
+        /* Startup failures may only have stderr. */
       }
-    }
-  }
-
-  /** Stops the backup and releases its write locks. The files and their backups stay. */
-  async stop(): Promise<void> {
-    const started = await this.ready;
-    const litebackup = await this.client;
-    await litebackup.backups.stop({ id: started.id });
-  }
+      reject(new LitebackupError(failure.code, failure.message, 0));
+    });
+  });
 }

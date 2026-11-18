@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
+
 	"testing"
 	"time"
 )
@@ -137,7 +137,7 @@ func (d *fakeDaemon) received(path string) []fakeRequest {
 // connect connects a client to the fake daemon.
 func (d *fakeDaemon) connect(t *testing.T) *Client {
 	t.Helper()
-	client, err := Connect(t.Context(), Options{SocketPath: d.socket})
+	client, err := Connect(t.Context(), &ConnectArgs{SocketPath: d.socket})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,8 +160,8 @@ func databaseStatus(name string, role string, state string, server int64, cloud 
 
 func TestVersionHeaderAndErrors(t *testing.T) {
 	daemon := newFakeDaemon(t)
-	daemon.route("POST /v1/backups/start", func(*fakeRequest) (int, any) {
-		return http.StatusConflict, map[string]any{"code": "name_in_use", "message": "main.db is already backed up from web-2; pass a prefix or a name, or use failover()"}
+	daemon.route("POST /v1/backup-rules/start", func(*fakeRequest) (int, any) {
+		return http.StatusBadRequest, map[string]any{"code": "invalid_argument", "message": "invalid destination"}
 	})
 	daemon.route("POST /v1/databases/release", func(*fakeRequest) (int, any) {
 		return http.StatusUpgradeRequired, map[string]any{"code": "sdk_unsupported", "message": "update the SDK"}
@@ -170,19 +170,19 @@ func TestVersionHeaderAndErrors(t *testing.T) {
 	if client.ClientVersion() != "0.3.18" {
 		t.Fatalf("client version %q", client.ClientVersion())
 	}
-	_, err := client.Backup(t.Context(), "/var/lib/app/main.db", BackupOptions{})
+	_, err := client.StartBackup(t.Context(), "/var/lib/app/main.db", nil)
 	var answered *Error
-	if !errors.As(err, &answered) || answered.Code != "name_in_use" || answered.Status != http.StatusConflict || !strings.Contains(answered.Message, "web-2") {
+	if !errors.As(err, &answered) || answered.Code != "invalid_argument" || answered.Status != http.StatusBadRequest || !strings.Contains(answered.Message, "destination") {
 		t.Fatalf("backup error %#v", err)
 	}
-	if !IsCode(err, "name_in_use") {
-		t.Fatal("IsCode missed name_in_use")
+	if !IsCode(err, "invalid_argument") {
+		t.Fatal("IsCode missed invalid_argument")
 	}
-	_, err = client.Release(t.Context(), "main.db", ReleaseOptions{})
+	_, err = client.Release(t.Context(), "main.db", nil)
 	if !IsCode(err, "sdk_unsupported") {
 		t.Fatalf("release error %v", err)
 	}
-	for _, path := range []string{"/v1/status/show", "/v1/backups/start", "/v1/databases/release"} {
+	for _, path := range []string{"/v1/status/show", "/v1/backup-rules/start", "/v1/databases/release"} {
 		for _, request := range daemon.received(path) {
 			if got := request.Header.Get("X-Litebackup-SDK-Version"); got != "go/"+SDKVersion {
 				t.Fatalf("%s sent SDK version %q", path, got)
@@ -191,55 +191,17 @@ func TestVersionHeaderAndErrors(t *testing.T) {
 	}
 }
 
-func TestBackupRequestAndWait(t *testing.T) {
+func TestStartBackup(t *testing.T) {
 	daemon := newFakeDaemon(t)
-	daemon.route("POST /v1/backups/start", func(request *fakeRequest) (int, any) {
-		return http.StatusOK, map[string]any{
-			"id": "b1", "path": request.Body["path"], "name": "", "prefix": "app/", "watch": "inotify", "maximum_local_databases": 0,
-			"failover": false, "databases": []any{databaseStatus("app/main.db", "origin", "syncing", 1, 0)},
-		}
+	daemon.route("POST /v1/backup-rules/start", func(request *fakeRequest) (int, any) {
+		return 200, map[string]any{"id": "b1", "path": request.Body["path"]}
 	})
-	daemon.route("GET /v1/backups/list", func(*fakeRequest) (int, any) {
-		return http.StatusOK, map[string]any{"backups": []any{map[string]any{
-			"id": "b1", "path": "/x/main.db", "name": "", "prefix": "app/", "watch": "inotify", "maximum_local_databases": 0,
-			"failover": false, "databases": []any{databaseStatus("app/main.db", "origin", "syncing", 1, 0)},
-		}}}
-	})
-	daemon.route("POST /v1/databases/sync", func(request *fakeRequest) (int, any) {
-		return http.StatusOK, databaseStatus(request.Body["name"].(string), "origin", "syncing", 4, 0)
-	})
-	var polls atomic.Int64
-	daemon.route("GET /v1/databases/status", func(request *fakeRequest) (int, any) {
-		return http.StatusOK, databaseStatus(request.Query["name"], "origin", "syncing", 4, polls.Add(1)*2)
-	})
-	daemon.route("POST /v1/backups/stop", func(*fakeRequest) (int, any) { return http.StatusOK, map[string]any{} })
-	durabilityPoll = 10 * time.Millisecond
 	client := daemon.connect(t)
-
-	directory := t.TempDir()
-	t.Chdir(directory)
-	backup, err := client.Backup(t.Context(), "main.db", BackupOptions{Prefix: "app/", Wait: DurabilityServer})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if backup.Name != "app/main.db" || backup.ID != "b1" {
-		t.Fatalf("backup %+v", backup)
-	}
-	started := daemon.received("/v1/backups/start")[0].Body
-	if started["path"] != filepath.Join(directory, "main.db") || started["prefix"] != "app/" || started["wait"] != "server" {
-		t.Fatalf("start body %v", started)
-	}
-	if err := backup.Wait(t.Context(), DurabilityCloud); err != nil {
-		t.Fatal(err)
-	}
-	if polls.Load() != 2 {
-		t.Fatalf("waited for the bucket over %d polls, want 2", polls.Load())
-	}
-	if err := backup.Stop(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if body := daemon.received("/v1/backups/stop")[0].Body; body["id"] != "b1" {
-		t.Fatalf("stop body %v", body)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	rule, err := client.StartBackup(t.Context(), "My App.sqlite", &StartBackupArgs{Prefix: "É/"})
+	if err != nil || rule.ID != "b1" || rule.Path != filepath.Join(dir, "My App.sqlite") {
+		t.Fatalf("rule %v %v", rule, err)
 	}
 }
 
@@ -262,7 +224,7 @@ func TestRestoreVersionsReplicateAcquire(t *testing.T) {
 	})
 	client := daemon.connect(t)
 
-	versions, err := client.Versions(t.Context(), "app/main.db", VersionsOptions{})
+	versions, err := client.Versions(t.Context(), "app/main.db", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +235,7 @@ func TestRestoreVersionsReplicateAcquire(t *testing.T) {
 		t.Fatalf("second page after %q", after)
 	}
 	at := time.Date(2026, 11, 15, 9, 30, 30, 0, time.UTC)
-	restored, err := client.Restore(t.Context(), "app/main.db", RestoreOptions{To: "/tmp/restored.db", Time: at})
+	restored, err := client.Restore(t.Context(), "app/main.db", &RestoreArgs{To: "/tmp/restored.db", Time: at})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,10 +245,10 @@ func TestRestoreVersionsReplicateAcquire(t *testing.T) {
 	if body := daemon.received("/v1/databases/restore")[0].Body; body["time"] != "2026-11-15T09:30:30Z" || body["path"] != "/tmp/restored.db" {
 		t.Fatalf("restore body %v", body)
 	}
-	if _, err := client.Restore(t.Context(), "app/main.db", RestoreOptions{To: "/tmp/x.db", Version: 1, Time: at}); err == nil {
+	if _, err := client.Restore(t.Context(), "app/main.db", &RestoreArgs{To: "/tmp/x.db", Version: 1, Time: at}); err == nil {
 		t.Fatal("a restore with a version and a time passed")
 	}
-	replica, err := client.Replicate(t.Context(), "app/main.db", ReplicateOptions{To: "/var/lib/replica/main.db", WriteProtection: WriteProtectionDetect, Timeout: 5 * time.Second})
+	replica, err := client.Replicate(t.Context(), "app/main.db", &ReplicateArgs{To: "/var/lib/replica/main.db", WriteProtection: WriteProtectionDetect, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +259,7 @@ func TestRestoreVersionsReplicateAcquire(t *testing.T) {
 	if body["to"] != "/var/lib/replica/main.db" || body["write_protection"] != "detect" || body["timeout_millis"] != float64(5000) {
 		t.Fatalf("replicate body %v", body)
 	}
-	acquired, err := client.Acquire(t.Context(), "tenants/42.db", AcquireOptions{To: "/var/lib/app/42.db", OffloadReleased: true, BlockOnLost: true})
+	acquired, err := client.Acquire(t.Context(), "tenants/42.db", &AcquireArgs{To: "/var/lib/app/42.db", OffloadReleased: true, BlockOnLost: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,12 +298,12 @@ func TestFailoverEvents(t *testing.T) {
 			"writer":   map[string]any{"name": "app/main.db", "active": true, "this_machine": false, "machine": "web-1", "lapsed": false},
 		}
 	})
-	daemon.route("POST /v1/backups/stop", func(*fakeRequest) (int, any) { return http.StatusOK, map[string]any{} })
+	daemon.route("POST /v1/backup-rules/stop", func(*fakeRequest) (int, any) { return http.StatusOK, map[string]any{} })
 	client := daemon.connect(t)
 
 	roles := make(chan Role, 4)
 	saved := make(chan string, 4)
-	failover, err := client.Failover(t.Context(), "/var/lib/app/main.db", FailoverOptions{
+	failover, err := client.Failover(t.Context(), "/var/lib/app/main.db", &FailoverArgs{
 		OnRoleChange:    func(role Role) { roles <- role },
 		OnConflictSaved: func(path string) { saved <- path },
 	})
@@ -386,7 +348,7 @@ func TestFailoverEvents(t *testing.T) {
 	if err := failover.Stop(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if body := daemon.received("/v1/backups/stop")[0].Body; body["name"] != "app/main.db" {
+	if body := daemon.received("/v1/backup-rules/stop")[0].Body; body["name"] != "app/main.db" {
 		t.Fatalf("stop body %v", body)
 	}
 }
@@ -465,12 +427,12 @@ func TestReplicatePrefix(t *testing.T) {
 		}
 		return http.StatusOK, map[string]any{}
 	})
-	client, err := Connect(t.Context(), Options{SocketPath: daemon.socket})
+	client, err := Connect(t.Context(), &ConnectArgs{SocketPath: daemon.socket})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	result, err := client.ReplicatePrefix(t.Context(), "tenants", ReplicatePrefixOptions{To: "replicas", WriteProtection: WriteProtectionLock})
+	result, err := client.ReplicatePrefix(t.Context(), "tenants", &ReplicatePrefixArgs{To: "replicas", WriteProtection: WriteProtectionLock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,24 +442,24 @@ func TestReplicatePrefix(t *testing.T) {
 	if err := client.StopReplicaPrefix(t.Context(), "tenants", "replicas"); err != nil {
 		t.Fatal(err)
 	}
-	result, err = client.ReplicatePrefix(t.Context(), "", ReplicatePrefixOptions{To: "all"})
+	result, err = client.ReplicatePrefix(t.Context(), "", &ReplicatePrefixArgs{To: "all"})
 	if err != nil || result.Prefix != "" {
 		t.Fatalf("all databases: %#v, %v", result, err)
 	}
-	if _, err := client.ReplicatePrefix(t.Context(), "tenants", ReplicatePrefixOptions{}); !IsCode(err, "invalid_argument") {
+	if _, err := client.ReplicatePrefix(t.Context(), "tenants", nil); !IsCode(err, "invalid_argument") {
 		t.Fatalf("empty directory: %v", err)
 	}
 	if err := client.StopReplicaPrefix(t.Context(), "tenants", ""); !IsCode(err, "invalid_argument") {
 		t.Fatalf("empty stop directory: %v", err)
 	}
 	daemon.route("POST /v1/replicas/start", func(*fakeRequest) (int, any) { return http.StatusOK, map[string]any{} })
-	if _, err := client.ReplicatePrefix(t.Context(), "tenants", ReplicatePrefixOptions{To: "replicas"}); !IsCode(err, "invalid_response") {
+	if _, err := client.ReplicatePrefix(t.Context(), "tenants", &ReplicatePrefixArgs{To: "replicas"}); !IsCode(err, "invalid_response") {
 		t.Fatalf("missing prefix: %v", err)
 	}
 	daemon.route("POST /v1/replicas/start", func(*fakeRequest) (int, any) {
 		return http.StatusForbidden, map[string]any{"code": "forbidden", "message": "namespace not allowed"}
 	})
-	if _, err := client.ReplicatePrefix(t.Context(), "tenants", ReplicatePrefixOptions{To: "replicas"}); !IsCode(err, "forbidden") {
+	if _, err := client.ReplicatePrefix(t.Context(), "tenants", &ReplicatePrefixArgs{To: "replicas"}); !IsCode(err, "forbidden") {
 		t.Fatalf("forbidden: %v", err)
 	}
 }
