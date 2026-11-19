@@ -1,0 +1,185 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["cryptography==46.0.3", "h11==0.16.0"]
+# ///
+"""Build platform wheels from a verified litebackup release.
+
+Usage: scripts/build-wheels [--version VERSION] [--output DIRECTORY] RELEASE-DIRECTORY METADATA-JSON
+
+RELEASE-DIRECTORY holds the cli release's files under their published names
+(litebackup-linux-amd64, ...), and METADATA-JSON is the package metadata
+https://litebackup.com/pkg/metadata serves. The release comes from its signed
+document, which must verify with Litebackup's release keys, and every binary must
+match its signed SHA-256 and size before any wheel is built.
+
+Each binary's wheel platform comes from the binary itself: a static Linux binary
+gets a manylinux_2_17 and a musllinux_1_2 wheel, a dynamic one manylinux for the
+newest GLIBC_ symbol version it needs, and a macOS binary macosx for the minimum
+OS in its LC_BUILD_VERSION. An sdist is built too; it installs on any platform
+and uses the installed litebackup command. VERSION is the package's version
+unless given.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import tomllib
+from pathlib import Path
+
+PROJECT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT / "src"))
+from litebackup.release import SignatureError, find_release  # noqa: E402
+
+PLATFORMS = PROJECT.parent / "testdata" / "contract" / "binary" / "platforms.json"
+ELF_MACHINES = {"x86_64": 62, "aarch64": 183}
+MACHO_CPUS = {"x86_64": 0x01000007, "arm64": 0x0100000C}
+
+
+def fail(message: str) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def elf_platforms(content: bytes, machine: str, static_platforms: list[str]) -> list[str]:
+    """Wheel platforms of a Linux binary: both static tags, or manylinux for its newest GLIBC_ version."""
+    if content[:4] != b"\x7fELF" or content[4] != 2 or content[5] != 1:
+        fail("expected a 64-bit little-endian ELF binary")
+    e_machine = struct.unpack_from("<H", content, 18)[0]
+    if e_machine != ELF_MACHINES[machine]:
+        fail(f"the binary is for ELF machine {e_machine}, not {machine}")
+    program_offset, section_offset = struct.unpack_from("<QQ", content, 32)
+    program_size, program_count, section_size, section_count, names_index = struct.unpack_from("<HHHHH", content, 54)
+    segments = [struct.unpack_from("<I", content, program_offset + index * program_size)[0] for index in range(program_count)]
+    # PT_INTERP (3) names the dynamic loader; a binary without one is static.
+    if 3 not in segments:
+        return static_platforms
+    sections = [struct.unpack_from("<IIQQQQ", content, section_offset + index * section_size) for index in range(section_count)]
+    names = sections[names_index]
+    names_data = content[names[4] : names[4] + names[5]]
+
+    def section_name(section: tuple[int, ...]) -> bytes:
+        start = section[0]
+        return names_data[start : names_data.index(b"\x00", start)]
+
+    dynamic_strings = next((section for section in sections if section_name(section) == b".dynstr"), None)
+    if dynamic_strings is None:
+        fail("a dynamic binary without .dynstr")
+    strings = content[dynamic_strings[4] : dynamic_strings[4] + dynamic_strings[5]]
+    versions = [(int(major), int(minor)) for major, minor in re.findall(rb"GLIBC_(\d+)\.(\d+)", strings)]
+    if not versions:
+        fail("a dynamic binary that needs no GLIBC_ version; build it static or with glibc")
+    major, minor = max(versions)
+    return [f"manylinux_{major}_{minor}_{machine}"]
+
+
+def macho_platform(content: bytes, machine: str) -> str:
+    """The wheel platform of a macOS binary from LC_BUILD_VERSION, or LC_VERSION_MIN_MACOSX."""
+    magic, cpu, _subtype, _filetype, command_count, _size, _flags, _reserved = struct.unpack_from("<IiiIIIII", content, 0)
+    if magic != 0xFEEDFACF:
+        fail("expected a 64-bit Mach-O binary")
+    if cpu != MACHO_CPUS[machine]:
+        fail(f"the binary is for Mach-O CPU {cpu:#x}, not {machine}")
+    offset = 32
+    minimum: int | None = None
+    for _ in range(command_count):
+        command, size = struct.unpack_from("<II", content, offset)
+        if command == 0x32:  # LC_BUILD_VERSION: platform, minos, sdk, ntools
+            platform, encoded = struct.unpack_from("<II", content, offset + 8)
+            if platform == 1:
+                minimum = encoded
+        elif command == 0x24 and minimum is None:  # LC_VERSION_MIN_MACOSX: version, sdk
+            minimum = struct.unpack_from("<I", content, offset + 8)[0]
+        offset += size
+    if minimum is None:
+        fail("the binary records no minimum macOS version")
+    major, minor = minimum >> 16, (minimum >> 8) & 0xFF
+    if major >= 11 and minor:
+        # pip matches macOS 11 and later only as major_0, so a binary needing 12.3 is tagged 13_0.
+        major, minor = major + 1, 0
+    return f"macosx_{major}_{minor}_{machine}"
+
+
+def build(output: Path, environment: dict[str, str]) -> Path:
+    def artifacts() -> set[Path]:
+        return {*output.glob("*.whl"), *output.glob("*.tar.gz")}
+
+    before = artifacts()
+    subprocess.run(
+        ["uv", "build", "--quiet", "--out-dir", str(output), *environment.pop("TARGETS").split()], cwd=PROJECT, env=environment, check=True
+    )
+    built = artifacts() - before
+    if len(built) != 1:
+        fail(f"expected one new artifact, got {sorted(path.name for path in built)}")
+    return built.pop()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--version", help="the release to package; the package's version by default")
+    parser.add_argument("--output", type=Path, default=PROJECT / "dist", help="where the wheels and sdist go")
+    parser.add_argument("release_directory", type=Path)
+    parser.add_argument("metadata", type=Path)
+    arguments = parser.parse_args()
+    package_version = tomllib.loads((PROJECT / "pyproject.toml").read_text())["project"]["version"]
+    version = arguments.version or package_version
+    if version != package_version:
+        print(f"warning: packaging litebackup {version} into the {package_version} Python package", file=sys.stderr)
+    try:
+        release = find_release(arguments.metadata.read_text(), version=version)
+    except (SignatureError, LookupError) as error:
+        fail(f"the metadata does not hold a verified release {version}: {error}")
+
+    plans: list[tuple[Path, list[str]]] = []
+    for platform in json.loads(PLATFORMS.read_text())["platforms"]:
+        try:
+            file = release.file(platform["release_file"])
+        except KeyError as error:
+            fail(str(error))
+        source = arguments.release_directory / file.filename
+        if not source.exists():
+            print(f"skipping {platform['os']}-{platform['arch']}: {source} is missing", file=sys.stderr)
+            continue
+        content = source.read_bytes()
+        digest = hashlib.sha256(content).hexdigest()
+        if digest != file.sha256 or len(content) != file.size:
+            fail(
+                f"{source} does not match release {version}: SHA-256 {digest}, {len(content)} bytes; "
+                f"signed {file.sha256}, {file.size} bytes"
+            )
+        if platform["os"] == "linux":
+            tags = elf_platforms(content, platform["machine"], platform["static_wheel_platforms"])
+        else:
+            tags = [macho_platform(content, platform["machine"])]
+        plans.append((source, tags))
+    if not plans:
+        fail(f"no files of release {version} found in {arguments.release_directory}")
+
+    arguments.output.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix="litebackup-wheels-"))
+    try:
+        base = {key: value for key, value in os.environ.items() if not key.startswith("LITEBACKUP_WHEEL_")}
+        print(f"built {build(arguments.output, {**base, 'TARGETS': '--sdist'}).name}")
+        for source, tags in plans:
+            binary = staging / source.name / "litebackup"
+            binary.parent.mkdir()
+            shutil.copyfile(source, binary)
+            binary.chmod(0o755)
+            for tag in tags:
+                environment = {**base, "LITEBACKUP_WHEEL_BINARY": str(binary), "LITEBACKUP_WHEEL_PLATFORM": tag, "TARGETS": "--wheel"}
+                print(f"built {build(arguments.output, environment).name} from verified {source.name} {version}")
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    main()

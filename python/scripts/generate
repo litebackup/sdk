@@ -1,0 +1,22 @@
+#!/bin/bash
+# Generate src/litebackup/_generated/models.py from the socket API spec.
+set -o errexit
+set -o nounset
+set -o pipefail
+
+cd "$(dirname "$0")/.."
+uvx --from datamodel-code-generator==0.98.0 datamodel-codegen \
+    --input ../client-openapi.yaml \
+    --input-file-type openapi \
+    --output src/litebackup/_generated/models.py \
+    --output-model-type dataclasses.dataclass \
+    --dataclass-arguments '{"frozen": true, "slots": true, "kw_only": true}' \
+    --target-python-version 3.11 \
+    --use-standard-collections \
+    --use-union-operator \
+    --enum-field-as-literal all \
+    --use-field-description \
+    --output-datetime-class datetime \
+    --disable-timestamp \
+    --use-double-quotes \
+    --formatters black isort

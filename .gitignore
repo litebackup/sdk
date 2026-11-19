@@ -2,3 +2,9 @@ node_modules/
 dist/
 *.tgz
 typescript/npm/*/bin/
+.venv/
+python/src/litebackup/_bin/
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/

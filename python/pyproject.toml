@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "litebackup"
+version = "1.0.0"
+description = "Back up, replicate, and restore SQLite databases with Litebackup"
+readme = "README.md"
+license = { text = "UNLICENSED" }
+requires-python = ">=3.11"
+dependencies = ["h11>=0.14,<1"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Topic :: Database",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+release = ["cryptography>=42"]
+aiosqlite = ["aiosqlite>=0.20"]
+sqlalchemy = ["sqlalchemy>=2.0"]
+django = ["django>=4.2"]
+
+[project.urls]
+Homepage = "https://litebackup.com"
+Documentation = "https://github.com/litebackup/sdk/tree/main/python"
+
+[dependency-groups]
+dev = [
+    "pytest==8.4.2",
+    "pytest-asyncio==1.2.0",
+    "mypy==1.18.2",
+    "ruff==0.14.1",
+    "cryptography==46.0.3",
+    "aiosqlite==0.21.0",
+    "sqlalchemy==2.0.44",
+    "django==5.2.7",
+    "django-stubs==5.2.7",
+    "fastapi==0.120.0",
+    "uvicorn==0.38.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/litebackup"]
+exclude = ["src/litebackup/_bin"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "scripts/wheel_hook.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/litebackup", "README.md", "pyproject.toml", "scripts/wheel_hook.py"]
+exclude = ["src/litebackup/_bin"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+extend-exclude = ["src/litebackup/_generated"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC"]
+# timeout arguments are the daemon's server-side timeouts, sent as timeout_millis, not local waits.
+ignore = ["ASYNC109"]
