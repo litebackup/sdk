@@ -1,0 +1,18 @@
+{
+  "description": "Stop a whole rule by ID.",
+  "operation": "rules.stop",
+  "args": {
+    "id": "01a1-rule"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/backup-rules/stop",
+    "query": {},
+    "body": {
+      "rule_id": "01a1-rule"
+    }
+  },
+  "response": {
+    "lease_pending": true
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "description": "Settings equal to the defaults are omitted.",
+  "operation": "databases.acquire",
+  "args": {
+    "name": "agents/42.sqlite",
+    "to": "/var/lib/app/agents/../agents/42.sqlite",
+    "maintenance": false,
+    "offload": "never",
+    "on_lost": "conflict",
+    "timeout": "0s"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/databases/acquire",
+    "query": {},
+    "body": {
+      "name": "agents/42.sqlite",
+      "path": "/var/lib/app/agents/42.sqlite"
+    }
+  },
+  "response": {
+    "database": {
+      "name": "agents/42.sqlite",
+      "path": "{cwd}/agents/42.sqlite",
+      "role": "origin",
+      "state": "syncing",
+      "acquired": true,
+      "failover": false,
+      "local_changed": false,
+      "synced_server": {
+        "version": 3
+      },
+      "synced_cloud": {
+        "version": 2
+      },
+      "journal_mode": "wal",
+      "page_count": 2,
+      "sync_count": 3,
+      "hint_misses": 0
+    },
+    "outcome": "created"
+  }
+}

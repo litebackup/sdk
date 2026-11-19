@@ -27,61 +27,49 @@ type BackupArgs struct {
 	Timeout time.Duration
 }
 
+// StartBackup saves a continuous backup rule for a file, directory, or glob
+// and returns once the daemon saved it; discovery and uploads run in the
+// background. Starting the same path again with the same settings returns
+// the saved rule, so call it on every start. Other settings for a saved path
+// fail with exists, and the error's Details["rule"] is the saved rule.
 func (c *Client) StartBackup(ctx context.Context, path string, args *StartBackupArgs) (*BackupRule, error) {
 	if args == nil {
 		args = &StartBackupArgs{}
 	}
 	if path == "" {
-		return nil, &Error{Code: "invalid_argument", Message: "backup needs a path"}
+		return nil, invalidArgument("backup needs a path")
 	}
 	if args.Name != "" && args.Prefix != "" {
-		return nil, &Error{Code: "invalid_argument", Message: "choose a name or a prefix"}
+		return nil, invalidArgument("choose a name or a prefix")
 	}
 	absolute, err := absolutePath(path)
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]any{"path": absolute}
-	if args.Name != "" {
-		body["name"] = args.Name
-	}
-	if args.Prefix != "" {
-		body["prefix"] = args.Prefix
-	}
-	if args.MaximumLocalDatabases != 0 {
-		body["maximum_local_databases"] = args.MaximumLocalDatabases
-	}
+	body := BackupRequest{Path: absolute, Name: args.Name, Prefix: args.Prefix, MaximumLocalDatabases: args.MaximumLocalDatabases}
 	var info BackupRule
-	if err := c.call(ctx, http.MethodPost, "/v1/backup-rules/start", body, &info); err != nil {
+	if err := c.call(ctx, http.MethodPost, "/v1/backup-rules/start", body, &info, 0); err != nil {
 		return nil, err
 	}
 	return &info, nil
 }
 
-// ErrBusy matches a writer lock held by another job or a continuous backup.
-var ErrBusy = errors.New("backup writer busy")
-
-// Is matches the corresponding busy and timeout errors.
-func (e *Error) Is(target error) bool {
-	return target == ErrBusy && e.Code == "busy" || target == context.DeadlineExceeded && e.Code == "timeout"
-}
-
 // Backup runs the foreground job for this session.
 func (c *Client) Backup(ctx context.Context, path string, args *BackupArgs) error {
 	if c.customSocket {
-		return &Error{Code: "invalid_argument", Message: "foreground backup needs a named session and cannot target SocketPath"}
+		return invalidArgument("foreground backup needs a named session and cannot target SocketPath")
 	}
-	return runBackup(ctx, c.session, path, args)
+	return runBackup(ctx, c.session, c.binaryPath, path, args)
 }
 
-func runBackup(ctx context.Context, session, path string, args *BackupArgs) error {
+func runBackup(ctx context.Context, session string, binaryPath string, path string, args *BackupArgs) error {
 	if args == nil {
 		args = &BackupArgs{}
 	}
 	if path == "" || (args.Name != "" && args.Prefix != "") || strings.HasSuffix(args.Name, "/") {
-		return &Error{Code: "invalid_argument", Message: "expected a source and either a name or a prefix"}
+		return invalidArgument("expected a source and either a name or a prefix")
 	}
-	binary, err := Binary()
+	binary, err := resolveBinary(binaryPath)
 	if err != nil {
 		return err
 	}
@@ -110,7 +98,7 @@ func runBackup(ctx context.Context, session, path string, args *BackupArgs) erro
 		return nil
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return &Error{Code: CodeCancelled, Message: "the backup was cancelled", Err: ctx.Err()}
 	}
 	var exited *exec.ExitError
 	if errors.As(err, &exited) {

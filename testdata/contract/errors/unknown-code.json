@@ -1,0 +1,15 @@
+{
+  "description": "A code the SDK does not know is kept verbatim.",
+  "operation": "rules.list",
+  "response": {
+    "status": 503,
+    "content_type": "application/json",
+    "body": "{\"code\":\"bucket_unreachable\",\"message\":\"the bucket did not answer\"}"
+  },
+  "expect": {
+    "code": "bucket_unreachable",
+    "message": "the bucket did not answer",
+    "status": 503,
+    "details": {}
+  }
+}

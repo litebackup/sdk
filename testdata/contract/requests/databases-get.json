@@ -1,0 +1,33 @@
+{
+  "description": "Names are query-escaped.",
+  "operation": "databases.get",
+  "args": {
+    "name": "tenants/a b&c.sqlite"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/v1/databases/status",
+    "query": {
+      "name": "tenants/a b&c.sqlite"
+    }
+  },
+  "response": {
+    "name": "tenants/a b&c.sqlite",
+    "path": "/var/lib/app/main.sqlite",
+    "role": "origin",
+    "state": "syncing",
+    "acquired": false,
+    "failover": false,
+    "local_changed": false,
+    "synced_server": {
+      "version": 3
+    },
+    "synced_cloud": {
+      "version": 2
+    },
+    "journal_mode": "wal",
+    "page_count": 2,
+    "sync_count": 3,
+    "hint_misses": 0
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "description": "Sync posts the name.",
+  "operation": "databases.sync",
+  "args": {
+    "name": "main.sqlite"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/databases/sync",
+    "query": {},
+    "body": {
+      "name": "main.sqlite"
+    }
+  },
+  "response": {
+    "name": "main.sqlite",
+    "path": "/var/lib/app/main.sqlite",
+    "role": "origin",
+    "state": "syncing",
+    "acquired": false,
+    "failover": false,
+    "local_changed": false,
+    "synced_server": {
+      "version": 3
+    },
+    "synced_cloud": {
+      "version": 2
+    },
+    "journal_mode": "wal",
+    "page_count": 2,
+    "sync_count": 3,
+    "hint_misses": 0
+  }
+}

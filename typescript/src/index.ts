@@ -1,22 +1,25 @@
 export { Litebackup } from "./client.js";
 export type {
   AcquireOptions,
+  EventPageOptions,
+  EventsOptions,
   LitebackupOptions,
   PageOptions,
-  EventPageOptions,
-  SignalOptions,
-  EventsOptions,
   ReleaseOptions,
   ReplicateOptions,
   ReplicatePrefixOptions,
   RestoreOptions,
   ShutdownOptions,
+  SignalOptions,
   VersionsOptions,
 } from "./client.js";
-export type { BackupOptions, StartBackupOptions, BackupSource, SQLiteHandle } from "./backup.js";
+export type { BackupOptions, BackupSource, StartBackupOptions } from "./backup.js";
+export type { PathSource } from "./location.js";
+export { defaultCleanupTimeout } from "./managed.js";
+export type { ManagedOptions, ManagedScope, ScopeAdapter } from "./managed.js";
 export type { Failover } from "./failover.js";
 export type { FailoverEvents, FailoverOptions } from "./failover.js";
-export { LitebackupError, sdkVersion } from "./types.js";
+export { ErrorCode, LitebackupError, minimumDaemonVersion, sdkVersion } from "./types.js";
 export type {
   AcquireResult,
   BackupInfo,
@@ -26,6 +29,7 @@ export type {
   Durability,
   EventList,
   FailoverInfo,
+  LitebackupErrorOptions,
   LitebackupEvent,
   PrefixReplica,
   ReleaseResult,

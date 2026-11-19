@@ -1,0 +1,15 @@
+{
+  "description": "A body that is not JSON becomes http_<status> with its text.",
+  "operation": "rules.list",
+  "response": {
+    "status": 502,
+    "content_type": "text/html",
+    "body": "<html>Bad Gateway</html>\n"
+  },
+  "expect": {
+    "code": "http_502",
+    "message": "<html>Bad Gateway</html>",
+    "status": 502,
+    "details": {}
+  }
+}

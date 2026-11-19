@@ -401,7 +401,7 @@ paths:
   /v1/backup-rules/start:
     post:
       operationId: startBackup
-      description: Persist a continuous backup rule. Matching and uploading happen in the background.
+      description: Persist a continuous backup rule. Matching and uploading happen in the background. Starting the same path again with the same name, prefix, watch, and maximum_local_databases returns the saved rule, so apps can call it on every start. Other settings for a saved path are refused with 409 exists, and the error's rule is the saved rule.
       responses:
         '200':
           description: success
@@ -903,14 +903,45 @@ components:
         - session_id
         - watch
         - databases
+    BackupRule:
+      type: object
+      properties:
+        id:
+          type: string
+        path:
+          type: string
+          description: the path or glob
+        name:
+          type: string
+          description: the resolved remote name for a single file, or empty for a directory or glob
+        prefix:
+          type: string
+        watch:
+          type: string
+        maximum_local_databases:
+          type: integer
+          format: int64
+        failover:
+          type: boolean
+      required:
+        - id
+        - path
+        - name
+        - prefix
+        - watch
+        - maximum_local_databases
+        - failover
     Error:
       type: object
       properties:
         code:
           type: string
-          description: such as exists (a restore target exists), in_use (another machine writes the database), not_found, still_open, invalid_argument, timeout
+          description: such as exists (a restore target exists, or a backup rule with other settings already covers the path), in_use (another machine writes the database), not_found, still_open, invalid_argument, timeout
         message:
           type: string
+        rule:
+          $ref: '#/components/schemas/BackupRule'
+          description: for exists from backup-rules/start, the rule already saved for the path; stop it by its ID before saving different settings
       required:
         - code
         - message
@@ -1181,34 +1212,6 @@ components:
           description: when positive, offload the least recently changed idle databases past this count once the bucket holds them
       required:
         - path
-    BackupRule:
-      type: object
-      properties:
-        id:
-          type: string
-        path:
-          type: string
-          description: the path or glob
-        name:
-          type: string
-          description: the resolved remote name for a single file, or empty for a directory or glob
-        prefix:
-          type: string
-        watch:
-          type: string
-        maximum_local_databases:
-          type: integer
-          format: int64
-        failover:
-          type: boolean
-      required:
-        - id
-        - path
-        - name
-        - prefix
-        - watch
-        - maximum_local_databases
-        - failover
     BackupList:
       type: object
       properties:

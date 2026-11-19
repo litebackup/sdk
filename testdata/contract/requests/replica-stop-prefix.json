@@ -1,0 +1,18 @@
+{
+  "description": "Stop a prefix replica.",
+  "operation": "replicas.stop_prefix",
+  "args": {
+    "prefix": "tenants",
+    "to": "replicas"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/replicas/stop",
+    "query": {},
+    "body": {
+      "prefix": "tenants",
+      "to": "{cwd}/replicas"
+    }
+  },
+  "response": {}
+}

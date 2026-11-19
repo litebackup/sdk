@@ -7,14 +7,14 @@
 //
 //	_, err := litebackup.StartBackup(ctx, "/var/lib/app/main.db", nil)
 //
-// Connect returns a Client for everything else.
+// Connect returns a Client for everything else. Managed runs code against a
+// database it acquires, opens, closes, and releases.
 package litebackup
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -30,34 +30,21 @@ import (
 
 // SDKVersion is the version sent with every call. Daemons refuse SDKs older
 // than their minimum with sdk_unsupported.
-const SDKVersion = "0.7.0"
+const SDKVersion = "1.0.0"
+
+// MinimumDaemonVersion is the oldest daemon this SDK talks to. Connect
+// refuses an older one with incompatible_version.
+const MinimumDaemonVersion = "1.0.0"
 
 const (
 	sdkVersionHeader    = "X-Litebackup-SDK-Version"
 	clientVersionHeader = "X-Litebackup-Client-Version"
 	// responseLimit bounds one decoded response.
 	responseLimit = 64 << 20
+	// deadlineGrace is added to a call's server-side timeout for its
+	// client-side deadline, so the daemon's own timeout answer arrives first.
+	deadlineGrace = 30 * time.Second
 )
-
-// Error is an error the daemon answered with.
-type Error struct {
-	// Code is such as busy, exists, in_use, not_found, still_open, timeout, or sdk_unsupported.
-	Code    string
-	Message string
-	// Status is the HTTP status of the answer.
-	Status int
-}
-
-// Error returns the code and message.
-func (e *Error) Error() string {
-	return e.Code + ": " + e.Message
-}
-
-// IsCode reports whether err is an *Error with the given code.
-func IsCode(err error, code string) bool {
-	var answered *Error
-	return errors.As(err, &answered) && answered.Code == code
-}
 
 // ConnectArgs selects the session a Client talks to.
 type ConnectArgs struct {
@@ -69,6 +56,9 @@ type ConnectArgs struct {
 	Session string
 	// SocketPath connects to this socket and never starts a daemon.
 	SocketPath string
+	// BinaryPath is the litebackup binary that starts the daemon; see Binary
+	// for the search when empty.
+	BinaryPath string
 }
 
 // Client talks to the daemon of one session.
@@ -76,16 +66,21 @@ type Client struct {
 	customSocket bool
 	session      string
 	socketPath   string
+	binaryPath   string
 	http         *http.Client
 
 	mutex         sync.Mutex
 	clientVersion string
 	failovers     map[*FailoverRun]struct{}
 	closed        bool
+	// lifetime ends with Close, which aborts calls in flight.
+	lifetime context.Context
+	end      context.CancelFunc
 }
 
 // Connect connects to a session's daemon, starting it like the litebackup
-// command does when nothing listens on its socket.
+// command does when nothing listens on its socket. It refuses a daemon older
+// than MinimumDaemonVersion with incompatible_version.
 func Connect(ctx context.Context, args *ConnectArgs) (*Client, error) {
 	if args == nil {
 		args = &ConnectArgs{}
@@ -95,17 +90,21 @@ func Connect(ctx context.Context, args *ConnectArgs) (*Client, error) {
 	if socket == "" {
 		resolved, path, err := SessionSocket(args.Session)
 		if err != nil {
-			return nil, err
+			return nil, invalidArgument(err.Error())
 		}
 		session, socket = resolved, path
-		if err := launchDaemon(ctx, session, socket, args.Token); err != nil {
+		if err := launchDaemon(ctx, session, socket, args.Token, args.BinaryPath); err != nil {
 			return nil, err
 		}
 	}
+	lifetime, end := context.WithCancel(context.Background())
 	client := &Client{
 		customSocket: args.SocketPath != "",
 		session:      session,
 		socketPath:   socket,
+		binaryPath:   args.BinaryPath,
+		lifetime:     lifetime,
+		end:          end,
 		http: &http.Client{Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _ string, _ string) (net.Conn, error) {
 				var dialer net.Dialer
@@ -114,15 +113,57 @@ func Connect(ctx context.Context, args *ConnectArgs) (*Client, error) {
 			MaxIdleConns: 4,
 		}},
 	}
-	status, err := client.Status(ctx)
-	if err != nil {
+	if err := client.checkDaemon(ctx); err != nil {
 		client.http.CloseIdleConnections()
+		end()
 		return nil, err
 	}
-	if client.session == "" {
-		client.session = status.Session
-	}
 	return client, nil
+}
+
+// checkDaemon sends the connect probe and refuses a daemon older than
+// MinimumDaemonVersion.
+func (c *Client) checkDaemon(ctx context.Context) error {
+	var status Status
+	if err := c.call(ctx, http.MethodGet, "/v1/status/show?limit=1", nil, &status, 0); err != nil {
+		return err
+	}
+	if c.session == "" {
+		c.session = status.Session
+	}
+	version := c.ClientVersion()
+	if version != "" && compareVersions(version, MinimumDaemonVersion) >= 0 {
+		return nil
+	}
+	reported := "does not report its version"
+	if version != "" {
+		reported = "is version " + version
+	}
+	restart := "Stop it with `litebackup drain` so the next call starts the new binary"
+	if c.session != "" {
+		restart = "Stop it with `litebackup drain --session " + c.session + "` so the next call starts the new binary"
+	}
+	return &Error{Code: CodeIncompatibleVersion, Message: fmt.Sprintf("the litebackup daemon %s, and this SDK needs %s or later. %s, or restart the service if `litebackup install service` runs it", reported, MinimumDaemonVersion, restart)}
+}
+
+// compareVersions orders dotted numeric versions, ignoring any -suffix;
+// unparsable parts count as zero.
+func compareVersions(left string, right string) int {
+	leftParts := strings.Split(strings.SplitN(left, "-", 2)[0], ".")
+	rightParts := strings.Split(strings.SplitN(right, "-", 2)[0], ".")
+	for index := range max(len(leftParts), len(rightParts)) {
+		var leftNumber, rightNumber int
+		if index < len(leftParts) {
+			leftNumber, _ = strconv.Atoi(leftParts[index])
+		}
+		if index < len(rightParts) {
+			rightNumber, _ = strconv.Atoi(rightParts[index])
+		}
+		if leftNumber != rightNumber {
+			return leftNumber - rightNumber
+		}
+	}
+	return 0
 }
 
 // Session is the session this client talks to.
@@ -131,15 +172,16 @@ func (c *Client) Session() string { return c.session }
 // SocketPath is the daemon's socket.
 func (c *Client) SocketPath() string { return c.socketPath }
 
-// ClientVersion is the daemon's version, known after the first call.
+// ClientVersion is the daemon's version, from its last answer.
 func (c *Client) ClientVersion() string {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	return c.clientVersion
 }
 
-// Close stops following the client's failovers and closes its connections.
-// The daemon keeps running, and so do the failovers.
+// Close stops following the client's failovers, ends its calls in flight, and
+// closes its connections. The daemon keeps running, and so do the failovers
+// and any acquired databases. Calls after Close fail with closed.
 func (c *Client) Close() error {
 	c.mutex.Lock()
 	failovers := c.failovers
@@ -149,8 +191,21 @@ func (c *Client) Close() error {
 	for failover := range failovers {
 		failover.end()
 	}
+	c.end()
 	c.http.CloseIdleConnections()
 	return nil
+}
+
+// isClosed reports whether Close ran.
+func (c *Client) isClosed() bool {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.closed
+}
+
+// closedError is the error of a call on a closed client.
+func closedError() *Error {
+	return &Error{Code: CodeClosed, Message: "the client is closed"}
 }
 
 // addFailover records a failover so Close stops following it; it reports
@@ -175,19 +230,33 @@ func (c *Client) removeFailover(failover *FailoverRun) {
 	delete(c.failovers, failover)
 }
 
-// call sends one request and decodes its JSON answer into result.
-func (c *Client) call(ctx context.Context, method string, path string, body any, result any) error {
+// call sends one request and decodes its JSON answer into result. A positive
+// serverTimeout gives the call a client-side deadline of that plus
+// deadlineGrace; otherwise only ctx and Close end the wait.
+func (c *Client) call(ctx context.Context, method string, path string, body any, result any, serverTimeout time.Duration) error {
+	if c.isClosed() {
+		return closedError()
+	}
+	callContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(c.lifetime, cancel)
+	defer stop()
+	if serverTimeout > 0 {
+		var cancelDeadline context.CancelFunc
+		callContext, cancelDeadline = context.WithTimeout(callContext, serverTimeout+deadlineGrace)
+		defer cancelDeadline()
+	}
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return invalidArgument(err.Error())
 		}
 		reader = bytes.NewReader(encoded)
 	}
-	request, err := http.NewRequestWithContext(ctx, method, "http://litebackup"+path, reader)
+	request, err := http.NewRequestWithContext(callContext, method, "http://litebackup"+path, reader)
 	if err != nil {
-		return err
+		return invalidArgument(err.Error())
 	}
 	request.Header.Set(sdkVersionHeader, "go/"+SDKVersion)
 	if body != nil {
@@ -195,18 +264,16 @@ func (c *Client) call(ctx context.Context, method string, path string, body any,
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return err
+		return c.transportError(ctx, callContext, err)
 	}
 	defer response.Body.Close()
 	version := response.Header.Get(clientVersionHeader)
-	if version != "" {
-		c.mutex.Lock()
-		c.clientVersion = version
-		c.mutex.Unlock()
-	}
+	c.mutex.Lock()
+	c.clientVersion = version
+	c.mutex.Unlock()
 	content, err := io.ReadAll(io.LimitReader(response.Body, responseLimit))
 	if err != nil {
-		return err
+		return c.transportError(ctx, callContext, err)
 	}
 	if response.StatusCode != http.StatusOK {
 		return responseError(response.StatusCode, content)
@@ -215,31 +282,28 @@ func (c *Client) call(ctx context.Context, method string, path string, body any,
 		return nil
 	}
 	if err := json.Unmarshal(content, result); err != nil {
-		return fmt.Errorf("decoding %s: %w", path, err)
+		return &Error{Code: CodeInvalidResponse, Message: fmt.Sprintf("decoding %s: %v", path, err), Status: response.StatusCode, Err: err}
 	}
 	return nil
 }
 
-// responseError turns a non-200 answer into an *Error.
-func responseError(status int, content []byte) *Error {
-	answered := &Error{Code: "http_" + strconv.Itoa(status), Message: strings.TrimSpace(string(content)), Status: status}
-	var decoded struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
+// transportError names why a call ended without an answer: the caller
+// cancelled, the client closed, the deadline passed, or the connection failed.
+func (c *Client) transportError(ctx context.Context, callContext context.Context, err error) error {
+	switch {
+	case ctx.Err() != nil:
+		return &Error{Code: CodeCancelled, Message: "the call was cancelled; the daemon may still finish the operation", Err: ctx.Err()}
+	case c.isClosed():
+		return closedError()
+	case callContext.Err() != nil:
+		return &Error{Code: CodeTimeout, Message: "the daemon did not answer within the call's timeout; it may still finish the operation", Err: context.DeadlineExceeded}
+	default:
+		return &Error{Code: CodeConnectionFailed, Message: err.Error(), Err: err}
 	}
-	if json.Unmarshal(content, &decoded) == nil {
-		if decoded.Code != "" {
-			answered.Code = decoded.Code
-		}
-		if decoded.Message != "" {
-			answered.Message = decoded.Message
-		}
-	}
-	return answered
 }
 
-// absolutePath resolves a relative path against the working directory; the
-// daemon needs absolute paths.
+// absolutePath resolves a relative path against the working directory and
+// cleans it; the daemon needs absolute paths.
 func absolutePath(path string) (string, error) {
 	if path == "" {
 		return "", nil
@@ -254,9 +318,12 @@ func absolutePath(path string) (string, error) {
 	return filepath.Join(directory, path), nil
 }
 
-// millis renders a duration as the API's milliseconds, or 0 for none.
-func millis(duration time.Duration) int64 {
-	return duration.Milliseconds()
+// millis renders a duration as the API's milliseconds, refusing a negative one.
+func millis(duration time.Duration, name string) (int64, error) {
+	if duration < 0 {
+		return 0, invalidArgument(name + " must not be negative")
+	}
+	return duration.Milliseconds(), nil
 }
 
 // Status returns the session, its server, and the first page of databases on this machine.
@@ -267,33 +334,28 @@ func (c *Client) Status(ctx context.Context) (*Status, error) {
 // StatusPage returns up to limit databases whose names sort after the cursor.
 func (c *Client) StatusPage(ctx context.Context, after string, limit int) (*Status, error) {
 	var status Status
-	if err := c.call(ctx, http.MethodGet, "/v1/status/show?"+url.Values{"after": {after}, "limit": {strconv.Itoa(limit)}}.Encode(), nil, &status); err != nil {
+	if err := c.call(ctx, http.MethodGet, "/v1/status/show?"+url.Values{"after": {after}, "limit": {strconv.Itoa(limit)}}.Encode(), nil, &status, 0); err != nil {
 		return nil, err
 	}
 	return &status, nil
 }
 
-// Databases returns every database. Use DatabasesPage for bounded memory.
+// Databases returns every database. AllDatabases iterates with bounded memory.
 func (c *Client) Databases(ctx context.Context) ([]DatabaseStatus, error) {
-	var result []DatabaseStatus
-	after := ""
-	for {
-		page, err := c.DatabasesPage(ctx, after, 100)
+	var databases []DatabaseStatus
+	for database, err := range c.AllDatabases(ctx) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, page.Databases...)
-		if page.Next == "" {
-			return result, nil
-		}
-		after = page.Next
+		databases = append(databases, database)
 	}
+	return databases, nil
 }
 
 // DatabasesPage returns one page. Pass Next as after to continue.
-func (c *Client) DatabasesPage(ctx context.Context, after string, limit int) (*DatabasePage, error) {
-	var page DatabasePage
-	if err := c.call(ctx, http.MethodGet, "/v1/databases/list?"+url.Values{"after": {after}, "limit": {strconv.Itoa(limit)}}.Encode(), nil, &page); err != nil {
+func (c *Client) DatabasesPage(ctx context.Context, after string, limit int) (*DatabaseStatusList, error) {
+	var page DatabaseStatusList
+	if err := c.call(ctx, http.MethodGet, "/v1/databases/list?"+url.Values{"after": {after}, "limit": {strconv.Itoa(limit)}}.Encode(), nil, &page, 0); err != nil {
 		return nil, err
 	}
 	return &page, nil
@@ -302,7 +364,7 @@ func (c *Client) DatabasesPage(ctx context.Context, after string, limit int) (*D
 // Database returns one database's role, state, and synced versions.
 func (c *Client) Database(ctx context.Context, name string) (*DatabaseStatus, error) {
 	var status DatabaseStatus
-	if err := c.call(ctx, http.MethodGet, "/v1/databases/status?"+url.Values{"name": {name}}.Encode(), nil, &status); err != nil {
+	if err := c.call(ctx, http.MethodGet, "/v1/databases/status?"+url.Values{"name": {name}}.Encode(), nil, &status, 0); err != nil {
 		return nil, err
 	}
 	return &status, nil
@@ -311,7 +373,7 @@ func (c *Client) Database(ctx context.Context, name string) (*DatabaseStatus, er
 // Sync syncs a database now and returns once the server acknowledged it.
 func (c *Client) Sync(ctx context.Context, name string) (*DatabaseStatus, error) {
 	var status DatabaseStatus
-	if err := c.call(ctx, http.MethodPost, "/v1/databases/sync", map[string]string{"name": name}, &status); err != nil {
+	if err := c.call(ctx, http.MethodPost, "/v1/databases/sync", NameRequest{Name: name}, &status, 0); err != nil {
 		return nil, err
 	}
 	return &status, nil
@@ -325,34 +387,37 @@ type VersionsArgs struct {
 	Limit int
 }
 
-// Versions lists the versions of a database the server can restore, oldest first.
-func (c *Client) Versions(ctx context.Context, name string, args *VersionsArgs) ([]Version, error) {
+// Versions lists the versions of a database the server can restore, oldest
+// first. AllVersions iterates with bounded memory.
+func (c *Client) Versions(ctx context.Context, name string, args *VersionsArgs) ([]RestorableVersion, error) {
+	versions := []RestorableVersion{}
+	for version, err := range c.AllVersions(ctx, name, args) {
+		if err != nil {
+			return nil, err
+		}
+		versions = append(versions, version)
+	}
+	return versions, nil
+}
+
+// VersionsPage returns one page of versions after args.After, at most
+// args.Limit when positive. Pass Next as After to continue; 0 means no more.
+func (c *Client) VersionsPage(ctx context.Context, name string, args *VersionsArgs) (*VersionList, error) {
 	if args == nil {
 		args = &VersionsArgs{}
 	}
-	versions := []Version{}
-	after := args.After
-	for {
-		query := url.Values{"name": {name}}
-		if after > 0 {
-			query.Set("after", strconv.FormatInt(after, 10))
-		}
-		if args.Limit > 0 {
-			query.Set("limit", strconv.Itoa(args.Limit-len(versions)))
-		}
-		var page struct {
-			Versions []Version `json:"versions"`
-			Next     int64     `json:"next"`
-		}
-		if err := c.call(ctx, http.MethodGet, "/v1/databases/versions?"+query.Encode(), nil, &page); err != nil {
-			return nil, err
-		}
-		versions = append(versions, page.Versions...)
-		if page.Next == 0 || page.Next <= after || len(page.Versions) == 0 || args.Limit > 0 && len(versions) >= args.Limit {
-			return versions, nil
-		}
-		after = page.Next
+	query := url.Values{"name": {name}}
+	if args.After > 0 {
+		query.Set("after", strconv.FormatInt(args.After, 10))
 	}
+	if args.Limit > 0 {
+		query.Set("limit", strconv.Itoa(args.Limit))
+	}
+	var page VersionList
+	if err := c.call(ctx, http.MethodGet, "/v1/databases/versions?"+query.Encode(), nil, &page, 0); err != nil {
+		return nil, err
+	}
+	return &page, nil
 }
 
 // RestoreArgs picks the file and the version a restore writes.
@@ -370,10 +435,10 @@ type RestoreArgs struct {
 // Restore writes a version of a database to a new file and checks it.
 func (c *Client) Restore(ctx context.Context, name string, args *RestoreArgs) (*RestoreResult, error) {
 	if args == nil || args.To == "" {
-		return nil, &Error{Code: "invalid_argument", Message: "restore needs a path to write to"}
+		return nil, invalidArgument("restore needs a path to write to")
 	}
 	if args.Version != 0 && !args.Time.IsZero() {
-		return nil, &Error{Code: "invalid_argument", Message: "restore takes a version or a time, not both"}
+		return nil, invalidArgument("restore takes a version or a time, not both")
 	}
 	path, err := absolutePath(args.To)
 	if err != nil {
@@ -387,7 +452,7 @@ func (c *Client) Restore(ctx context.Context, name string, args *RestoreArgs) (*
 		body["time"] = args.Time.UTC().Format(time.RFC3339Nano)
 	}
 	var result RestoreResult
-	if err := c.call(ctx, http.MethodPost, "/v1/databases/restore", body, &result); err != nil {
+	if err := c.call(ctx, http.MethodPost, "/v1/databases/restore", body, &result, 0); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -411,37 +476,39 @@ type AcquireArgs struct {
 	Timeout time.Duration
 }
 
-// Acquire takes the write lock on a database and makes the local file the
-// server's head, for worker pools that move databases between machines.
-func (c *Client) Acquire(ctx context.Context, name string, args *AcquireArgs) (*AcquireResult, error) {
-	if args == nil {
-		args = &AcquireArgs{}
-	}
+// acquireRequest builds the wire request for name and args.
+func acquireRequest(name string, args *AcquireArgs) (*AcquireRequest, error) {
 	path, err := absolutePath(args.To)
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]any{"name": name}
-	if path != "" {
-		body["path"] = path
+	timeout, err := millis(args.Timeout, "the acquire timeout")
+	if err != nil {
+		return nil, err
 	}
-	if args.Maintenance {
-		body["maintenance"] = true
-	}
+	body := &AcquireRequest{Name: name, Path: path, Maintenance: args.Maintenance, MachineLabel: args.MachineLabel, TimeoutMillis: timeout}
 	if args.OffloadReleased {
-		body["offload"] = "released"
-	}
-	if args.MachineLabel != "" {
-		body["machine_label"] = args.MachineLabel
+		body.Offload = AcquireRequestOffloadReleased
 	}
 	if args.BlockOnLost {
-		body["on_lost"] = "block"
+		body.OnLost = AcquireRequestOnLostBlock
 	}
-	if args.Timeout > 0 {
-		body["timeout_millis"] = millis(args.Timeout)
+	return body, nil
+}
+
+// Acquire takes the write lock on a database and makes the local file the
+// server's head, for worker pools that move databases between machines.
+// Managed acquires, opens, closes, and releases around a function.
+func (c *Client) Acquire(ctx context.Context, name string, args *AcquireArgs) (*AcquireResult, error) {
+	if args == nil {
+		args = &AcquireArgs{}
+	}
+	body, err := acquireRequest(name, args)
+	if err != nil {
+		return nil, err
 	}
 	var result AcquireResult
-	if err := c.call(ctx, http.MethodPost, "/v1/databases/acquire", body, &result); err != nil {
+	if err := c.call(ctx, http.MethodPost, "/v1/databases/acquire", body, &result, args.Timeout); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -458,23 +525,22 @@ type ReleaseArgs struct {
 }
 
 // Release syncs an acquired database a final time, runs its maintenance, and
-// releases its write lock.
+// releases its write lock. Every connection to it must be closed first, or
+// it fails with still_open once Timeout runs out.
 func (c *Client) Release(ctx context.Context, name string, args *ReleaseArgs) (*ReleaseResult, error) {
 	if args == nil {
 		args = &ReleaseArgs{}
 	}
-	body := map[string]any{"name": name}
+	timeout, err := millis(args.Timeout, "the release timeout")
+	if err != nil {
+		return nil, err
+	}
+	body := ReleaseRequest{Name: name, Offload: args.Offload, TimeoutMillis: timeout}
 	if args.Wait != "" && args.Wait != DurabilityNone {
-		body["wait"] = args.Wait
-	}
-	if args.Offload {
-		body["offload"] = true
-	}
-	if args.Timeout > 0 {
-		body["timeout_millis"] = millis(args.Timeout)
+		body.Wait = ReleaseRequestWait(args.Wait)
 	}
 	var result ReleaseResult
-	if err := c.call(ctx, http.MethodPost, "/v1/databases/release", body, &result); err != nil {
+	if err := c.call(ctx, http.MethodPost, "/v1/databases/release", body, &result, args.Timeout); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -484,7 +550,7 @@ func (c *Client) Release(ctx context.Context, name string, args *ReleaseArgs) (*
 // holds its last version. Acquire brings it back.
 func (c *Client) Offload(ctx context.Context, name string) (*DatabaseStatus, error) {
 	var status DatabaseStatus
-	if err := c.call(ctx, http.MethodPost, "/v1/databases/offload", map[string]string{"name": name}, &status); err != nil {
+	if err := c.call(ctx, http.MethodPost, "/v1/databases/offload", NameRequest{Name: name}, &status, 0); err != nil {
 		return nil, err
 	}
 	return &status, nil
@@ -493,41 +559,34 @@ func (c *Client) Offload(ctx context.Context, name string) (*DatabaseStatus, err
 // Writer returns which machine writes a database and how long its lease runs.
 func (c *Client) Writer(ctx context.Context, name string) (*Writer, error) {
 	var writer Writer
-	if err := c.call(ctx, http.MethodGet, "/v1/databases/writer?"+url.Values{"name": {name}}.Encode(), nil, &writer); err != nil {
+	if err := c.call(ctx, http.MethodGet, "/v1/databases/writer?"+url.Values{"name": {name}}.Encode(), nil, &writer, 0); err != nil {
 		return nil, err
 	}
 	return &writer, nil
 }
 
-// Backups lists every backup and failover on this machine.
+// Backups lists every backup and failover rule on this machine.
 func (c *Client) Backups(ctx context.Context) ([]BackupRule, error) {
-	var list struct {
-		Backups []BackupRule `json:"backups"`
-	}
-	if err := c.call(ctx, http.MethodGet, "/v1/backup-rules/list", nil, &list); err != nil {
+	var list BackupList
+	if err := c.call(ctx, http.MethodGet, "/v1/backup-rules/list", nil, &list, 0); err != nil {
 		return nil, err
 	}
 	return list.Backups, nil
 }
 
-// StopBackupResult reports whether a remote release remains pending.
-type StopBackupResult struct {
-	LeasePending bool `json:"lease_pending"`
-}
-
 // StopBackup stops the single-file backup for an exact remote name on this machine.
 func (c *Client) StopBackup(ctx context.Context, name string) (*StopBackupResult, error) {
-	return c.stopBackup(ctx, map[string]string{"name": name})
+	return c.stopBackup(ctx, StopBackupRequest{Name: name})
 }
 
 // StopBackupRule stops a whole rule and future discovery using its saved ID.
 func (c *Client) StopBackupRule(ctx context.Context, id string) (*StopBackupResult, error) {
-	return c.stopBackup(ctx, map[string]string{"rule_id": id})
+	return c.stopBackup(ctx, StopBackupRequest{RuleID: id})
 }
 
-func (c *Client) stopBackup(ctx context.Context, selector map[string]string) (*StopBackupResult, error) {
+func (c *Client) stopBackup(ctx context.Context, selector StopBackupRequest) (*StopBackupResult, error) {
 	var result StopBackupResult
-	if err := c.call(ctx, http.MethodPost, "/v1/backup-rules/stop", selector, &result); err != nil {
+	if err := c.call(ctx, http.MethodPost, "/v1/backup-rules/stop", selector, &result, 0); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -536,7 +595,7 @@ func (c *Client) stopBackup(ctx context.Context, selector map[string]string) (*S
 // Replicas lists prefix replicas and every replica on this machine.
 func (c *Client) Replicas(ctx context.Context) (*ReplicaList, error) {
 	var list ReplicaList
-	if err := c.call(ctx, http.MethodGet, "/v1/replicas/list", nil, &list); err != nil {
+	if err := c.call(ctx, http.MethodGet, "/v1/replicas/list", nil, &list, 0); err != nil {
 		return nil, err
 	}
 	return &list, nil
@@ -562,31 +621,24 @@ func (c *Client) Replicate(ctx context.Context, name string, args *ReplicateArgs
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]any{"name": name}
-	if path != "" {
-		body["to"] = path
-	}
-	if args.WriteProtection != "" {
-		body["write_protection"] = args.WriteProtection
-	}
-	if args.Timeout > 0 {
-		body["timeout_millis"] = millis(args.Timeout)
-	}
-	var result struct {
-		Database *DatabaseStatus `json:"database"`
-	}
-	if err := c.call(ctx, http.MethodPost, "/v1/replicas/start", body, &result); err != nil {
+	timeout, err := millis(args.Timeout, "the replica timeout")
+	if err != nil {
 		return nil, err
 	}
-	if result.Database == nil {
-		return nil, &Error{Code: "invalid_response", Message: "the daemon did not return the replica", Status: http.StatusOK}
+	body := ReplicaRequest{Name: name, To: path, WriteProtection: args.WriteProtection, TimeoutMillis: timeout}
+	var result ReplicaResult
+	if err := c.call(ctx, http.MethodPost, "/v1/replicas/start", body, &result, args.Timeout); err != nil {
+		return nil, err
 	}
-	return result.Database, nil
+	if result.Database.Name == "" {
+		return nil, &Error{Code: CodeInvalidResponse, Message: "the daemon did not return the replica", Status: http.StatusOK}
+	}
+	return &result.Database, nil
 }
 
 // StopReplica stops a replica. The file stays, unlocked, at its last version.
 func (c *Client) StopReplica(ctx context.Context, name string) error {
-	return c.call(ctx, http.MethodPost, "/v1/replicas/stop", map[string]string{"name": name}, nil)
+	return c.call(ctx, http.MethodPost, "/v1/replicas/stop", StopReplicaRequest{Name: name}, nil, 0)
 }
 
 // ReplicatePrefixArgs configures live replicas of a namespace.
@@ -602,47 +654,40 @@ type ReplicatePrefixArgs struct {
 // happen in the background; returning does not mean every replica is local.
 func (c *Client) ReplicatePrefix(ctx context.Context, prefix string, args *ReplicatePrefixArgs) (*PrefixReplica, error) {
 	if args == nil || args.To == "" {
-		return nil, &Error{Code: "invalid_argument", Message: "replicating a prefix needs a directory"}
+		return nil, invalidArgument("replicating a prefix needs a directory")
 	}
 	path, err := absolutePath(args.To)
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]any{"prefix": prefix, "to": path}
-	if args.WriteProtection != "" {
-		body["write_protection"] = args.WriteProtection
-	}
-	var result struct {
-		Prefix *PrefixReplica `json:"prefix"`
-	}
-	if err := c.call(ctx, http.MethodPost, "/v1/replicas/start", body, &result); err != nil {
+	body := ReplicaRequest{Prefix: prefix, To: path, WriteProtection: args.WriteProtection}
+	var result ReplicaResult
+	if err := c.call(ctx, http.MethodPost, "/v1/replicas/start", body, &result, 0); err != nil {
 		return nil, err
 	}
-	if result.Prefix == nil {
-		return nil, &Error{Code: "invalid_response", Message: "the daemon did not return the prefix replica", Status: http.StatusOK}
+	if result.Prefix.ID == "" {
+		return nil, &Error{Code: CodeInvalidResponse, Message: "the daemon did not return the prefix replica", Status: http.StatusOK}
 	}
-	return result.Prefix, nil
+	return &result.Prefix, nil
 }
 
 // StopReplicaPrefix stops a prefix replica and its replicas. Files stay,
 // unlocked, at their last versions. Use the same prefix and directory as at start.
 func (c *Client) StopReplicaPrefix(ctx context.Context, prefix string, to string) error {
 	if to == "" {
-		return &Error{Code: "invalid_argument", Message: "stopping a prefix replica needs a directory"}
+		return invalidArgument("stopping a prefix replica needs a directory")
 	}
 	path, err := absolutePath(to)
 	if err != nil {
 		return err
 	}
-	return c.call(ctx, http.MethodPost, "/v1/replicas/stop", map[string]string{"prefix": prefix, "to": path}, nil)
+	return c.call(ctx, http.MethodPost, "/v1/replicas/stop", StopReplicaRequest{Prefix: prefix, To: path}, nil, 0)
 }
 
 // Conflicts lists conflict copies: local copies saved because they diverged from the server.
 func (c *Client) Conflicts(ctx context.Context) ([]Conflict, error) {
-	var list struct {
-		Conflicts []Conflict `json:"conflicts"`
-	}
-	if err := c.call(ctx, http.MethodGet, "/v1/conflicts/list", nil, &list); err != nil {
+	var list ConflictList
+	if err := c.call(ctx, http.MethodGet, "/v1/conflicts/list", nil, &list, 0); err != nil {
 		return nil, err
 	}
 	return list.Conflicts, nil
@@ -650,7 +695,7 @@ func (c *Client) Conflicts(ctx context.Context) ([]Conflict, error) {
 
 // DeleteConflict deletes a conflict copy and its -wal and -shm files.
 func (c *Client) DeleteConflict(ctx context.Context, id string) error {
-	return c.call(ctx, http.MethodPost, "/v1/conflicts/delete", map[string]string{"id": id}, nil)
+	return c.call(ctx, http.MethodPost, "/v1/conflicts/delete", IDRequest{ID: id}, nil, 0)
 }
 
 // EventsArgs selects a page of events.
@@ -665,17 +710,21 @@ type EventsArgs struct {
 }
 
 // Events returns one page of events, oldest first, waiting up to Wait for
-// the first new one.
+// the first new one. WatchEvents follows them.
 func (c *Client) Events(ctx context.Context, args *EventsArgs) (*EventList, error) {
 	if args == nil {
 		args = &EventsArgs{}
+	}
+	wait, err := millis(args.Wait, "the event wait")
+	if err != nil {
+		return nil, err
 	}
 	query := url.Values{}
 	if args.After != 0 {
 		query.Set("after", strconv.FormatInt(args.After, 10))
 	}
-	if args.Wait > 0 {
-		query.Set("wait_millis", strconv.FormatInt(millis(args.Wait), 10))
+	if wait > 0 {
+		query.Set("wait_millis", strconv.FormatInt(wait, 10))
 	}
 	if args.Limit > 0 {
 		query.Set("limit", strconv.Itoa(args.Limit))
@@ -685,7 +734,7 @@ func (c *Client) Events(ctx context.Context, args *EventsArgs) (*EventList, erro
 		path += "?" + query.Encode()
 	}
 	var list EventList
-	if err := c.call(ctx, http.MethodGet, path, nil, &list); err != nil {
+	if err := c.call(ctx, http.MethodGet, path, nil, &list, args.Wait); err != nil {
 		return nil, err
 	}
 	return &list, nil
@@ -700,20 +749,18 @@ type ShutdownArgs struct {
 }
 
 // Shutdown syncs every database a final time, releases every write lock,
-// ends the session, and stops the daemon.
+// ends the session, and stops the daemon. Close never does this.
 func (c *Client) Shutdown(ctx context.Context, args *ShutdownArgs) (*ShutdownResult, error) {
 	if args == nil {
 		args = &ShutdownArgs{}
 	}
-	body := map[string]any{}
-	if args.Wait != "" {
-		body["wait"] = args.Wait
+	timeout, err := millis(args.Timeout, "the shutdown timeout")
+	if err != nil {
+		return nil, err
 	}
-	if args.Timeout > 0 {
-		body["timeout_millis"] = millis(args.Timeout)
-	}
+	body := ShutdownRequest{Wait: ShutdownRequestWait(args.Wait), TimeoutMillis: timeout}
 	var result ShutdownResult
-	if err := c.call(ctx, http.MethodPost, "/v1/session/shutdown", body, &result); err != nil {
+	if err := c.call(ctx, http.MethodPost, "/v1/session/shutdown", body, &result, args.Timeout); err != nil {
 		return nil, err
 	}
 	return &result, nil

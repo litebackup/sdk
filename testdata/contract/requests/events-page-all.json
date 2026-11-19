@@ -1,0 +1,22 @@
+{
+  "description": "after, wait, and limit.",
+  "operation": "events.page",
+  "args": {
+    "after": 5,
+    "wait": "30s",
+    "limit": 10
+  },
+  "request": {
+    "method": "GET",
+    "path": "/v1/events/list",
+    "query": {
+      "after": "5",
+      "wait_millis": "30000",
+      "limit": "10"
+    }
+  },
+  "response": {
+    "events": [],
+    "next": 5
+  }
+}

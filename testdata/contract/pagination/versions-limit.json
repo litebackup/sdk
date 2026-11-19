@@ -1,0 +1,72 @@
+{
+  "description": "A limit asks for what remains and stops once reached.",
+  "operation": "databases.versions",
+  "args": {
+    "name": "main.sqlite",
+    "after": 10,
+    "limit": 3
+  },
+  "item_key": "version",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/databases/versions",
+        "query": {
+          "name": "main.sqlite",
+          "after": "10",
+          "limit": "3"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "versions": [
+            {
+              "version": 11,
+              "state_digest": "d11",
+              "time": "2026-11-15T09:11:00Z"
+            },
+            {
+              "version": 12,
+              "state_digest": "d12",
+              "time": "2026-11-15T09:12:00Z"
+            }
+          ],
+          "next": 12
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/databases/versions",
+        "query": {
+          "name": "main.sqlite",
+          "after": "12",
+          "limit": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "versions": [
+            {
+              "version": 13,
+              "state_digest": "d13",
+              "time": "2026-11-15T09:13:00Z"
+            }
+          ],
+          "next": 13
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      11,
+      12,
+      13
+    ]
+  }
+}

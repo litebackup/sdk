@@ -1,0 +1,48 @@
+{
+  "description": "Stopping after the first event sends no further request.",
+  "operation": "events.watch",
+  "args": {
+    "after": 7
+  },
+  "item_key": "id",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/events/list",
+        "query": {
+          "after": "7",
+          "wait_millis": "30000"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "events": [
+            {
+              "id": 8,
+              "time": "2026-11-15T09:30:00Z",
+              "name": "main.sqlite",
+              "type": "synced",
+              "message": "version 8"
+            },
+            {
+              "id": 9,
+              "time": "2026-11-15T09:30:00Z",
+              "name": "main.sqlite",
+              "type": "synced",
+              "message": "version 9"
+            }
+          ],
+          "next": 9
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      8
+    ]
+  },
+  "take": 1
+}

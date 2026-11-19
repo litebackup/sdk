@@ -1,0 +1,64 @@
+{
+  "description": "Failed work and close raise both and do not release.",
+  "scope": {
+    "name": "agents/42.sqlite",
+    "to": "agents/42.sqlite",
+    "durability": "cloud",
+    "offload": true
+  },
+  "fail": [
+    "work",
+    "close"
+  ],
+  "acquire_response": {
+    "database": {
+      "name": "agents/42.sqlite",
+      "path": "{cwd}/agents/42.sqlite",
+      "role": "origin",
+      "state": "syncing",
+      "acquired": true,
+      "failover": false,
+      "local_changed": false,
+      "synced_server": {
+        "version": 3
+      },
+      "synced_cloud": {
+        "version": 2
+      },
+      "journal_mode": "wal",
+      "page_count": 2,
+      "sync_count": 3,
+      "hint_misses": 0
+    },
+    "outcome": "created"
+  },
+  "expect": {
+    "steps": [
+      "acquire",
+      "open",
+      "work",
+      "close"
+    ],
+    "acquire_body": {
+      "name": "agents/42.sqlite",
+      "path": "{cwd}/agents/42.sqlite"
+    },
+    "release_body": null,
+    "raised": [
+      {
+        "source": "work"
+      },
+      {
+        "code": "scope_cleanup_failed",
+        "step": "close",
+        "cause": "close",
+        "details": {
+          "step": "close",
+          "name": "agents/42.sqlite",
+          "path": "{cwd}/agents/42.sqlite",
+          "acquired": true
+        }
+      }
+    ]
+  }
+}

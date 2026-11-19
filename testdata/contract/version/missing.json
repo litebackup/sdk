@@ -1,0 +1,9 @@
+{
+  "description": "A daemon that does not report its version is refused.",
+  "client_version": null,
+  "accepted": false,
+  "expect": {
+    "code": "incompatible_version",
+    "status": 0
+  }
+}

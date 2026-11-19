@@ -183,7 +183,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Persist a continuous backup rule. Matching and uploading happen in the background. */
+        /** @description Persist a continuous backup rule. Matching and uploading happen in the background. Starting the same path again with the same name, prefix, watch, and maximum_local_databases returns the saved rule, so apps can call it on every start. Other settings for a saved path are refused with 409 exists, and the error's rule is the saved rule. */
         post: operations["startBackup"];
         delete?: never;
         options?: never;
@@ -449,10 +449,24 @@ export interface components {
             recent_discovery_errors?: components["schemas"]["Event"][];
             databases: components["schemas"]["DatabaseStatus"][];
         };
+        BackupRule: {
+            id: string;
+            /** @description the path or glob */
+            path: string;
+            /** @description the resolved remote name for a single file, or empty for a directory or glob */
+            name: string;
+            prefix: string;
+            watch: string;
+            /** Format: int64 */
+            maximum_local_databases: number;
+            failover: boolean;
+        };
         Error: {
-            /** @description such as exists (a restore target exists), in_use (another machine writes the database), not_found, still_open, invalid_argument, timeout */
+            /** @description such as exists (a restore target exists, or a backup rule with other settings already covers the path), in_use (another machine writes the database), not_found, still_open, invalid_argument, timeout */
             code: string;
             message: string;
+            /** @description for exists from backup-rules/start, the rule already saved for the path; stop it by its ID before saving different settings */
+            rule?: components["schemas"]["BackupRule"];
         };
         DatabaseStatusList: {
             /** @description Pass this name as after to read the next page. Omitted on the last page. */
@@ -607,18 +621,6 @@ export interface components {
              * @description when positive, offload the least recently changed idle databases past this count once the bucket holds them
              */
             maximum_local_databases?: number;
-        };
-        BackupRule: {
-            id: string;
-            /** @description the path or glob */
-            path: string;
-            /** @description the resolved remote name for a single file, or empty for a directory or glob */
-            name: string;
-            prefix: string;
-            watch: string;
-            /** Format: int64 */
-            maximum_local_databases: number;
-            failover: boolean;
         };
         BackupList: {
             backups: components["schemas"]["BackupRule"][];

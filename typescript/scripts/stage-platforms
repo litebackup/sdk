@@ -1,46 +1,74 @@
 #!/usr/bin/env node
-// Copy litebackup binaries from scripts/build archives into the npm platform packages.
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, copyFileSync, chmodSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+// Copy verified litebackup binaries into the npm platform packages.
+//
+// Usage: scripts/stage-platforms [--version VERSION] [--npm-root DIRECTORY] RELEASE-DIRECTORY METADATA-JSON
+//
+// RELEASE-DIRECTORY holds the cli release's files under their published names
+// (litebackup-linux-amd64, ...), and METADATA-JSON is the package metadata
+// https://litebackup.com/pkg/metadata serves. The release is taken from its
+// signed document, which must verify with Litebackup's release keys, and every
+// file must match its signed SHA-256 before anything is copied. VERSION is
+// package.json's version unless given. Run `npm run build` first.
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const distribution = process.argv[2];
-if (!distribution || !existsSync(distribution)) {
-  console.error("usage: scripts/stage-platforms <litebackup dist directory>");
+const usage = "usage: scripts/stage-platforms [--version VERSION] [--npm-root DIRECTORY] RELEASE-DIRECTORY METADATA-JSON";
+
+const positional = [];
+let version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+let npmRoot = join(root, "npm");
+for (let index = 2; index < process.argv.length; index++) {
+  const argument = process.argv[index];
+  if (argument === "--version") version = process.argv[++index];
+  else if (argument === "--npm-root") npmRoot = resolve(process.argv[++index] ?? "");
+  else if (argument.startsWith("-")) fail(`unknown flag ${argument}\n${usage}`);
+  else positional.push(argument);
+}
+if (positional.length !== 2 || !version) fail(usage);
+const [releaseDirectory, metadataPath] = positional;
+
+function fail(message) {
+  console.error(`error: ${message}`);
   process.exit(1);
 }
-const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-// npm names architectures x64 and arm64; Go names them amd64 and arm64.
-const platforms = [
-  ["linux", "x64", "amd64"],
-  ["linux", "arm64", "arm64"],
-  ["darwin", "x64", "amd64"],
-  ["darwin", "arm64", "arm64"],
-];
-let staged = 0;
-for (const [system, npmArchitecture, goArchitecture] of platforms) {
-  const archive = join(distribution, `litebackup-${version}-${system}-${goArchitecture}.tar.zst`);
-  const target = join(root, "npm", `${system}-${npmArchitecture}`, "bin");
-  if (!existsSync(archive)) {
-    console.warn(`skipping ${system}-${npmArchitecture}: ${archive} is missing`);
+
+const releaseModule = join(root, "dist", "src", "release.js");
+if (!existsSync(releaseModule)) fail("dist/src/release.js is missing; run npm run build first");
+const { findRelease } = await import(releaseModule);
+
+let release;
+try {
+  release = findRelease(readFileSync(metadataPath, "utf8"), { version });
+} catch (error) {
+  fail(`the metadata does not hold a verified release ${version}: ${error.message}`);
+}
+
+const { platforms } = JSON.parse(readFileSync(join(root, "..", "testdata", "contract", "binary", "platforms.json"), "utf8"));
+const verified = [];
+for (const platform of platforms) {
+  const file = release.files.find((candidate) => candidate.name === platform.release_file);
+  if (!file) fail(`release ${version} has no ${platform.release_file}`);
+  const source = join(releaseDirectory, file.filename);
+  if (!existsSync(source)) {
+    console.warn(`skipping ${platform.os}-${platform.arch}: ${source} is missing`);
     continue;
   }
-  const extracted = mkdtempSync(join(tmpdir(), "litebackup-stage-"));
-  try {
-    execFileSync("tar", ["--zstd", "--extract", "--file", archive, "--directory", extracted]);
-    mkdirSync(target, { recursive: true });
-    copyFileSync(join(extracted, "litebackup"), join(target, "litebackup"));
-    chmodSync(join(target, "litebackup"), 0o755);
-    staged++;
-    console.log(`staged ${system}-${npmArchitecture}`);
-  } finally {
-    rmSync(extracted, { recursive: true, force: true });
+  const content = readFileSync(source);
+  const digest = createHash("sha256").update(content).digest("hex");
+  if (digest !== file.sha256 || content.length !== file.size) {
+    fail(`${source} does not match release ${version}: SHA-256 ${digest}, ${content.length} bytes; signed ${file.sha256}, ${file.size} bytes`);
   }
+  verified.push({ platform, source });
 }
-if (staged === 0) {
-  console.error("no platform archives found");
-  process.exit(1);
+if (verified.length === 0) fail(`no files of release ${version} found in ${releaseDirectory}`);
+
+for (const { platform, source } of verified) {
+  const target = join(npmRoot, `${platform.os}-${platform.arch}`, "bin", "litebackup");
+  mkdirSync(dirname(target), { recursive: true });
+  copyFileSync(source, target);
+  chmodSync(target, 0o755);
+  console.log(`staged ${platform.os}-${platform.arch} from verified ${platform.release_file} ${version}`);
 }

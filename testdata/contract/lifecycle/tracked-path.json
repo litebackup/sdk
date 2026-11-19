@@ -1,0 +1,49 @@
+{
+  "description": "Without to, the scope opens the path acquire returned.",
+  "scope": {
+    "name": "agents/42.sqlite",
+    "durability": "server"
+  },
+  "fail": [],
+  "acquire_response": {
+    "database": {
+      "name": "agents/42.sqlite",
+      "path": "/var/lib/app/agents/42.sqlite",
+      "role": "origin",
+      "state": "syncing",
+      "acquired": true,
+      "failover": false,
+      "local_changed": false,
+      "synced_server": {
+        "version": 3
+      },
+      "synced_cloud": {
+        "version": 2
+      },
+      "journal_mode": "wal",
+      "page_count": 2,
+      "sync_count": 3,
+      "hint_misses": 0
+    },
+    "outcome": "created"
+  },
+  "expect": {
+    "steps": [
+      "acquire",
+      "open",
+      "work",
+      "close",
+      "release"
+    ],
+    "acquire_body": {
+      "name": "agents/42.sqlite"
+    },
+    "open_path": "/var/lib/app/agents/42.sqlite",
+    "release_body": {
+      "name": "agents/42.sqlite",
+      "wait": "server",
+      "timeout_millis": 600000
+    },
+    "raised": []
+  }
+}

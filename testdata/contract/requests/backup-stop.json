@@ -1,0 +1,18 @@
+{
+  "description": "Stop a single-file backup by name.",
+  "operation": "backups.stop",
+  "args": {
+    "name": "main.sqlite"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/backup-rules/stop",
+    "query": {},
+    "body": {
+      "name": "main.sqlite"
+    }
+  },
+  "response": {
+    "lease_pending": false
+  }
+}

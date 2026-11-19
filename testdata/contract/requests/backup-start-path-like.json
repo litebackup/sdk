@@ -1,0 +1,26 @@
+{
+  "description": "A path object is resolved like a string.",
+  "operation": "backups.start",
+  "args": {
+    "source": {
+      "$path": "data/main.sqlite"
+    }
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/backup-rules/start",
+    "query": {},
+    "body": {
+      "path": "{cwd}/data/main.sqlite"
+    }
+  },
+  "response": {
+    "id": "01a1-rule",
+    "path": "/var/lib/app/main.sqlite",
+    "name": "main.sqlite",
+    "prefix": "",
+    "watch": "inotify",
+    "maximum_local_databases": 0,
+    "failover": false
+  }
+}

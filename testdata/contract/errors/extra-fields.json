@@ -1,0 +1,25 @@
+{
+  "description": "Fields besides code and message go to details under their wire names.",
+  "operation": "rules.list",
+  "response": {
+    "status": 409,
+    "content_type": "application/json",
+    "body": "{\"code\":\"exists\",\"message\":\"/var/lib/app/main.sqlite already has a backup rule with other settings\",\"rule\":{\"id\":\"01a1-rule\",\"path\":\"/var/lib/app/main.sqlite\",\"name\":\"main.sqlite\",\"prefix\":\"\",\"watch\":\"inotify\",\"maximum_local_databases\":0,\"failover\":false}}"
+  },
+  "expect": {
+    "code": "exists",
+    "message": "/var/lib/app/main.sqlite already has a backup rule with other settings",
+    "status": 409,
+    "details": {
+      "rule": {
+        "id": "01a1-rule",
+        "path": "/var/lib/app/main.sqlite",
+        "name": "main.sqlite",
+        "prefix": "",
+        "watch": "inotify",
+        "maximum_local_databases": 0,
+        "failover": false
+      }
+    }
+  }
+}

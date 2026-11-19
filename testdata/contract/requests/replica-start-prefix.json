@@ -1,0 +1,26 @@
+{
+  "description": "A prefix replica into a relative directory.",
+  "operation": "replicas.start_prefix",
+  "args": {
+    "prefix": "tenants",
+    "to": "replicas"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/replicas/start",
+    "query": {},
+    "body": {
+      "prefix": "tenants",
+      "to": "{cwd}/replicas"
+    }
+  },
+  "response": {
+    "prefix": {
+      "id": "p1",
+      "prefix": "tenants",
+      "to": "{cwd}/replicas",
+      "write_protection": "lock",
+      "databases": 0
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "A prefix replica without a directory sends nothing.",
+  "operation": "replicas.start_prefix",
+  "args": {
+    "prefix": "tenants"
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

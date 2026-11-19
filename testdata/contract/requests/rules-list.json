@@ -1,0 +1,23 @@
+{
+  "description": "List the saved rules.",
+  "operation": "rules.list",
+  "args": {},
+  "request": {
+    "method": "GET",
+    "path": "/v1/backup-rules/list",
+    "query": {}
+  },
+  "response": {
+    "backups": [
+      {
+        "id": "01a1-rule",
+        "path": "/var/lib/app/main.sqlite",
+        "name": "main.sqlite",
+        "prefix": "",
+        "watch": "inotify",
+        "maximum_local_databases": 0,
+        "failover": false
+      }
+    ]
+  }
+}

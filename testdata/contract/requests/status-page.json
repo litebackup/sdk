@@ -1,0 +1,24 @@
+{
+  "description": "Status takes a cursor and a limit.",
+  "operation": "session.status",
+  "args": {
+    "after": "m.sqlite",
+    "limit": 5
+  },
+  "request": {
+    "method": "GET",
+    "path": "/v1/status/show",
+    "query": {
+      "after": "m.sqlite",
+      "limit": "5"
+    }
+  },
+  "response": {
+    "session": "default",
+    "server": "https://example.litebackup.cloud",
+    "client_version": "1.0.0",
+    "session_id": "s1",
+    "watch": "inotify",
+    "databases": []
+  }
+}

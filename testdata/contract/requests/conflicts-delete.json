@@ -1,0 +1,16 @@
+{
+  "description": "Delete a conflict copy.",
+  "operation": "conflicts.delete",
+  "args": {
+    "id": "c1"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/conflicts/delete",
+    "query": {},
+    "body": {
+      "id": "c1"
+    }
+  },
+  "response": {}
+}

@@ -1,0 +1,47 @@
+{
+  "description": "Each supported platform: the npm package and release file that carry its binary, and its wheel platform tags. A static Linux binary gets both tags; a dynamic one gets manylinux_<glibc>. macOS tags use the binary's minimum OS from LC_BUILD_VERSION.",
+  "platforms": [
+    {
+      "os": "linux",
+      "arch": "x64",
+      "go_arch": "amd64",
+      "machine": "x86_64",
+      "npm_package": "@litebackup/bin-linux-x64",
+      "release_file": "litebackup-linux-amd64",
+      "static_wheel_platforms": [
+        "manylinux_2_17_x86_64",
+        "musllinux_1_2_x86_64"
+      ]
+    },
+    {
+      "os": "linux",
+      "arch": "arm64",
+      "go_arch": "arm64",
+      "machine": "aarch64",
+      "npm_package": "@litebackup/bin-linux-arm64",
+      "release_file": "litebackup-linux-arm64",
+      "static_wheel_platforms": [
+        "manylinux_2_17_aarch64",
+        "musllinux_1_2_aarch64"
+      ]
+    },
+    {
+      "os": "darwin",
+      "arch": "x64",
+      "go_arch": "amd64",
+      "machine": "x86_64",
+      "npm_package": "@litebackup/bin-darwin-x64",
+      "release_file": "litebackup-darwin-amd64",
+      "wheel_platform": "macosx_{major}_{minor}_x86_64"
+    },
+    {
+      "os": "darwin",
+      "arch": "arm64",
+      "go_arch": "arm64",
+      "machine": "arm64",
+      "npm_package": "@litebackup/bin-darwin-arm64",
+      "release_file": "litebackup-darwin-arm64",
+      "wheel_platform": "macosx_{major}_{minor}_arm64"
+    }
+  ]
+}

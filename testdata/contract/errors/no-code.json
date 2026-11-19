@@ -1,0 +1,15 @@
+{
+  "description": "A JSON object without a code keeps its message.",
+  "operation": "rules.list",
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": "{\"message\":\"boom\"}"
+  },
+  "expect": {
+    "code": "http_500",
+    "message": "boom",
+    "status": 500,
+    "details": {}
+  }
+}

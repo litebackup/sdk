@@ -1,0 +1,14 @@
+{
+  "description": "List replicas.",
+  "operation": "replicas.list",
+  "args": {},
+  "request": {
+    "method": "GET",
+    "path": "/v1/replicas/list",
+    "query": {}
+  },
+  "response": {
+    "prefixes": [],
+    "replicas": []
+  }
+}

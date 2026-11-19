@@ -1,0 +1,15 @@
+{
+  "description": "The daemon's sdk_unsupported passes through.",
+  "operation": "rules.list",
+  "response": {
+    "status": 426,
+    "content_type": "application/json",
+    "body": "{\"code\":\"sdk_unsupported\",\"message\":\"SDK version 0.1.0 is older than the minimum 0.4.0 this client supports; upgrade the SDK\"}"
+  },
+  "expect": {
+    "code": "sdk_unsupported",
+    "message": "SDK version 0.1.0 is older than the minimum 0.4.0 this client supports; upgrade the SDK",
+    "status": 426,
+    "details": {}
+  }
+}

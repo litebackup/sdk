@@ -1,0 +1,58 @@
+{
+  "description": "A failed long-poll is retried with backoff from the same cursor.",
+  "operation": "events.watch",
+  "args": {
+    "after": 3
+  },
+  "item_key": "id",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/events/list",
+        "query": {
+          "after": "3",
+          "wait_millis": "30000"
+        }
+      },
+      "response": {
+        "status": 503,
+        "body": {
+          "code": "unavailable",
+          "message": "the daemon is busy"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/events/list",
+        "query": {
+          "after": "3",
+          "wait_millis": "30000"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "events": [
+            {
+              "id": 4,
+              "time": "2026-11-15T09:30:00Z",
+              "name": "main.sqlite",
+              "type": "synced",
+              "message": "version 4"
+            }
+          ],
+          "next": 4
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      4
+    ]
+  },
+  "take": 1
+}

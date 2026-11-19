@@ -1,0 +1,16 @@
+{
+  "description": "Stop one replica.",
+  "operation": "replicas.stop",
+  "args": {
+    "name": "main.sqlite"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/replicas/stop",
+    "query": {},
+    "body": {
+      "name": "main.sqlite"
+    }
+  },
+  "response": {}
+}

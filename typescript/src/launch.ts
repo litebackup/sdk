@@ -5,6 +5,8 @@ import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
+import { LitebackupError } from "./types.js";
+
 /** Overrides the litebackup binary the SDK starts. */
 export const binaryPathEnvironment = "LITEBACKUP_PATH";
 
@@ -38,11 +40,12 @@ function onPath(environment: NodeJS.ProcessEnv): string | undefined {
 }
 
 /**
- * Finds the litebackup binary: LITEBACKUP_PATH, then this platform's
- * optional npm package, then litebackup on PATH, then ~/.local/bin.
+ * Finds the litebackup binary: the explicit path, then LITEBACKUP_PATH, then
+ * this platform's optional npm package, then litebackup on PATH, then
+ * ~/.local/bin. Throws binary_not_found with the install command when there is none.
  */
-export function litebackupBinary(environment: NodeJS.ProcessEnv = process.env): string {
-  const override = environment[binaryPathEnvironment]?.trim();
+export function litebackupBinary(environment: NodeJS.ProcessEnv = process.env, binaryPath?: string): string {
+  const override = binaryPath?.trim() || environment[binaryPathEnvironment]?.trim();
   if (override) {
     return override;
   }
@@ -68,7 +71,7 @@ export function litebackupBinary(environment: NodeJS.ProcessEnv = process.env): 
   if (existsSync(local)) {
     return local;
   }
-  throw new Error(`the litebackup command is not installed; set ${binaryPathEnvironment} or install it with: ${installCommand()}`);
+  throw new LitebackupError("binary_not_found", `the litebackup command is not installed; set ${binaryPathEnvironment} or install it with: ${installCommand()}`, 0);
 }
 
 /** Reports whether something accepts connections on the socket. */
@@ -91,11 +94,11 @@ export function socketListening(socketPath: string): Promise<boolean> {
  * start. Where `litebackup install service` ran, systemd or launchd owns the daemon,
  * and the launch command explains how to reach or start the service instead.
  */
-export async function launchDaemon(args: { session: string; socketPath: string; environment: NodeJS.ProcessEnv; token?: string }): Promise<void> {
+export async function launchDaemon(args: { session: string; socketPath: string; environment: NodeJS.ProcessEnv; token?: string; binaryPath?: string }): Promise<void> {
   if (await socketListening(args.socketPath)) {
     return;
   }
-  const binary = litebackupBinary(args.environment);
+  const binary = litebackupBinary(args.environment, args.binaryPath);
   const environment: NodeJS.ProcessEnv = { ...args.environment, [binaryPathEnvironment]: binary };
   if (args.token) {
     environment[tokenEnvironment] = args.token;
@@ -103,7 +106,7 @@ export async function launchDaemon(args: { session: string; socketPath: string; 
   await new Promise<void>((resolve, reject) => {
     execFile(binary, ["launch", "--session", args.session], { env: environment, timeout: 30_000 }, (error, _stdout, stderr) => {
       if (error) {
-        reject(new Error(`starting Litebackup failed: ${stderr.trim() || error.message}`));
+        reject(new LitebackupError("launch_failed", `starting Litebackup failed: ${stderr.trim() || error.message}`, 0, { cause: error }));
         return;
       }
       resolve();

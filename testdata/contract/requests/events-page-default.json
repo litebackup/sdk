@@ -1,0 +1,14 @@
+{
+  "description": "An event page with no options sends no query.",
+  "operation": "events.page",
+  "args": {},
+  "request": {
+    "method": "GET",
+    "path": "/v1/events/list",
+    "query": {}
+  },
+  "response": {
+    "events": [],
+    "next": 0
+  }
+}

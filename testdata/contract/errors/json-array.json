@@ -1,0 +1,15 @@
+{
+  "description": "JSON that is not an object is text.",
+  "operation": "rules.list",
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": "[\"boom\"]"
+  },
+  "expect": {
+    "code": "http_500",
+    "message": "[\"boom\"]",
+    "status": 500,
+    "details": {}
+  }
+}

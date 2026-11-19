@@ -1,0 +1,24 @@
+{
+  "description": "List conflict copies.",
+  "operation": "conflicts.list",
+  "args": {},
+  "request": {
+    "method": "GET",
+    "path": "/v1/conflicts/list",
+    "query": {}
+  },
+  "response": {
+    "conflicts": [
+      {
+        "id": "c1",
+        "name": "main.sqlite",
+        "path": "/var/lib/app/main.sqlite",
+        "conflict_path": "/var/lib/app/main.sqlite.conflict-1.sqlite",
+        "synced_version": 2,
+        "server_version": 3,
+        "reason": "diverged",
+        "created": "2026-11-15T09:30:00Z"
+      }
+    ]
+  }
+}

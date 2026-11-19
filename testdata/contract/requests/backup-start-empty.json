@@ -1,0 +1,10 @@
+{
+  "description": "An empty source sends nothing.",
+  "operation": "backups.start",
+  "args": {
+    "source": ""
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

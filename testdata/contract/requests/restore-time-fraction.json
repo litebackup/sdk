@@ -1,0 +1,27 @@
+{
+  "description": "Fractional seconds keep only significant digits.",
+  "operation": "databases.restore",
+  "args": {
+    "name": "main.sqlite",
+    "to": "/tmp/r.sqlite",
+    "time": "2026-11-15T09:30:00.250Z"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/databases/restore",
+    "query": {},
+    "body": {
+      "name": "main.sqlite",
+      "path": "/tmp/r.sqlite",
+      "time": "2026-11-15T09:30:00.25Z"
+    }
+  },
+  "response": {
+    "name": "main.sqlite",
+    "path": "{cwd}/restored.sqlite",
+    "version": 3,
+    "page_count": 2,
+    "page_size": 4096,
+    "state_digest": "abc"
+  }
+}

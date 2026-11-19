@@ -1,6 +1,6 @@
 {
   "name": "@litebackup/sdk",
-  "version": "0.7.0",
+  "version": "1.0.0",
   "description": "Back up, replicate, and restore SQLite databases with Litebackup",
   "license": "UNLICENSED",
   "type": "module",
@@ -10,6 +10,18 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
+    },
+    "./better-sqlite3": {
+      "types": "./dist/src/better-sqlite3.d.ts",
+      "default": "./dist/src/better-sqlite3.js"
+    },
+    "./node-sqlite": {
+      "types": "./dist/src/node-sqlite.d.ts",
+      "default": "./dist/src/node-sqlite.js"
+    },
+    "./drizzle": {
+      "types": "./dist/src/drizzle.d.ts",
+      "default": "./dist/src/drizzle.js"
     }
   },
   "files": [
@@ -25,14 +37,29 @@
     "prepack": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\" && npm run build"
   },
   "optionalDependencies": {
-    "@litebackup/bin-darwin-arm64": "0.7.0",
-    "@litebackup/bin-darwin-x64": "0.7.0",
-    "@litebackup/bin-linux-arm64": "0.7.0",
-    "@litebackup/bin-linux-x64": "0.7.0"
+    "@litebackup/bin-darwin-arm64": "1.0.0",
+    "@litebackup/bin-darwin-x64": "1.0.0",
+    "@litebackup/bin-linux-arm64": "1.0.0",
+    "@litebackup/bin-linux-x64": "1.0.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
     "@types/node": "24.19.2",
+    "better-sqlite3": "13.2.0",
+    "drizzle-orm": "0.45.4",
     "openapi-typescript": "7.13.0",
     "typescript": "5.9.3"
+  },
+  "peerDependencies": {
+    "better-sqlite3": ">=11",
+    "drizzle-orm": ">=0.40"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    }
   }
 }

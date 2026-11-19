@@ -9,7 +9,7 @@ import { SignatureError, findRelease } from "../src/index.js";
 // The fixtures are shared with the Go tests: the website's package metadata as
 // Litebackup's release key signed it, and a copy whose 0.3.30 document has one
 // SHA-256 changed under the original signature. Tests run from dist/test.
-const testdata = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "testdata");
+const testdata = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "testdata", "contract", "binary");
 const fixture = (name: string) => readFileSync(join(testdata, name), "utf8");
 
 test("verifies the signed package metadata", () => {

@@ -1,0 +1,36 @@
+{
+  "description": "A replica at the path this machine uses.",
+  "operation": "replicas.start",
+  "args": {
+    "name": "main.sqlite"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/replicas/start",
+    "query": {},
+    "body": {
+      "name": "main.sqlite"
+    }
+  },
+  "response": {
+    "database": {
+      "name": "main.sqlite",
+      "path": "/var/lib/app/main.sqlite",
+      "role": "replica",
+      "state": "syncing",
+      "acquired": false,
+      "failover": false,
+      "local_changed": false,
+      "synced_server": {
+        "version": 3
+      },
+      "synced_cloud": {
+        "version": 2
+      },
+      "journal_mode": "wal",
+      "page_count": 2,
+      "sync_count": 3,
+      "hint_misses": 0
+    }
+  }
+}

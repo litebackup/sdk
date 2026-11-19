@@ -1,0 +1,15 @@
+{
+  "description": "Shutdown with the daemon's defaults.",
+  "operation": "session.shutdown",
+  "args": {},
+  "request": {
+    "method": "POST",
+    "path": "/v1/session/shutdown",
+    "query": {},
+    "body": {}
+  },
+  "response": {
+    "released": 0,
+    "failed": []
+  }
+}

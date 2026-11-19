@@ -12,7 +12,7 @@ import (
 // document has one SHA-256 changed under the original signature.
 func readFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	content, err := os.ReadFile(filepath.Join("..", "testdata", name))
+	content, err := os.ReadFile(filepath.Join("..", "testdata", "contract", "binary", name))
 	if err != nil {
 		t.Fatal(err)
 	}

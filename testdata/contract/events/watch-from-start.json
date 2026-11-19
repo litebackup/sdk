@@ -1,0 +1,89 @@
+{
+  "description": "A watch from the start follows next and the largest event ID.",
+  "operation": "events.watch",
+  "args": {},
+  "item_key": "id",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/events/list",
+        "query": {
+          "wait_millis": "30000"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "events": [
+            {
+              "id": 1,
+              "time": "2026-11-15T09:30:00Z",
+              "name": "main.sqlite",
+              "type": "synced",
+              "message": "version 1"
+            },
+            {
+              "id": 2,
+              "time": "2026-11-15T09:30:00Z",
+              "name": "main.sqlite",
+              "type": "synced",
+              "message": "version 2"
+            }
+          ],
+          "next": 2
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/events/list",
+        "query": {
+          "after": "2",
+          "wait_millis": "30000"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "events": [],
+          "next": 2
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/events/list",
+        "query": {
+          "after": "2",
+          "wait_millis": "30000"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "events": [
+            {
+              "id": 5,
+              "time": "2026-11-15T09:30:00Z",
+              "name": "main.sqlite",
+              "type": "synced",
+              "message": "version 5"
+            }
+          ],
+          "next": 4
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      1,
+      2,
+      5
+    ]
+  },
+  "take": 3
+}

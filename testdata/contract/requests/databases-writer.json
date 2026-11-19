@@ -1,0 +1,21 @@
+{
+  "description": "Writer reads by name.",
+  "operation": "databases.writer",
+  "args": {
+    "name": "main.sqlite"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/v1/databases/writer",
+    "query": {
+      "name": "main.sqlite"
+    }
+  },
+  "response": {
+    "name": "main.sqlite",
+    "active": true,
+    "this_machine": true,
+    "machine": "worker-1",
+    "lapsed": false
+  }
+}

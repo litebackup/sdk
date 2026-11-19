@@ -1,0 +1,28 @@
+{
+  "description": "A glob with a prefix and a local database limit.",
+  "operation": "backups.start",
+  "args": {
+    "source": "/var/lib/app/tenants/**/*.sqlite",
+    "prefix": "tenants/",
+    "maximum_local_databases": 10
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/backup-rules/start",
+    "query": {},
+    "body": {
+      "path": "/var/lib/app/tenants/**/*.sqlite",
+      "prefix": "tenants/",
+      "maximum_local_databases": 10
+    }
+  },
+  "response": {
+    "id": "01a1-rule",
+    "path": "/var/lib/app/main.sqlite",
+    "name": "",
+    "prefix": "tenants/",
+    "watch": "inotify",
+    "maximum_local_databases": 0,
+    "failover": false
+  }
+}

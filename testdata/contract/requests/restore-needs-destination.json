@@ -1,0 +1,10 @@
+{
+  "description": "A restore without a destination sends nothing.",
+  "operation": "databases.restore",
+  "args": {
+    "name": "main.sqlite"
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

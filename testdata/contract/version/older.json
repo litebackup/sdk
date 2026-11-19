@@ -1,0 +1,9 @@
+{
+  "description": "An older daemon is refused.",
+  "client_version": "0.7.0",
+  "accepted": false,
+  "expect": {
+    "code": "incompatible_version",
+    "status": 0
+  }
+}

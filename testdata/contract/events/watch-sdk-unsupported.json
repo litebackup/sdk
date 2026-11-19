@@ -1,0 +1,30 @@
+{
+  "description": "sdk_unsupported ends a watch with that error.",
+  "operation": "events.watch",
+  "args": {},
+  "item_key": "id",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/events/list",
+        "query": {
+          "wait_millis": "30000"
+        }
+      },
+      "response": {
+        "status": 426,
+        "body": {
+          "code": "sdk_unsupported",
+          "message": "upgrade the SDK"
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [],
+    "error": {
+      "code": "sdk_unsupported"
+    }
+  }
+}

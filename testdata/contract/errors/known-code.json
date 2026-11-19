@@ -1,0 +1,15 @@
+{
+  "description": "A code and message are kept; details are empty.",
+  "operation": "rules.list",
+  "response": {
+    "status": 404,
+    "content_type": "application/json",
+    "body": "{\"code\":\"not_found\",\"message\":\"no database main.sqlite\"}"
+  },
+  "expect": {
+    "code": "not_found",
+    "message": "no database main.sqlite",
+    "status": 404,
+    "details": {}
+  }
+}

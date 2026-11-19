@@ -1,0 +1,16 @@
+{
+  "description": "A database page defaults to 100 from the start.",
+  "operation": "databases.page",
+  "args": {},
+  "request": {
+    "method": "GET",
+    "path": "/v1/databases/list",
+    "query": {
+      "after": "",
+      "limit": "100"
+    }
+  },
+  "response": {
+    "databases": []
+  }
+}

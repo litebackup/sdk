@@ -55,7 +55,7 @@ func newFakeDaemon(t *testing.T) *fakeDaemon {
 	t.Helper()
 	daemon := &fakeDaemon{t: t, socket: filepath.Join(shortDirectory(t), "client.sock"), routes: map[string]func(request *fakeRequest) (int, any){}}
 	daemon.route("GET /v1/status/show", func(*fakeRequest) (int, any) {
-		return http.StatusOK, map[string]any{"session": "unit", "server": "http://example", "client_version": "0.3.18", "session_id": "s", "watch": "inotify", "databases": []any{}}
+		return http.StatusOK, map[string]any{"session": "unit", "server": "http://example", "client_version": "1.0.0", "session_id": "s", "watch": "inotify", "databases": []any{}}
 	})
 	listener, err := net.Listen("unix", daemon.socket)
 	if err != nil {
@@ -101,7 +101,7 @@ func (d *fakeDaemon) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	d.requests = append(d.requests, recorded)
 	answer := d.routes[request.Method+" "+request.URL.Path]
 	d.mutex.Unlock()
-	writer.Header().Set("X-Litebackup-Client-Version", "0.3.18")
+	writer.Header().Set("X-Litebackup-Client-Version", "1.0.0")
 	writer.Header().Set("Content-Type", "application/json")
 	if answer == nil {
 		writer.WriteHeader(http.StatusNotFound)
@@ -167,7 +167,7 @@ func TestVersionHeaderAndErrors(t *testing.T) {
 		return http.StatusUpgradeRequired, map[string]any{"code": "sdk_unsupported", "message": "update the SDK"}
 	})
 	client := daemon.connect(t)
-	if client.ClientVersion() != "0.3.18" {
+	if client.ClientVersion() != "1.0.0" {
 		t.Fatalf("client version %q", client.ClientVersion())
 	}
 	_, err := client.StartBackup(t.Context(), "/var/lib/app/main.db", nil)

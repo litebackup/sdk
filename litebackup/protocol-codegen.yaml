@@ -1,0 +1,15 @@
+# oapi-codegen configuration for protocol.gen.go: the socket API's schemas as Go
+# types with their wire names, without operations. Error and Failover are
+# written by hand in this package; Empty has no fields.
+package: litebackup
+output: protocol.gen.go
+generate:
+  models: true
+compatibility:
+  always-prefix-enum-values: true
+output-options:
+  name-normalizer: ToCamelCaseWithInitialisms
+  prefer-skip-optional-pointer: true
+  exclude-schemas: [Error, Failover, Empty]
+  exclude-operation-ids: [showStatus,listDatabases,showDatabaseStatus,listVersions,restoreDatabase,syncDatabase,acquireDatabase,releaseDatabase,offloadDatabase,showWriter,startBackup,listBackups,stopBackup,startFailover,startReplica,listReplicas,stopReplica,listConflicts,deleteConflict,listEvents,shutdownSession]
+  skip-prune: true

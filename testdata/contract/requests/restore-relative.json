@@ -1,0 +1,25 @@
+{
+  "description": "A relative restore destination resolves against the working directory.",
+  "operation": "databases.restore",
+  "args": {
+    "name": "main.sqlite",
+    "to": "restored.sqlite"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/databases/restore",
+    "query": {},
+    "body": {
+      "name": "main.sqlite",
+      "path": "{cwd}/restored.sqlite"
+    }
+  },
+  "response": {
+    "name": "main.sqlite",
+    "path": "{cwd}/restored.sqlite",
+    "version": 3,
+    "page_count": 2,
+    "page_size": 4096,
+    "state_digest": "abc"
+  }
+}

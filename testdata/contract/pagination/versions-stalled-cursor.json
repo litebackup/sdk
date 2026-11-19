@@ -1,0 +1,61 @@
+{
+  "description": "A next that does not move past after ends iteration.",
+  "operation": "databases.versions",
+  "args": {
+    "name": "main.sqlite"
+  },
+  "item_key": "version",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/databases/versions",
+        "query": {
+          "name": "main.sqlite"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "versions": [
+            {
+              "version": 1,
+              "state_digest": "d1",
+              "time": "2026-11-15T09:01:00Z"
+            }
+          ],
+          "next": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/databases/versions",
+        "query": {
+          "name": "main.sqlite",
+          "after": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "versions": [
+            {
+              "version": 2,
+              "state_digest": "d2",
+              "time": "2026-11-15T09:02:00Z"
+            }
+          ],
+          "next": 1
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      1,
+      2
+    ]
+  }
+}

@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 
-import { absolutePath, type Litebackup } from "./client.js";
+import type { Litebackup } from "./client.js";
+import { absolutePath, type PathSource } from "./location.js";
 import { milliseconds, type Duration } from "./duration.js";
 import type { components } from "./generated/client.js";
 import { LitebackupError, type FailoverInfo, type LitebackupEvent, type Role, type Writer } from "./types.js";
@@ -11,6 +12,7 @@ export interface FailoverOptions {
   name?: string;
   /** Bound on the first download of a replica. */
   timeout?: Duration;
+  signal?: AbortSignal;
 }
 
 /** How long one events long-poll waits. */
@@ -60,7 +62,7 @@ export class Failover {
   }
 
   /** @internal */
-  static async start(client: Litebackup, path: string, options: FailoverOptions): Promise<Failover> {
+  static async start(client: Litebackup, path: PathSource, options: FailoverOptions): Promise<Failover> {
     if (!path) {
       throw new LitebackupError("invalid_argument", "failover needs a path", 0);
     }
@@ -68,16 +70,17 @@ export class Failover {
     if (options.name) {
       body.name = options.name;
     }
-    if (options.timeout !== undefined) {
-      body.timeout_millis = milliseconds(options.timeout);
+    const timeoutMillis = options.timeout === undefined ? 0 : milliseconds(options.timeout);
+    if (timeoutMillis) {
+      body.timeout_millis = timeoutMillis;
     }
     if (client.closed) {
       throw new LitebackupError("closed", "the client is closed", 0);
     }
     // Events after the log's end as of now are this failover's, including
     // those the start request itself records.
-    const end = await client.events.page({ after: -1 });
-    const info = (await client.call("POST", "/v1/failovers/start", body)) as FailoverInfo;
+    const end = await client.events.page({ after: -1, signal: options.signal });
+    const info = (await client.call("POST", "/v1/failovers/start", body, { signal: options.signal, timeoutMillis })) as FailoverInfo;
     const failover = new Failover(client, info);
     if (client.closed) {
       failover.end();
@@ -171,7 +174,7 @@ export class Failover {
         if ((this.listeners.get("error")?.size ?? 0) > 0) {
           this.notify("error", error instanceof Error ? error : new Error(String(error)));
         }
-        if (error instanceof LitebackupError && error.code === "sdk_unsupported") {
+        if (error instanceof LitebackupError && (error.code === "sdk_unsupported" || error.code === "closed")) {
           return;
         }
         try {

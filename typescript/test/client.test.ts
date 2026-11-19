@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { Litebackup, LitebackupError, installCommand, litebackupBinary, sdkVersion, sessionSocket } from "../src/index.js";
 import { FakeDaemon, databaseStatus } from "./fake.js";
@@ -16,7 +17,7 @@ test("sends the SDK version, converts answers to camelCase, and maps errors", as
   daemon.route("POST /v1/databases/offload", () => [426, "not json"]);
   const litebackup = new Litebackup({ socketPath: daemon.socketPath });
   await litebackup.connect();
-  assert.equal(litebackup.clientVersion, "0.3.18");
+  assert.equal(litebackup.clientVersion, "1.0.0");
 
   const status = await litebackup.databases.get("app/main.db");
   assert.equal(status.syncedServer.version, 3);
@@ -36,7 +37,7 @@ test("sends the SDK version, converts answers to camelCase, and maps errors", as
   for (const request of daemon.requests) {
     assert.equal(request.headers["x-litebackup-sdk-version"], `typescript/${sdkVersion}`);
   }
-  assert.equal(sdkVersion, "0.7.0");
+  assert.equal(sdkVersion, "1.0.0");
 });
 
 test("startBackup awaits the local rule and stop reports a pending lease", async (t) => {
@@ -45,16 +46,21 @@ test("startBackup awaits the local rule and stop reports a pending lease", async
   daemon.route("POST /v1/backup-rules/stop", () => [200, { lease_pending: true }]);
   const client = new Litebackup({ socketPath: daemon.socketPath });
   await client.connect();
-  const source = { name: "My App.db", open: true, memory: false };
-  assert.equal((await client.backups.start(source, { prefix: "É/" })).id, "rule");
-  assert.deepEqual(daemon.received("/v1/backup-rules/start")[0]!.body, { path: join(process.cwd(), source.name), prefix: "É/" });
+  assert.equal((await client.backups.start("My App.db", { prefix: "É/" })).id, "rule");
+  await client.backups.start(pathToFileURL(join(process.cwd(), "url dir", "My App.db")));
+  assert.deepEqual(
+    daemon.received("/v1/backup-rules/start").map((req) => req.body),
+    [{ path: join(process.cwd(), "My App.db"), prefix: "É/" }, { path: join(process.cwd(), "url dir", "My App.db") }],
+  );
   assert.deepEqual(await client.backups.stop("É/My App.db"), { leasePending: true });
   assert.deepEqual(await client.rules.stop("rule"), { leasePending: true });
   assert.deepEqual(
     daemon.received("/v1/backup-rules/stop").map((req) => req.body),
     [{ name: "É/My App.db" }, { rule_id: "rule" }],
   );
-  await assert.rejects(client.backups.start({ ...source, memory: true }), LitebackupError);
+  // A handle is not a path: drivers have their own subpath exports.
+  await assert.rejects(client.backups.start({ name: "x.db", memory: false, open: true } as unknown as string), LitebackupError);
+  await assert.rejects(client.backups.start(new URL("https://example.com/x.db")), LitebackupError);
 });
 test("restore, versions, replicate, and acquire send the socket fields", async (t) => {
   const daemon = await FakeDaemon.start(t);
@@ -79,7 +85,7 @@ test("restore, versions, replicate, and acquire send the socket fields", async (
 
   const restored = await litebackup.databases.restore("app/main.db", { to: "/tmp/restored.db", time: new Date("2026-11-15T09:30:30Z") });
   assert.equal(restored.pageSize, 4096);
-  assert.deepEqual(daemon.received("/v1/databases/restore")[0]!.body, { name: "app/main.db", path: "/tmp/restored.db", time: "2026-11-15T09:30:30.000Z" });
+  assert.deepEqual(daemon.received("/v1/databases/restore")[0]!.body, { name: "app/main.db", path: "/tmp/restored.db", time: "2026-11-15T09:30:30Z" });
   await assert.rejects(litebackup.databases.restore("app/main.db", { to: "/tmp/x.db", version: 1, time: "2026-11-15T09:30:30Z" }), LitebackupError);
 
   const replica = await litebackup.replicas.start("app/main.db", { to: "replica/main.db", writeProtection: "detect", timeout: "2m" });

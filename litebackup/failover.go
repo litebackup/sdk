@@ -2,20 +2,13 @@ package litebackup
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"sync"
 	"time"
 )
 
-const (
-	// eventWait is how long one events long-poll waits.
-	eventWait = 30 * time.Second
-	// eventPage is how many events one page reads.
-	eventPage = 1000
-	// maximumRetryDelay bounds the delay between failed long-polls.
-	maximumRetryDelay = 10 * time.Second
-)
+// eventPage is how many events one failover long-poll reads.
+const eventPage = 1000
 
 // FailoverArgs configures a failover.
 type FailoverArgs struct {
@@ -56,7 +49,7 @@ func (c *Client) Failover(ctx context.Context, path string, args *FailoverArgs) 
 		args = &FailoverArgs{}
 	}
 	if path == "" {
-		return nil, errors.New("failover needs a path")
+		return nil, invalidArgument("failover needs a path")
 	}
 	absolute, err := absolutePath(path)
 	if err != nil {
@@ -68,22 +61,20 @@ func (c *Client) Failover(ctx context.Context, path string, args *FailoverArgs) 
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]any{"path": absolute}
-	if args.Name != "" {
-		body["name"] = args.Name
+	timeout, err := millis(args.Timeout, "the failover timeout")
+	if err != nil {
+		return nil, err
 	}
-	if args.Timeout > 0 {
-		body["timeout_millis"] = millis(args.Timeout)
-	}
+	body := FailoverRequest{Path: absolute, Name: args.Name, TimeoutMillis: timeout}
 	var info FailoverInfo
-	if err := c.call(ctx, http.MethodPost, "/v1/failovers/start", body, &info); err != nil {
+	if err := c.call(ctx, http.MethodPost, "/v1/failovers/start", body, &info, args.Timeout); err != nil {
 		return nil, err
 	}
 	watchContext, cancel := context.WithCancel(context.Background())
 	failover := &FailoverRun{client: c, args: *args, name: info.Name, path: info.Path, role: info.Role, cancel: cancel}
 	if !c.addFailover(failover) {
 		cancel()
-		return nil, errors.New("the client is closed")
+		return nil, closedError()
 	}
 	go failover.follow(watchContext, end.Next)
 	return failover, nil
@@ -144,7 +135,7 @@ func (f *FailoverRun) changeRole(role Role) {
 func (f *FailoverRun) handle(event *Event) {
 	switch event.Type {
 	case "role_changed":
-		role := event.Role
+		role := Role(event.Role)
 		if role == "" {
 			role = Role(event.Message)
 		}
@@ -166,7 +157,7 @@ func (f *FailoverRun) handle(event *Event) {
 // follow long-polls the daemon's events after cursor until stopped, handing
 // this failover's events to it.
 func (f *FailoverRun) follow(ctx context.Context, cursor int64) {
-	delay := 250 * time.Millisecond
+	delay := firstRetryDelay
 	for ctx.Err() == nil {
 		page, err := f.client.Events(ctx, &EventsArgs{After: cursor, Wait: eventWait, Limit: eventPage})
 		if err != nil {
@@ -176,7 +167,7 @@ func (f *FailoverRun) follow(ctx context.Context, cursor int64) {
 			if f.args.OnError != nil {
 				f.args.OnError(err)
 			}
-			if IsCode(err, "sdk_unsupported") {
+			if IsCode(err, CodeSDKUnsupported) || IsCode(err, CodeClosed) {
 				return
 			}
 			select {
@@ -187,7 +178,7 @@ func (f *FailoverRun) follow(ctx context.Context, cursor int64) {
 			delay = min(delay*2, maximumRetryDelay)
 			continue
 		}
-		delay = 250 * time.Millisecond
+		delay = firstRetryDelay
 		for index := range page.Events {
 			event := &page.Events[index]
 			cursor = max(cursor, event.ID)

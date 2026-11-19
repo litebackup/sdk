@@ -1,0 +1,15 @@
+{
+  "description": "An empty body has an empty message.",
+  "operation": "rules.list",
+  "response": {
+    "status": 500,
+    "content_type": "text/plain",
+    "body": ""
+  },
+  "expect": {
+    "code": "http_500",
+    "message": "",
+    "status": 500,
+    "details": {}
+  }
+}

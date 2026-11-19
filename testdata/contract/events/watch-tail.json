@@ -1,0 +1,67 @@
+{
+  "description": "A watch from -1 starts at the end of the log.",
+  "operation": "events.watch",
+  "args": {
+    "after": -1,
+    "wait": "5s"
+  },
+  "item_key": "id",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/events/list",
+        "query": {
+          "after": "-1",
+          "wait_millis": "5000"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "events": [],
+          "next": 41
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/events/list",
+        "query": {
+          "after": "41",
+          "wait_millis": "5000"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "events": [
+            {
+              "id": 42,
+              "time": "2026-11-15T09:30:00Z",
+              "name": "main.sqlite",
+              "type": "synced",
+              "message": "version 42"
+            },
+            {
+              "id": 43,
+              "time": "2026-11-15T09:30:00Z",
+              "name": "main.sqlite",
+              "type": "synced",
+              "message": "version 43"
+            }
+          ],
+          "next": 43
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      42,
+      43
+    ]
+  },
+  "take": 2
+}

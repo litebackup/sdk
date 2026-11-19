@@ -1,0 +1,37 @@
+{
+  "description": "Acquire with only a name uses the path this machine already has.",
+  "operation": "databases.acquire",
+  "args": {
+    "name": "agents/42.sqlite"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/databases/acquire",
+    "query": {},
+    "body": {
+      "name": "agents/42.sqlite"
+    }
+  },
+  "response": {
+    "database": {
+      "name": "agents/42.sqlite",
+      "path": "{cwd}/agents/42.sqlite",
+      "role": "origin",
+      "state": "syncing",
+      "acquired": true,
+      "failover": false,
+      "local_changed": false,
+      "synced_server": {
+        "version": 3
+      },
+      "synced_cloud": {
+        "version": 2
+      },
+      "journal_mode": "wal",
+      "page_count": 2,
+      "sync_count": 3,
+      "hint_misses": 0
+    },
+    "outcome": "created"
+  }
+}

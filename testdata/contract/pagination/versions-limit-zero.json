@@ -1,0 +1,16 @@
+{
+  "description": "A limit of 0 yields nothing and sends nothing.",
+  "operation": "databases.versions",
+  "args": {
+    "name": "main.sqlite",
+    "limit": 0
+  },
+  "item_key": "version",
+  "exchanges": [],
+  "expect": {
+    "items": []
+  },
+  "skip": {
+    "go": "Go's zero Limit means no limit, as zero values mean defaults in Go arguments"
+  }
+}

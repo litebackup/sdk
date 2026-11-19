@@ -1,0 +1,21 @@
+{
+  "description": "Status reads the first page of 100.",
+  "operation": "session.status",
+  "args": {},
+  "request": {
+    "method": "GET",
+    "path": "/v1/status/show",
+    "query": {
+      "after": "",
+      "limit": "100"
+    }
+  },
+  "response": {
+    "session": "default",
+    "server": "https://example.litebackup.cloud",
+    "client_version": "1.0.0",
+    "session_id": "s1",
+    "watch": "inotify",
+    "databases": []
+  }
+}

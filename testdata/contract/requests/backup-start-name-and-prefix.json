@@ -1,0 +1,12 @@
+{
+  "description": "A name and a prefix together send nothing.",
+  "operation": "backups.start",
+  "args": {
+    "source": "/var/lib/app/main.sqlite",
+    "name": "a.sqlite",
+    "prefix": "tenants/"
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

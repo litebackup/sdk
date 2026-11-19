@@ -129,10 +129,18 @@ func InstallCommand() string {
 
 // Binary finds the litebackup binary: LITEBACKUP_PATH, then litebackup on
 // PATH, then ~/.local/bin/litebackup, where InstallCommand puts it for a
-// user other than root, which an app's PATH may not include.
+// user other than root, which an app's PATH may not include. It fails with
+// binary_not_found and the install command when there is none.
 func Binary() (string, error) {
-	override := strings.TrimSpace(os.Getenv(BinaryPathEnvironment))
-	if override != "" {
+	return resolveBinary("")
+}
+
+// resolveBinary is Binary with an explicit override taking precedence.
+func resolveBinary(override string) (string, error) {
+	if override = strings.TrimSpace(override); override != "" {
+		return override, nil
+	}
+	if override = strings.TrimSpace(os.Getenv(BinaryPathEnvironment)); override != "" {
 		return override, nil
 	}
 	found, err := exec.LookPath("litebackup")
@@ -147,7 +155,7 @@ func Binary() (string, error) {
 			return local, nil
 		}
 	}
-	return "", fmt.Errorf("the litebackup command is not installed; set %s or install it with: %s", BinaryPathEnvironment, InstallCommand())
+	return "", &Error{Code: CodeBinaryNotFound, Message: fmt.Sprintf("the litebackup command is not installed; set %s or install it with: %s", BinaryPathEnvironment, InstallCommand())}
 }
 
 // socketListening reports whether something accepts connections on the socket.
@@ -165,11 +173,11 @@ func socketListening(path string) bool {
 // daemon joins with token on its first start. Where `litebackup install
 // service` ran, systemd or launchd owns the daemon and the launch command says how to
 // reach or start the service instead.
-func launchDaemon(ctx context.Context, session string, socket string, token string) error {
+func launchDaemon(ctx context.Context, session string, socket string, token string, binaryPath string) error {
 	if socketListening(socket) {
 		return nil
 	}
-	binary, err := Binary()
+	binary, err := resolveBinary(binaryPath)
 	if err != nil {
 		return err
 	}
@@ -184,9 +192,9 @@ func launchDaemon(ctx context.Context, session string, socket string, token stri
 	if err != nil {
 		var exitError *exec.ExitError
 		if errors.As(err, &exitError) && len(strings.TrimSpace(string(output))) > 0 {
-			return fmt.Errorf("starting Litebackup failed: %s", strings.TrimSpace(string(output)))
+			return &Error{Code: CodeLaunchFailed, Message: "starting Litebackup failed: " + strings.TrimSpace(string(output)), Err: err}
 		}
-		return fmt.Errorf("starting Litebackup failed: %w", err)
+		return &Error{Code: CodeLaunchFailed, Message: "starting Litebackup failed: " + err.Error(), Err: err}
 	}
 	return nil
 }

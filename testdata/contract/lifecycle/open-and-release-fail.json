@@ -1,0 +1,67 @@
+{
+  "description": "A failed open and release raise both, open first.",
+  "scope": {
+    "name": "agents/42.sqlite",
+    "to": "agents/42.sqlite",
+    "durability": "cloud",
+    "offload": true
+  },
+  "fail": [
+    "open",
+    "release"
+  ],
+  "acquire_response": {
+    "database": {
+      "name": "agents/42.sqlite",
+      "path": "{cwd}/agents/42.sqlite",
+      "role": "origin",
+      "state": "syncing",
+      "acquired": true,
+      "failover": false,
+      "local_changed": false,
+      "synced_server": {
+        "version": 3
+      },
+      "synced_cloud": {
+        "version": 2
+      },
+      "journal_mode": "wal",
+      "page_count": 2,
+      "sync_count": 3,
+      "hint_misses": 0
+    },
+    "outcome": "created"
+  },
+  "expect": {
+    "steps": [
+      "acquire",
+      "open",
+      "release"
+    ],
+    "acquire_body": {
+      "name": "agents/42.sqlite",
+      "path": "{cwd}/agents/42.sqlite"
+    },
+    "release_body": {
+      "name": "agents/42.sqlite",
+      "wait": "cloud",
+      "timeout_millis": 600000
+    },
+    "raised": [
+      {
+        "source": "open"
+      },
+      {
+        "code": "scope_cleanup_failed",
+        "step": "release",
+        "cause": "release",
+        "details": {
+          "step": "release",
+          "name": "agents/42.sqlite",
+          "path": "{cwd}/agents/42.sqlite",
+          "durability": "cloud"
+        }
+      }
+    ]
+  }
+}

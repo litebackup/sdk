@@ -1,0 +1,19 @@
+{
+  "description": "A database page passes the cursor.",
+  "operation": "databases.page",
+  "args": {
+    "after": "tenants/9.sqlite",
+    "limit": 2
+  },
+  "request": {
+    "method": "GET",
+    "path": "/v1/databases/list",
+    "query": {
+      "after": "tenants/9.sqlite",
+      "limit": "2"
+    }
+  },
+  "response": {
+    "databases": []
+  }
+}

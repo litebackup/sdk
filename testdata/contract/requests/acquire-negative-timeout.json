@@ -1,0 +1,11 @@
+{
+  "description": "A negative duration sends nothing.",
+  "operation": "databases.acquire",
+  "args": {
+    "name": "agents/42.sqlite",
+    "timeout": "-1s"
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

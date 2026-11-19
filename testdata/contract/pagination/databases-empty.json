@@ -1,0 +1,27 @@
+{
+  "description": "An empty first page ends iteration.",
+  "operation": "databases.iterate",
+  "args": {},
+  "item_key": "name",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/databases/list",
+        "query": {
+          "after": "",
+          "limit": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "databases": []
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": []
+  }
+}

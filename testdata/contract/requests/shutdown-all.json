@@ -1,0 +1,21 @@
+{
+  "description": "Shutdown with a wait and a timeout.",
+  "operation": "session.shutdown",
+  "args": {
+    "wait": "cloud",
+    "timeout": "1m"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/session/shutdown",
+    "query": {},
+    "body": {
+      "wait": "cloud",
+      "timeout_millis": 60000
+    }
+  },
+  "response": {
+    "released": 2,
+    "failed": []
+  }
+}

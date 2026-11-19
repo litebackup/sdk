@@ -30,7 +30,7 @@ func Default(ctx context.Context) (*Client, error) {
 
 // Backup runs once without connecting to or launching a daemon.
 func Backup(ctx context.Context, path string, args *BackupArgs) error {
-	return runBackup(ctx, "", path, args)
+	return runBackup(ctx, "", "", path, args)
 }
 
 // StartBackup saves a continuous rule in the local daemon.
@@ -97,7 +97,7 @@ func Restore(ctx context.Context, name string, args *RestoreArgs) (*RestoreResul
 }
 
 // Versions lists restorable versions with the shared client; see Client.Versions.
-func Versions(ctx context.Context, name string, args *VersionsArgs) ([]Version, error) {
+func Versions(ctx context.Context, name string, args *VersionsArgs) ([]RestorableVersion, error) {
 	client, err := Default(ctx)
 	if err != nil {
 		return nil, err

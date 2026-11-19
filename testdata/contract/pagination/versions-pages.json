@@ -1,0 +1,67 @@
+{
+  "description": "Version iteration passes next as after until next is 0.",
+  "operation": "databases.versions",
+  "args": {
+    "name": "main.sqlite"
+  },
+  "item_key": "version",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/databases/versions",
+        "query": {
+          "name": "main.sqlite"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "versions": [
+            {
+              "version": 1,
+              "state_digest": "d1",
+              "time": "2026-11-15T09:01:00Z"
+            },
+            {
+              "version": 2,
+              "state_digest": "d2",
+              "time": "2026-11-15T09:02:00Z"
+            }
+          ],
+          "next": 2
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/databases/versions",
+        "query": {
+          "name": "main.sqlite",
+          "after": "2"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "versions": [
+            {
+              "version": 3,
+              "state_digest": "d3",
+              "time": "2026-11-15T09:03:00Z"
+            }
+          ],
+          "next": 0
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      1,
+      2,
+      3
+    ]
+  }
+}
