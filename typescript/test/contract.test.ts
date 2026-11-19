@@ -5,7 +5,7 @@ import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -308,12 +308,12 @@ interface RaisedError {
 }
 
 interface LifecycleFixture {
-  scope: { name: string; to?: string; durability?: string; offload?: boolean; cleanup_timeout?: string };
+  scope: { name: string; to?: string; durability?: string; offload?: boolean; cleanup_timeout?: string; create?: boolean };
   fail: string[];
   cancel?: string;
   acquire_response: Json;
   skip?: Record<string, string>;
-  expect: { steps: string[]; acquire_body?: Json; open_path?: string; release_body: Json; raised: RaisedError[] };
+  expect: { steps: string[]; acquire_body?: Json; open_path?: string; release_body: Json; raised: RaisedError[]; created_file?: string; missing_file?: string };
 }
 
 for (const name of fixtureNames("lifecycle")) {
@@ -358,6 +358,7 @@ for (const name of fixtureNames("lifecycle")) {
             durability: fixture.scope.durability as "cloud",
             offload: fixture.scope.offload,
             cleanupTimeout: fixture.scope.cleanup_timeout,
+            create: fixture.scope.create,
             adapter,
             signal: controller.signal,
           },
@@ -379,6 +380,8 @@ for (const name of fixtureNames("lifecycle")) {
       }
       assert.deepEqual(steps, fixture.expect.steps);
       if (fixture.expect.open_path) assert.equal(openPath, fixture.expect.open_path);
+      if (fixture.expect.created_file) assert.ok(existsSync(fixture.expect.created_file), "the scope did not create the file");
+      if (fixture.expect.missing_file) assert.ok(!existsSync(fixture.expect.missing_file), "the scope created the file");
       for (const request of daemon.received) {
         const expected = request.path.endsWith("/acquire") ? fixture.expect.acquire_body : fixture.expect.release_body;
         assert.deepEqual(decoded(request.body), expected, request.path);

@@ -309,6 +309,7 @@ class Databases(_Group):
         durability: Durability,
         adapter: _managed.ScopeAdapter[Connection],
         to: PathSource | None = None,
+        create: bool = True,
         offload: bool = False,
         cleanup_timeout: Duration | None = None,
         machine_label: str | None = None,
@@ -322,7 +323,9 @@ class Databases(_Group):
                 db.execute("INSERT INTO steps (body) VALUES (?)", (step,))
                 db.commit()
 
-        The adapter rolls back what the block did not commit. A failed block still
+        When ``to`` is given and nothing is there, an empty file is created first
+        (``create=False`` to skip), so a database neither the server nor this machine
+        has becomes a new one. The adapter rolls back what the block did not commit. A failed block still
         closes and releases, without offload. A failed close does not release: the
         database stays acquired with its file untouched. Several failures raise an
         ExceptionGroup, the block's error first.
@@ -333,6 +336,7 @@ class Databases(_Group):
             durability=durability,
             adapter=adapter,
             to=to,
+            create=create,
             offload=offload,
             cleanup_timeout=cleanup_timeout,
             machine_label=machine_label,
@@ -682,6 +686,7 @@ class AsyncDatabases(_AsyncGroup):
         durability: Durability,
         adapter: _managed.AsyncScopeAdapter[Connection],
         to: PathSource | None = None,
+        create: bool = True,
         offload: bool = False,
         cleanup_timeout: Duration | None = None,
         machine_label: str | None = None,
@@ -697,6 +702,7 @@ class AsyncDatabases(_AsyncGroup):
             durability=durability,
             adapter=adapter,
             to=to,
+            create=create,
             offload=offload,
             cleanup_timeout=cleanup_timeout,
             machine_label=machine_label,

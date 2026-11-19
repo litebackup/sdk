@@ -8,11 +8,22 @@ and move databases between machines. Your app keeps using its SQLite driver.
 ```ts
 import Database from "better-sqlite3";
 import { Litebackup } from "@litebackup/sdk";
+import { databasePath } from "@litebackup/sdk/better-sqlite3";
 
 const litebackup = new Litebackup();
 
 const db = new Database("/var/lib/app/main.sqlite");
-await litebackup.backups.start(db); // Continuous backup runs in the litebackup background process.
+await litebackup.backups.start(databasePath(db)); // Continuous backup runs in the litebackup background process.
+```
+
+```python
+import sqlite3
+from litebackup import Litebackup
+from litebackup.integrations.sqlite3 import database_path
+
+db = sqlite3.connect("/var/lib/app/main.sqlite")
+with Litebackup() as litebackup:
+    litebackup.backups.start(database_path(db))
 ```
 
 Or add backups to an existing app with the CLI:
@@ -78,6 +89,18 @@ Add machine. A persistent session joins once and reuses its machine identity
 across restarts. A fresh foreground job uses a temporary identity for that run.
 See [agent fleets](docs/sqlite-fleet.md) and [serverless jobs](docs/sqlite-serverless.md).
 
+**Python 3.11+**
+
+```sh
+pip install litebackup
+export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
+```
+
+Wheels for Linux (glibc and musl) and macOS, on x64 and arm64, include the
+client. Elsewhere pip installs the source package, which uses an installed
+`litebackup` command. Django, FastAPI, SQLAlchemy, and aiosqlite support is
+in `litebackup.integrations`; see the [Python guide](python/README.md).
+
 **CLI / Go**
 
 Install the command on each app machine, then join as the user running your app:
@@ -97,10 +120,15 @@ The [client guide](docs/litebackup-client.md) also covers sessions, permissions,
 
 ## Back up without slowing startup
 
-Pass a path or a `better-sqlite3` handle to `await backups.start(db)`. It returns when the daemon saves the local rule. Discovery and uploads run in the background.
+Pass the database's path to `backups.start`. It returns when the daemon saves
+the local rule; discovery and uploads run in the background. Call it on every
+start: the same path and settings return the saved rule.
 
-The opening example uses `better-sqlite3` (`npm install better-sqlite3`);
-you can also pass a filename and use any SQLite driver. In Go:
+The opening example uses `better-sqlite3`. `@litebackup/sdk/node-sqlite`,
+`@litebackup/sdk/drizzle`, and the Python integrations for sqlite3, aiosqlite,
+SQLAlchemy, Django, and FastAPI get the path from the handle or configuration
+the app already has. With any other driver, pass the filename. In Go,
+`sqlitedsn` resolves the DSN you open:
 
 ```go
 import "github.com/litebackup/sdk/litebackup"
@@ -116,6 +144,7 @@ Your app writes to its local SQLite files as usual, and Litebackup syncs changes
 in the background. Keep those files on a persistent disk or volume so they
 remain available across restarts and redeploys.
 
+[Drivers, frameworks, and writing an adapter →](docs/sqlite-integrations.md)
 [Continuous backup, globs, and durability →](docs/sqlite-backup.md)
 [Complete Go examples →](docs/sqlite-go.md)
 
@@ -145,27 +174,32 @@ to back up the same name reports `busy` in status.
 
 ## A database per agent
 
-Acquire a database before the agent opens it. Close SQLite and release it when
-the run finishes; the next machine acquires the latest released version.
+Take the agent's database for one run. The managed scope acquires it, opens
+it, runs your code, closes it, and releases it; the next machine continues
+from the released version.
 
 ```ts
-import { appendFile, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { Litebackup } from "@litebackup/sdk";
+import { adapter } from "@litebackup/sdk/node-sqlite";
 
 const litebackup = new Litebackup();
 
 await mkdir("/var/lib/app/agents", { recursive: true });
-const path = "/var/lib/app/agents/42.sqlite";
-await appendFile(path, ""); // create the file if needed; keep existing contents
-await litebackup.databases.acquire("agents/42.sqlite", { to: path });
-// Run the agent with path using any SQLite driver, then close every connection.
-await litebackup.databases.release("agents/42.sqlite", { offload: true });
+await litebackup.databases.managed("agents/42.sqlite",
+  { to: "/var/lib/app/agents/42.sqlite", durability: "cloud", offload: true, adapter: adapter() },
+  (db) => {
+    db.exec("CREATE TABLE IF NOT EXISTS memory (body TEXT)");
+    db.prepare("INSERT INTO memory (body) VALUES (?)").run("Tests passed on main");
+  });
 ```
 
-Wait for `acquire()` before writing. `release()` syncs the last changes to
-the server; `offload: true` removes the local file once it's in your bucket.
+`durability: "cloud"` returns once the bucket holds the run's last version;
+`offload: true` then removes the local file. What the work does not commit is
+rolled back. If closing the database fails, it is not released, so no other
+machine writes while a connection may still be open.
 
-[Complete agent example, retries, and local disk management →](docs/sqlite-agent-state.md)
+[Complete agent examples, failures, retries, and local disk →](docs/sqlite-agent-state.md)
 
 ## Read from another machine
 
@@ -283,7 +317,8 @@ joins. Persistent sessions save their identity. Fresh foreground jobs use a temp
 | [Live SQLite backup](docs/sqlite-live-backup.md) | Back up a running database and handle WAL files |
 | [Recover deleted rows](docs/sqlite-deleted-rows.md) | Restore selected records without replacing the whole database |
 | [SQLite in Docker](docs/sqlite-docker.md) | Pinned CLI installation in a Dockerfile, persistent volumes, and a runnable Compose example |
-| [API reference](docs/sdk-reference.md) | TypeScript and Go operations, options, errors, and status |
+| [Integrations](docs/sqlite-integrations.md) | better-sqlite3, node:sqlite, Drizzle, sqlite3, aiosqlite, SQLAlchemy, Django, FastAPI, Go drivers |
+| [API reference](docs/sdk-reference.md) | TypeScript, Python, and Go operations, options, errors, and status |
 | [Client runtime](docs/litebackup-client.md) | Sessions, credentials, service installs, Docker, shutdown |
 | [Storage providers](docs/sqlite-cloud-backup.md) | S3, R2, GCS, and other S3-compatible buckets |
 | [Troubleshooting](docs/sqlite-backup-errors.md) | Join failures, name conflicts, timeouts, and diagnostics |

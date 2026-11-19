@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
@@ -88,6 +89,24 @@ def _scope(name: str, durability: str | None, cleanup_timeout: Duration | None, 
     return _Scope(name, cast(Literal["server", "cloud"], durability), offload, cleanup_seconds)
 
 
+def _create_empty_file(to: PathSource | None, create: bool) -> None:
+    """Creates an empty file and its directory unless something is already there.
+
+    The daemon treats an empty file as no copy: a new database when the server has
+    none, replaced by the server's head otherwise.
+    """
+    if not to or not create:
+        return
+    path = absolute_path(to)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+    except FileExistsError:
+        pass
+    except OSError as error:
+        raise invalid_argument(f"creating {path} failed: {error}") from error
+
+
 def _raise(errors: list[BaseException], name: str) -> None:
     """Raises one error alone, or several as a group, first one first."""
     if len(errors) == 1:
@@ -104,6 +123,7 @@ def managed(
     durability: Literal["server", "cloud"],
     adapter: ScopeAdapter[Connection],
     to: PathSource | None = None,
+    create: bool = True,
     offload: bool = False,
     cleanup_timeout: Duration | None = None,
     machine_label: str | None = None,
@@ -112,6 +132,7 @@ def managed(
     acquire_timeout: Duration | None = None,
 ) -> Iterator[Connection]:
     scope = _scope(name, durability, cleanup_timeout, offload, adapter)
+    _create_empty_file(to, create)
     acquired = client.databases.acquire(
         name, to=to, maintenance=maintenance, machine_label=machine_label, on_lost=on_lost, timeout=acquire_timeout
     )
@@ -181,6 +202,7 @@ async def managed_async(
     durability: Literal["server", "cloud"],
     adapter: AsyncScopeAdapter[Connection],
     to: PathSource | None = None,
+    create: bool = True,
     offload: bool = False,
     cleanup_timeout: Duration | None = None,
     machine_label: str | None = None,
@@ -189,6 +211,7 @@ async def managed_async(
     acquire_timeout: Duration | None = None,
 ) -> AsyncIterator[Connection]:
     scope = _scope(name, durability, cleanup_timeout, offload, adapter)
+    await asyncio.to_thread(_create_empty_file, to, create)
     acquired = await client.databases.acquire(
         name, to=to, maintenance=maintenance, machine_label=machine_label, on_lost=on_lost, timeout=acquire_timeout
     )

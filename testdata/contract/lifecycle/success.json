@@ -1,5 +1,5 @@
 {
-  "description": "A scope that succeeds releases with the requested offload.",
+  "description": "A scope that succeeds creates the missing file and releases with the requested offload.",
   "scope": {
     "name": "agents/42.sqlite",
     "to": "agents/42.sqlite",
@@ -48,6 +48,7 @@
       "timeout_millis": 600000,
       "offload": true
     },
-    "raised": []
+    "raised": [],
+    "created_file": "{cwd}/agents/42.sqlite"
   }
 }

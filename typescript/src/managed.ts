@@ -1,3 +1,6 @@
+import { mkdir, open } from "node:fs/promises";
+import { dirname } from "node:path";
+
 import type { Litebackup } from "./client.js";
 import { milliseconds, type Duration } from "./duration.js";
 import { absolutePath, type PathSource } from "./location.js";
@@ -22,6 +25,12 @@ export interface ScopeAdapter<Connection> {
 export interface ManagedOptions<Connection> {
   /** Local file or file: URL; the path this machine already uses when unset. */
   to?: PathSource;
+  /**
+   * When `to` is given and nothing is there, create an empty file and its
+   * directory first, so a database neither the server nor this machine has
+   * becomes a new one; the server's head replaces an empty file. Defaults to true.
+   */
+  create?: boolean;
   /** How far the final sync must reach before the release resolves. Required. */
   durability: Durability;
   /** Remove the local file once the bucket holds the released version; requested only when the work succeeded. Defaults to false. */
@@ -66,6 +75,18 @@ async function withinTimeout<T>(operation: Promise<T> | T, timeoutMillis: number
   }
 }
 
+/** Creates an empty file and its directory unless something is already at path. */
+async function createEmptyFile(path: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  try {
+    await (await open(path, "wx")).close();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw new LitebackupError("invalid_argument", `creating ${path} failed: ${String(error)}`, 0, { cause: error });
+    }
+  }
+}
+
 /** Throws one error alone, or several together as an AggregateError, first one first. */
 function throwScopeErrors(errors: unknown[], name: string): never {
   if (errors.length === 1) {
@@ -93,6 +114,9 @@ export async function runManaged<Connection, Result>(
   }
   if (options.signal?.aborted) {
     throw new LitebackupError("cancelled", "the managed database was cancelled before it was acquired", 0, { cause: options.signal.reason });
+  }
+  if (options.to && options.create !== false) {
+    await createEmptyFile(absolutePath(options.to));
   }
   const acquired = await client.databases.acquire(name, {
     to: options.to,

@@ -9,9 +9,11 @@ go get github.com/litebackup/sdk/litebackup
 export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
 ```
 
-The SDK starts the local client when needed. It uses `LITEBACKUP_PATH`, then
-`litebackup` on `PATH`, then `~/.local/bin/litebackup`, where the installer
-puts it for a user other than root. Your application can use any SQLite driver.
+The SDK starts the local client when needed. It uses `ConnectArgs.BinaryPath`,
+then `LITEBACKUP_PATH`, then `litebackup` on `PATH`, then
+`~/.local/bin/litebackup`, where the installer puts it for a user other than
+root. It refuses a client older than 1.0.0 with `incompatible_version`. Your
+application can use any SQLite driver.
 
 ## Continuous backup
 
@@ -107,42 +109,71 @@ go run . /var/lib/app/exports/main.sqlite /var/lib/app/exports/audit.sqlite
 See [one-shot jobs](sqlite-backup-script.md) for naming and per-database consistency,
 and [Cron](sqlite-cron-backup.md) for preventing overlapping runs.
 
-## Acquire and release an agent database
+## Register the database the app opens
 
-This helper expects a connected client and a function that runs the agent
-using the given path. That function must close every SQLite connection before
-returning. Use a persistent directory accessible to the client.
+`sqlitedsn` finds the file a `database/sql` DSN opens, with each driver's own
+parsing: relative paths, `file:` URIs, escaping, and query parameters. It
+refuses in-memory and temporary databases and imports no driver.
 
 ```go
-func runAgent(ctx context.Context, client *litebackup.Client, work func(string) error) error {
-    path, name := "/var/lib/app/agents/42.sqlite", "agents/42.sqlite"
-    if err := os.MkdirAll("/var/lib/app/agents", 0o750); err != nil {
-        return err
-    }
-    file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-    if err != nil {
-        return err
-    }
-    if err := file.Close(); err != nil {
-        return err
-    }
-    _, err = client.Acquire(ctx, name, &litebackup.AcquireArgs{To: path})
-    if err != nil {
-        return err
-    }
-    workErr := work(path)
-    cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-    defer cancel()
-    _, releaseErr := client.Release(cleanup, name, &litebackup.ReleaseArgs{
-        Wait: litebackup.DurabilityCloud, Offload: true, Timeout: 30 * time.Minute,
-    })
-    return errors.Join(workErr, releaseErr)
+dsn := "file:data/app.sqlite?_pragma=journal_mode(WAL)"
+db, err := sql.Open("sqlite", dsn) // modernc.org/sqlite; use sqlitedsn.Mattn for "sqlite3"
+if err != nil {
+    return err
 }
+path, err := sqlitedsn.Modernc(dsn)
+if err != nil {
+    return err
+}
+_, err = client.StartBackup(ctx, path, nil)
 ```
 
-This fragment uses `context`, `os`, `time`, `errors`, and `litebackup` from
-the one-shot program's imports. See [agents](sqlite-agent-state.md) for ownership,
-concurrency, lost leases, and offloading.
+Registration is idempotent: starting the same path with the same settings
+returns the saved rule, so every start may call it. Other settings for a saved
+path fail with `exists`, and `Details["rule"]` is the saved rule. A complete
+program is in [examples/go-app](../examples/go-app/main.go).
+
+## Run an agent against its own database
+
+`Managed` acquires the database, opens it with the adapter, runs your
+function, closes it, and releases it. It is a package function because Go
+methods cannot take type parameters.
+
+```go
+err := litebackup.Managed(ctx, client, "agents/42.sqlite", &litebackup.ManagedArgs[*sql.DB]{
+    To:         "/var/lib/app/agents/42.sqlite",
+    Durability: litebackup.DurabilityCloud,
+    Offload:    true,
+    Adapter:    litebackup.SQLAdapter("sqlite"),
+}, func(ctx context.Context, db *sql.DB) error {
+    _, err := db.ExecContext(ctx, "INSERT INTO steps (body) VALUES (?)", "tests passed")
+    return err
+})
+```
+
+Closing and releasing use `context.WithoutCancel(ctx)` and their own
+`CleanupTimeout` (10 minutes by default), so they finish after `ctx` is
+cancelled. `SQLAdapter` closes the pool and fails if a connection is still in
+use, such as a transaction that was never committed or rolled back; then the
+database is not released and stays acquired here. Failures are returned with
+`errors.Join`, the work's error first. A `scope_cleanup_failed` error's `Err`
+is the close or release error. The complete program is in
+[examples/go-app/agent](../examples/go-app/agent/main.go). See
+[agents](sqlite-agent-state.md) for concurrency and offloading.
+
+## Iterate pages
+
+`AllDatabases`, `AllVersions`, and `WatchEvents` return `iter.Seq2[T, error]`;
+the page calls (`DatabasesPage`, `VersionsPage`, `Events`) remain.
+
+```go
+for version, err := range client.AllVersions(ctx, "main.sqlite", nil) {
+    if err != nil {
+        return err
+    }
+    fmt.Println(version.Version, version.Time)
+}
+```
 
 ## Replica and restore
 
@@ -162,4 +193,4 @@ return err
 ```
 
 Replicate waits for the first local copy; restore requires a new destination.
-The [API reference](sdk-reference.md) maps every Go method to its TypeScript equivalent.
+The [API reference](sdk-reference.md) maps every Go method to its TypeScript and Python equivalents.

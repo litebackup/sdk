@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -25,7 +28,13 @@ type ScopeAdapter[DB any] interface {
 // ManagedArgs configures Managed.
 type ManagedArgs[DB any] struct {
 	// To is the local file; the path this machine already uses when empty.
+	// When nothing is at To, Managed creates an empty file and its directory
+	// first, so a database neither the server nor this machine has becomes a
+	// new one; the server's head replaces an empty file.
 	To string
+	// RequireExisting skips creating To, so a database neither the server nor
+	// this machine has fails with not_found.
+	RequireExisting bool
 	// Durability is how far the final sync must reach before the release
 	// returns: DurabilityServer or DurabilityCloud. It is required.
 	Durability Durability
@@ -85,6 +94,11 @@ func Managed[DB any](ctx context.Context, client *Client, name string, args *Man
 	if ctx.Err() != nil {
 		return &Error{Code: CodeCancelled, Message: "the managed database was cancelled before it was acquired", Err: ctx.Err()}
 	}
+	if settings.To != "" && !settings.RequireExisting {
+		if err := createEmptyFile(settings.To); err != nil {
+			return err
+		}
+	}
 	acquired, err := client.Acquire(ctx, name, &AcquireArgs{
 		To: settings.To, Maintenance: settings.Maintenance, MachineLabel: settings.MachineLabel,
 		BlockOnLost: settings.BlockOnLost, Timeout: settings.AcquireTimeout,
@@ -126,6 +140,26 @@ func Managed[DB any](ctx context.Context, client *Client, name string, args *Man
 		return joinScopeErrors(workErr, scope.closeFailed(closeErr))
 	}
 	return joinScopeErrors(workErr, scope.release(workErr == nil && settings.Offload))
+}
+
+// createEmptyFile creates an empty file and its directory unless something
+// is already at path.
+func createEmptyFile(path string) error {
+	absolute, err := absolutePath(path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
+		return &Error{Code: CodeInvalidArgument, Message: "creating " + absolute + " failed: " + err.Error(), Err: err}
+	}
+	file, err := os.OpenFile(absolute, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if errors.Is(err, fs.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return &Error{Code: CodeInvalidArgument, Message: "creating " + absolute + " failed: " + err.Error(), Err: err}
+	}
+	return file.Close()
 }
 
 // managedScope is one Managed call's database and cleanup settings.

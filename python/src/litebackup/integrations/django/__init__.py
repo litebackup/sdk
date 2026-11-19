@@ -7,7 +7,9 @@ Add it to INSTALLED_APPS and name the databases to back up::
         "databases": {"default": {}},              # or {"default": {"name": "app/main.sqlite"}}
     }
 
-Each database is registered in AppConfig.ready() with ``backups.start()``, which
+Each database is registered in AppConfig.ready() with ``backups.start()``. Before
+the first migrate, when NAME does not exist yet, the app creates the empty file
+SQLite would create on first connect. ``backups.start()``
 returns the saved rule when the same settings were registered before, so every
 process start may call it. Keys of each entry are backups.start's: ``name``,
 ``prefix``, and ``maximum_local_databases``. Other top-level keys: ``token``,

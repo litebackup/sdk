@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.0.0
+
+The first public release, with a Python SDK. This SDK refuses a litebackup
+client older than 1.0.0 with `incompatible_version`. The npm packages and
+wheels bundle 1.0.0. Where the CLI is installed separately, upgrade it, then
+run `litebackup drain --session NAME` once so the next call starts the new
+daemon. The server is unchanged from 0.7.0.
+
+- **Python.** `pip install litebackup`: `Litebackup` and `AsyncLitebackup`, with
+  integrations for sqlite3, aiosqlite, SQLAlchemy, Django, and FastAPI. Wheels
+  bundle the client for Linux (glibc and musl) and macOS on x64 and arm64.
+- **Registration is idempotent.** Starting a backup rule again with the same
+  path, name, prefix, watch, and local database limit returns the saved rule.
+  Other settings for a saved path fail with 409 `exists`, and the error carries
+  the saved rule. Earlier clients answered 400 `invalid_argument` for a
+  changed destination and silently kept a changed watch or limit.
+- **Managed scopes.** `databases.managed` (TypeScript, Python) and
+  `litebackup.Managed` (Go) acquire, open, run, close, and release a database.
+  A failed close never releases; failed work keeps its error first.
+- **Errors** have `details`: the answer's other fields under their wire names.
+  New SDK codes are `binary_not_found`, `incompatible_version`, and
+  `scope_cleanup_failed`.
+- **Iterators**: TypeScript `databases.iterate()`, `databases.iterateVersions()`;
+  Python `iter_all()`, `iter_versions()`; Go `AllDatabases`, `AllVersions`,
+  `WatchEvents`. Event watches retry failed long-polls with backoff.
+- **Every TypeScript operation takes `signal`.** Calls with a server-side
+  timeout get a client-side deadline 30 seconds past it.
+
+| 0.7.0 | 1.0.0 |
+| --- | --- |
+| TypeScript `backups.start(db)` with a better-sqlite3 handle; `SQLiteHandle` | `backups.start(databasePath(db))` from `@litebackup/sdk/better-sqlite3`, `/node-sqlite`, or `/drizzle` |
+| TypeScript `backups.once(handle)` | `backups.once(path)` |
+| Restore times sent as `2026-11-15T09:30:00.000Z` | `2026-11-15T09:30:00Z`; fractions only when not zero |
+| TypeScript `acquire` sending `maintenance: false`, a zero `timeout`, or other defaults | Options equal to the defaults are not sent |
+| TypeScript `events.watch()` throwing on the first failed long-poll | Retries with backoff; `onError` hears each failure |
+| Go `Version`, `DatabasePage` | `RestorableVersion`, `DatabaseStatusList` (generated, wire names intact) |
+| Go optional times as `*time.Time` | `time.Time`; absent is the zero time |
+| Go `Role`, `State` string types | `Role` aliases `DatabaseStatusRole`; states are `DatabaseStatusState` constants |
+| Go errors from `Binary()` and launch as plain errors | `*Error` with `binary_not_found` or `launch_failed` |
+| `scripts/stage-platforms DIST` with build archives | `scripts/stage-platforms RELEASE-DIRECTORY METADATA-JSON`, verified |
+
 ## 0.7.0
 
 The SDK API is unchanged from 0.6.1. Bundled Litebackup 0.7.0 adds dismissible

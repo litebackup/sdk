@@ -7,6 +7,7 @@ Start with the [README](../README.md), or pick a guide below.
 | Install a server and connect machines | [Server](litebackup-server.md), [client runtime](litebackup-client.md) |
 | Connect a bucket | [Storage providers](sqlite-cloud-backup.md) |
 | Back up SQLite continuously | [SQLite backup](sqlite-backup.md) |
+| Add backups to an app's driver or framework | [Integrations](sqlite-integrations.md) |
 | Back up while the app keeps writing | [Live SQLite backup and WAL](sqlite-live-backup.md) |
 | Keep SQLite data across container replacements | [SQLite in Docker](sqlite-docker.md) |
 | Give each customer a database | [Tenants](sqlite-multitenancy.md) |
@@ -18,8 +19,9 @@ Start with the [README](../README.md), or pick a guide below.
 | Schedule backups | [Cron and Kubernetes CronJob](sqlite-cron-backup.md) |
 | Run backups as retried activities | [Temporal](sqlite-temporal.md) |
 | Integrate from Go | [Go examples](sqlite-go.md) |
+| Integrate from Python | [Python guide](../python/README.md) |
 | Look up a method or error | [API](sdk-reference.md), [troubleshooting](sqlite-backup-errors.md) |
-| Work on this SDK | [Development](sdk-development.md) |
+| Work on this SDK | [Development](sdk-development.md), [SDK contract](sdk-contract.md) |
 
 TypeScript examples use ESM. Examples importing `node:sqlite` require Node.js
 22.13+ (Node 24 is used for the runnable examples); the SDK itself supports

@@ -20,6 +20,8 @@ try {
     [
       'import { execFileSync } from "node:child_process";',
       'import { Litebackup, litebackupBinary } from "@litebackup/sdk";',
+      'import { databasePath } from "@litebackup/sdk/node-sqlite";',
+      'if (typeof databasePath !== "function") throw new Error("missing the node-sqlite subpath export");',
       "const client = new Litebackup();",
       'if (typeof client.backups.once !== "function") throw new Error("missing backups.once");',
       "const binary = litebackupBinary({});",
@@ -42,10 +44,13 @@ try {
     }
   }
   for (const file of readdirSync(join(root, "examples"))) {
-    const code = readFileSync(join(root, "examples", file), "utf8").replace('"../src/index.js"', '"@litebackup/sdk"');
+    // ../src/index.js is the package root; ../src/<driver>.js is its subpath export.
+    const code = readFileSync(join(root, "examples", file), "utf8")
+      .replaceAll('"../src/index.js"', '"@litebackup/sdk"')
+      .replaceAll(/"\.\.\/src\/([a-z0-9-]+)\.js"/g, '"@litebackup/sdk/$1"');
     writeFileSync(join(scratch, file), code);
   }
-  execFileSync("npm", ["install", "--silent", "--ignore-scripts", "--no-audit", "--no-fund", "--omit=optional", "typescript@5.9.3", "@types/node@24.19.2", "@types/better-sqlite3@7.6.13",
+  execFileSync("npm", ["install", "--silent", "--ignore-scripts", "--no-audit", "--no-fund", "--omit=optional", "typescript@5.9.3", "@types/node@24.19.2", "@types/better-sqlite3@7.6.13", "better-sqlite3@13.2.0", "drizzle-orm@0.45.4",
     ...["activity", "workflow", "worker", "client"].map((name) => "@temporalio/" + name + "@1.26.0")], { cwd: scratch, stdio: "inherit" });
   execFileSync(join(scratch, "node_modules/.bin/tsc"), ["--noEmit", "--strict", "--skipLibCheck", "--module", "NodeNext", "--target", "es2023", ...readdirSync(scratch).filter((name) => name.endsWith(".ts"))], { cwd: scratch, stdio: "inherit" });
   console.log(`pack check passed for ${platform}: ${sdkTarball}, ${binaryTarball}`);

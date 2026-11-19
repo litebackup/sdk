@@ -365,6 +365,7 @@ async def test_lifecycle(name: str, client_kind: str, cwd: str, daemons: list[Co
         "to": scope.get("to"),
         "offload": scope.get("offload", False),
         "cleanup_timeout": duration(scope.get("cleanup_timeout")),
+        "create": scope.get("create", True),
         "adapter": adapter,
     }
     work_error: BaseException | None = None
@@ -423,6 +424,10 @@ async def test_lifecycle(name: str, client_kind: str, cwd: str, daemons: list[Co
     assert steps == expect["steps"]
     if expect.get("open_path"):
         assert adapter.open_path == expect["open_path"]
+    if expect.get("created_file"):
+        assert os.path.exists(expect["created_file"])
+    if expect.get("missing_file"):
+        assert not os.path.exists(expect["missing_file"])
     for received in daemon.received:
         expected_body = expect["acquire_body"] if received.path.endswith("/acquire") else expect["release_body"]
         assert received.json() == expected_body, received.path

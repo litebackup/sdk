@@ -583,6 +583,7 @@ func TestContractLifecycle(t *testing.T) {
 			Durability     string `json:"durability"`
 			Offload        bool   `json:"offload"`
 			CleanupTimeout string `json:"cleanup_timeout"`
+			Create         *bool  `json:"create"`
 		} `json:"scope"`
 		Fail            []string          `json:"fail"`
 		Cancel          string            `json:"cancel"`
@@ -594,6 +595,8 @@ func TestContractLifecycle(t *testing.T) {
 			OpenPath    string          `json:"open_path"`
 			ReleaseBody json.RawMessage `json:"release_body"`
 			Raised      []raisedError   `json:"raised"`
+			CreatedFile string          `json:"created_file"`
+			MissingFile string          `json:"missing_file"`
 		} `json:"expect"`
 	}
 	for name := range contractFixtures[lifecycleFixture](t, "lifecycle", "/") {
@@ -641,7 +644,7 @@ func TestContractLifecycle(t *testing.T) {
 			}
 			err := Managed(ctx, client, fixture.Scope.Name, &ManagedArgs[string]{
 				To: fixture.Scope.To, Durability: Durability(fixture.Scope.Durability), Offload: fixture.Scope.Offload,
-				CleanupTimeout: cleanupTimeout, Adapter: adapter,
+				CleanupTimeout: cleanupTimeout, Adapter: adapter, RequireExisting: fixture.Scope.Create != nil && !*fixture.Scope.Create,
 			}, func(ctx context.Context, connection string) error {
 				steps.add("work")
 				switch {
@@ -659,6 +662,16 @@ func TestContractLifecycle(t *testing.T) {
 			}
 			if !reflect.DeepEqual(steps.all(), expectedSteps) {
 				t.Fatalf("steps %v, want %v", steps.all(), expectedSteps)
+			}
+			if fixture.Expect.CreatedFile != "" {
+				if _, statErr := os.Stat(fixture.Expect.CreatedFile); statErr != nil {
+					t.Fatalf("the scope did not create %s: %v", fixture.Expect.CreatedFile, statErr)
+				}
+			}
+			if fixture.Expect.MissingFile != "" {
+				if _, statErr := os.Stat(fixture.Expect.MissingFile); statErr == nil {
+					t.Fatalf("the scope created %s", fixture.Expect.MissingFile)
+				}
 			}
 			if fixture.Expect.OpenPath != "" && adapter.openPath != fixture.Expect.OpenPath {
 				t.Fatalf("opened %s, want %s", adapter.openPath, fixture.Expect.OpenPath)

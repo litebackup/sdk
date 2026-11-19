@@ -1,145 +1,158 @@
-# Litebackup SDK reference for TypeScript and Go
+# Litebackup SDK reference for TypeScript, Python, and Go
 
-Both SDKs use the local client's [socket API](../client-openapi.yaml). Wire
-fields use snake_case; TypeScript results use camelCase; Go exposes named
-struct fields with JSON tags. Both keep timestamp fields in response objects
-as their declared types: TypeScript strings and Go `time.Time` / `*time.Time`.
+The three SDKs use the local client's [socket API](../client-openapi.yaml) and
+behave the same way; [the SDK contract](sdk-contract.md) is the shared
+behavior, checked by the same fixtures in each SDK's tests. Wire fields are
+snake_case: TypeScript results use camelCase, Python keeps the wire names on
+frozen dataclasses, and Go has generated structs with JSON tags. Times are
+strings in TypeScript, `datetime` in Python, and `time.Time` in Go, where an
+absent optional time is the zero time.
 
 ## Connect
 
 ```ts
 import { Litebackup } from "@litebackup/sdk";
-const client = new Litebackup({
-  token: process.env.LITEBACKUP_TOKEN,
-  session: "default",
-});
+
+const litebackup = new Litebackup({ session: "default" });
+```
+
+```python
+from litebackup import AsyncLitebackup, Litebackup
+
+with Litebackup(session="default") as litebackup:
+    ...
+
+
+async def main() -> None:
+    async with AsyncLitebackup(session="default") as litebackup:
+        ...
 ```
 
 ```go
-client, err := litebackup.Connect(ctx, &litebackup.ConnectArgs{
-    Token: os.Getenv("LITEBACKUP_TOKEN"), Session: "default",
-})
+client, err := litebackup.Connect(ctx, &litebackup.ConnectArgs{Session: "default"})
 ```
 
-`token` is a join token plus server address (`JOIN_TOKEN@HOST`), not a server
-API key. It is only used when the local client first joins; see
-[client credentials](litebackup-client.md#join-and-register).
+| Option | TypeScript | Python | Go | Meaning |
+| --- | --- | --- | --- | --- |
+| Join token | `token` | `token` | `Token` | `JOIN_TOKEN@HOST`, used only when the daemon first joins; `LITEBACKUP_TOKEN` by default |
+| Session | `session` | `session` | `Session` | `LITEBACKUP_SESSION`, then `default` |
+| Socket | `socketPath` | `socket_path` | `SocketPath` | Connect to this socket and never start a daemon |
+| Binary | `binaryPath` | `binary_path` | `BinaryPath` | The `litebackup` binary that starts the daemon |
+| Launch | `launch: false` | `launch=False` | not applicable | Never start the daemon |
+| Environment | `environment` | `environment` | the process environment | Used to resolve sessions and start the daemon |
 
-Omit token and session to use the environment. TypeScript also supports
-`environment`, `launch: false`, and `socketPath`. Go supports `ConnectArgs.SocketPath` for an existing daemon. A socket override
-connects without launching.
-Go callers pass a context and a pointer to the operation’s `Args` struct. Pass `nil` to use defaults. Restore and prefix replication require a destination. TypeScript durations are milliseconds
-or strings such as `"5s"` and `"2m"`; Go uses `time.Duration`.
+TypeScript and Python clients connect on first use; `connect()` checks at
+startup. Connecting starts the session's daemon with `litebackup launch` when
+nothing listens on its socket. The binary is the explicit one, then
+`LITEBACKUP_PATH`, then the one the npm package or wheel bundles, then
+`litebackup` on `PATH`, then `~/.local/bin/litebackup`. Go bundles none.
 
-Create one TypeScript client for the session. Socket operations connect on first use.
-Call `await client.connect()` for an explicit startup check. Foreground backup
-runs the CLI directly and requires a session selected by name or environment.
-The TypeScript client keeps the environment it resolves on first use. Retry a
-transient connection failure on the same client. If you correct the session
-or token in the process environment, create a new client to pick up the change.
-On a fresh Go worker, set `LITEBACKUP_TOKEN` and call the package function
-`litebackup.Backup(ctx, path, nil)` directly. Calling `litebackup.Connect`
-first starts or connects to a persistent session by default.
+Connecting fails with `incompatible_version` when the daemon is older than
+1.0.0, and the message says how to replace it: `litebackup drain --session
+NAME` stops it after a final sync, and the next call starts the new binary.
+`close()` closes connections and stops watches; it never stops the daemon,
+its failovers, or its acquired databases.
+
+Go callers pass a context and a pointer to the operation's `Args` struct, or
+`nil` for defaults. TypeScript durations are milliseconds or strings such as
+`"5s"` and `"2m"`, Python durations are seconds or a `timedelta`, and Go uses
+`time.Duration`. Relative paths resolve against the working directory;
+TypeScript also takes `file:` URLs and Python any `os.PathLike`.
 
 ## Operations
 
-The TypeScript column shows methods on `client`. Go also exposes package
-helpers for backup, replication, failover, restore, and version listing.
+| TypeScript `litebackup.` | Python `litebackup.` | Go `client.` | Returns when / result |
+| --- | --- | --- | --- |
+| `backups.start(path, options?)` | `backups.start(path, ...)` | `StartBackup(ctx, path, args)` | The rule is saved. Idempotent; other settings fail with `exists` |
+| `backups.stop(name)` | `backups.stop(name)` | `StopBackup(ctx, name)` | A single-file backup stopped |
+| `rules.list()` / `rules.stop(id)` | `rules.list()` / `rules.stop(id)` | `Backups(ctx)` / `StopBackupRule(ctx, id)` | Saved rules; a whole rule stopped |
+| `backups.once(path, options?)` | `backups.once(path, ...)` | `Backup(ctx, path, args)` | A foreground job is acknowledged at its `wait` |
+| `replicas.start(name, options?)` | `replicas.start(name, ...)` | `Replicate(ctx, name, args)` | The first local version is available |
+| `replicas.startPrefix(prefix, { to })` | `replicas.start_prefix(prefix, to=)` | `ReplicatePrefix(ctx, prefix, args)` | The namespace is registered; files download in the background |
+| `replicas.list()`, `stop(name)`, `stopPrefix(prefix, to)` | `replicas.list()`, `stop(name)`, `stop_prefix(prefix, to=)` | `Replicas`, `StopReplica`, `StopReplicaPrefix` | Replicas; files stay when stopped |
+| `databases.restore(name, { to, version?, time? })` | `databases.restore(name, to=, version=, time=)` | `Restore(ctx, name, args)` | A new file is written and checked; an existing file is never replaced |
+| `databases.versions(name, options?)` | `databases.versions(name, ...)` | `Versions(ctx, name, args)` | Restorable versions, oldest first |
+| `databases.iterateVersions(name, options?)` | `databases.iter_versions(name, ...)` | `AllVersions(ctx, name, args)` | The same, a page at a time |
+| `databases.acquire(name, options?)` | `databases.acquire(name, ...)` | `Acquire(ctx, name, args)` | The write lock is held and the local file is the head |
+| `databases.release(name, options?)` | `databases.release(name, ...)` | `Release(ctx, name, args)` | The final sync reached `wait` and the lock is released |
+| `databases.managed(name, options, work)` | `with databases.managed(name, ...) as db` | `Managed(ctx, client, name, args, work)` | Acquire, open, work, close, release; see below |
+| `databases.offload(name)` | `databases.offload(name)` | `Offload(ctx, name)` | A released file is removed once the bucket holds it |
+| `databases.writer(name)` | `databases.writer(name)` | `Writer(ctx, name)` | The writer's machine and lease |
+| `databases.get(name)` | `databases.get(name)` | `Database(ctx, name)` | One database's status |
+| `databases.sync(name)` | `databases.sync(name)` | `Sync(ctx, name)` | The server acknowledged a sync |
+| `databases.list()` / `iterate()` / `page()` | `databases.list()` / `iter_all()` / `page()` | `Databases` / `AllDatabases` / `DatabasesPage` | Every database on this machine |
+| `failovers.start(path, options?)` | `failovers.start(path, ...)` | `Failover(ctx, path, args)` | This machine is the origin or holds a replica |
+| `conflicts.list()` / `delete(id)` | `conflicts.list()` / `delete(id)` | `Conflicts` / `DeleteConflict` | Conflict copies |
+| `events.watch(options?)` | `events.watch(...)` | `WatchEvents(ctx, args)` | Events as they happen; failed long-polls are retried |
+| `events.page(options?)` | `events.page(...)` | `Events(ctx, args)` | One page of events |
+| `session.status(options?)` | `session.status(...)` | `Status(ctx)` / `StatusPage` | The session, its server, and a page of databases |
+| `session.shutdown(options?)` | `session.shutdown(...)` | `Shutdown(ctx, args)` | Every database final-synced and the daemon stopped |
 
-| TypeScript | Go | Returns when / result |
-| --- | --- | --- |
-| `await backups.start(pathOrHandle, options?)` | `StartBackup(ctx, path, *StartBackupArgs)` | Durable local rule acknowledgement |
-| `await backups.stop(name)` | `StopBackup(ctx, name)` | Stop a single-file backup on this machine by remote name |
-| `await rules.stop(rule.id)` | `StopBackupRule(ctx, rule.ID)` | Stop a whole backup rule, including future matches |
-| `await backups.once(pathOrHandle, options?)` | `Backup(ctx, path, *BackupArgs)` | Foreground job acknowledged and locks released |
-| `replicas.start(name, options?)` | `Replicate(ctx, name, *ReplicateArgs)` | First local version available |
-| `replicas.startPrefix(prefix, { to, writeProtection? })` | `ReplicatePrefix(ctx, prefix, *ReplicatePrefixArgs)` | Namespace registered; files download in background |
-| `databases.restore(name, { to, version?, time? })` | `Restore(ctx, name, *RestoreArgs)` | New file materialized and checked |
-| `databases.versions(name, { after?, limit? }?)` | `Versions(ctx, name, *VersionsArgs)` | Retained restorable versions, oldest first; SDK follows pagination |
-| `databases.acquire(name, options?)` | `Acquire(ctx, name, *AcquireArgs)` | Ownership obtained, local file current |
-| `databases.release(name, options?)` | `Release(ctx, name, *ReleaseArgs)` | Final sync and ownership released |
-| `databases.offload(name)` | `Offload(ctx, name)` | Remove released local file after bucket durability |
-| `databases.writer(name)` | `Writer(ctx, name)` | Writer machine and lease |
-| `session.status({ after?, limit? }?)` | `StatusPage(ctx, after, limit)` | Session and database status |
-| `databases.get(name, { signal }?)` | `Database(ctx, name)` | One local database's status |
-| `databases.page({ after?, limit? }?)` | `DatabasesPage(ctx, after, limit)` | Returns databases and `next`. Pass that cursor as `after` until it is absent. |
-| `databases.sync(name, { signal }?)` | `Sync(ctx, name)` | Explicit server acknowledgement |
-| `rules.list({ signal }?)` | `Backups(ctx)` | Registered backups |
-| `databases.list()` | `Databases(ctx)` | All locally tracked databases |
-| `failovers.start(path, options?)` | `Failover(ctx, path, args)` | Local role and change notifications |
-| `replicas.list()` | `Replicas(ctx)` | Prefix rules and replicas |
-| `replicas.stop(name)` | `StopReplica(ctx, name)` | Stop one replica; file stays |
-| `replicas.stopPrefix(prefix, to)` | `StopReplicaPrefix(ctx, prefix, to)` | Stop prefix and replicas; files stay |
-| `conflicts.list()` / `conflicts.delete(id)` | `Conflicts(ctx)` / `DeleteConflict(ctx, id)` | Inspect / remove divergent saved copies |
-| `events.watch({ after?, wait?, signal? }?)` | `Events(ctx, *EventsArgs)` | TS async iterator; Go one page with `Next` cursor |
-| `events.page({ after?, wait?, limit?, signal? }?)` | `Events(ctx, *EventsArgs)` | One event page |
-| `close()` | `Close()` | Close local watchers and cancel in-flight TypeScript jobs; daemon stays |
-| `session.shutdown({ wait?, timeout? }?)` | `Shutdown(ctx, *ShutdownArgs)` | Drain and stop the whole session |
+Every TypeScript operation takes `signal`, and Go takes `ctx`. Cancelling stops
+the local wait only: the daemon may still finish the operation, and the error
+is `cancelled`. In async Python, cancelling the task raises
+`asyncio.CancelledError` as usual. Calls with a `timeout` wait that long plus
+30 seconds for the daemon's answer; others wait until it answers.
 
-## Release compatibility
+## Options
 
-Use version 0.5.0 of the SDK, CLI and server for these examples. See the [breaking change in the release notes](../CHANGELOG.md). Releases through 0.3.32 use the earlier continuous `backup` behavior.
+| Backup TS | Python | Go | Meaning |
+| --- | --- | --- | --- |
+| `name` | `name` | `Name` | Exact remote name of a single file |
+| `prefix` | `prefix` | `Prefix` | Prefix before each relative path |
+| `maximumLocalDatabases` | `maximum_local_databases` | `MaximumLocalDatabases` | Continuous rules: offload idle files past this count once the bucket holds them |
+| `wait` | `wait` | `Wait` | `backups.once`: `server` (default) or `cloud` |
+| `timeout` | `timeout` | `Timeout` | `backups.once`: bounds the job |
 
-If you override the bundled CLI with `LITEBACKUP_PATH` or install the CLI for
-Go, check `litebackup --version` on the worker. The 0.4.2 foreground command
-enrolls a fresh worker as a persistent machine. Temporary enrollment requires
-both the CLI and the server to support it.
+| Acquire TS | Python | Go | Meaning |
+| --- | --- | --- | --- |
+| `to` | `to` | `To` | Local file; the known path when omitted |
+| `maintenance` | `maintenance` | `Maintenance` | Checkpoint and VACUUM past the freelist threshold on release |
+| `offload: "released"` | `offload="released"` | `OffloadReleased` | Offload after release once the bucket holds it |
+| `machineLabel` | `machine_label` | `MachineLabel` | What other machines see as the writer |
+| `onLost: "block"` | `on_lost="block"` | `BlockOnLost` | Block local writes after a lost lock instead of saving a conflict copy |
+| `timeout` | `timeout` | `Timeout` | Bounds downloading the head |
 
-## Backup options
+Release takes `wait` (`server` or `cloud`), `offload`, and `timeout`, which
+bounds waiting for every connection to close and for `wait`. Close all SQLite
+connections first, or release fails with `still_open`.
 
-| TypeScript | Go | Meaning |
-| --- | --- | --- |
-| `name` | `Name` | Exact remote database name |
-| `prefix` | `Prefix` | Prefix before relative path |
-| `wait: "server" \| "cloud"` | `Wait: DurabilityServer / DurabilityCloud` | Foreground durability, default server |
-| `timeout` | `Timeout` | Bounds the foreground job |
-| `maximumLocalDatabases` | `MaximumLocalDatabases` | Continuous rules only. Offload idle files above a positive count once bucket-safe |
+Managed scopes take the acquire options plus `create` (true by default:
+create an empty file at `to` when nothing is there; Go spells it
+`RequireExisting` for false), `durability` (required, the
+release's `wait`), `offload` (only after the work succeeded), `cleanupTimeout`
+/ `cleanup_timeout` / `CleanupTimeout` (10 minutes by default), and an
+`adapter`. See [integrations](sqlite-integrations.md) for adapters and the
+failure rules.
 
-TypeScript accepts a path or a duck-typed `better-sqlite3` handle. The handle
-supplies `name`, `memory`, and `open`. In-memory handles are rejected.
-Recursive globs use **. See [backup semantics](sqlite-backup.md).
-
-## Acquire and release options
-
-| Acquire TS | Acquire Go | Meaning |
-| --- | --- | --- |
-| `to` | `To` | Local path; omitted to reuse the known path |
-| `maintenance` | `Maintenance` | Checkpoint and optional VACUUM on release |
-| `offload: "released"` | `OffloadReleased: true` | Offload after release when bucket-safe |
-| `machineLabel` | `MachineLabel` | Label visible to other machines |
-| `onLost: "block"` | `BlockOnLost: true` | Block local writes when ownership is lost, rather than default conflict behavior |
-| `timeout` | `Timeout` | Bounds downloading the head |
-
-Release options: `wait` (`Wait`) chooses server or cloud durability, `offload`
-(`Offload`) requests local removal after bucket safety, and `timeout`
-(`Timeout`) bounds waiting for closure and durability. Close all SQLite
-connections before release. See [agents](sqlite-agent-state.md).
-
-Replica options: `to`, `writeProtection: "lock" | "detect" | "none"`, and
-`timeout` for the first single-file download. Prefix replicas require a
-`to` directory and support `writeProtection`; registration does not wait for
-the namespace's downloads. See [replicas](sqlite-replication.md).
+Options equal to the daemon's defaults are not sent, so the SDKs send identical
+requests. Replica options are `to`, `writeProtection` (`lock`, `detect`, or
+`none`), and `timeout` for the first download.
 
 ## Status and errors
 
-`DatabaseStatus` has `role`, `state`, `syncedServer`, `syncedCloud`,
-`localChanged`, `acquired`, and diagnostics such as `lastError`.
-Roles are `origin` and `replica`. States are `syncing`, `retrying`, `synced`,
-`waiting`, `offloaded`, `stopped`, `conflicted`, and `error`. The counters tell
-you which version reached the server or bucket. An active origin can stay in
-`syncing` while it continues backing up changes. An origin whose syncs fail
-is `retrying`: `lastError` says why and `nextRetryTime` says when the next
-attempt runs. `firstUnsyncedChangeTime` is when the first change the server
-lacks was seen; it is absent when the server has every change seen, survives
-restarts, and may be earlier than the real first change, never later.
+`DatabaseStatus` has `role` (`origin` or `replica`), `state`, the versions the
+server and bucket hold (`syncedServer`, `syncedCloud`), `localChanged`,
+`acquired`, and diagnostics such as `lastError`. States are `syncing`,
+`retrying`, `synced`, `waiting`, `offloaded`, `stopped`, `conflicted`, and
+`error`. A `retrying` origin's `lastError` says why and `nextRetryTime` when
+the next attempt runs. `firstUnsyncedChangeTime` is when the first change the
+server lacks was seen; it is absent when the server has every change seen and
+may be earlier than the real first change, never later.
+
+Every failure is one error type with `code`, `message`, `status` (the HTTP
+status, or 0 for errors the SDK raised), and `details`: `LitebackupError` in
+TypeScript and Python, `*litebackup.Error` in Go (`IsCode(err, code)`).
+Codes the daemon answers with are kept verbatim; `details` holds the answer's
+other fields under their wire names, such as `details.rule` for `exists`.
 
 ```ts
 import { Litebackup, LitebackupError } from "@litebackup/sdk";
 
-const client = new Litebackup();
+const litebackup = new Litebackup();
 
 try {
-  await client.databases.acquire("agents/42.sqlite", { to: "/var/lib/app/42.sqlite" });
+  await litebackup.databases.acquire("agents/42.sqlite", { to: "/var/lib/app/42.sqlite" });
 } catch (error) {
   if (error instanceof LitebackupError && error.code === "in_use") {
     console.error("Agent already running; retry later");
@@ -149,13 +162,28 @@ try {
 }
 ```
 
-Go uses `*litebackup.Error` with `Code`, `Message`, and `Status`, and
-`litebackup.IsCode(err, "in_use")`. TypeScript operations report cancellation as `cancelled` and socket failures as `connection_failed`.
-See [troubleshooting](sqlite-backup-errors.md) for common codes.
+| Code | Raised by | Meaning |
+| --- | --- | --- |
+| `invalid_argument` | SDK or daemon | An argument failed validation; the SDK sends nothing |
+| `binary_not_found` | SDK | No `litebackup` binary; the message has the install command |
+| `launch_failed` | SDK | `litebackup launch` failed |
+| `connection_failed` | SDK | The socket refused or dropped the connection |
+| `incompatible_version` | SDK | The daemon is older than 1.0.0 |
+| `cancelled` | SDK | The caller cancelled; the daemon may still finish |
+| `timeout` | SDK or daemon | The operation's timeout ran out |
+| `closed` | SDK | The client was closed |
+| `invalid_response` | SDK | The daemon's answer could not be decoded |
+| `scope_cleanup_failed` | SDK | A managed scope could not close or release; `details.step` says which |
+| `sdk_unsupported` | daemon | This SDK is older than the daemon accepts |
+| `exists`, `in_use`, `not_found`, `still_open`, `busy` | daemon | See [troubleshooting](sqlite-backup-errors.md) |
+
+Only event watches retry, with backoff from 250 ms to 10 s. Acquire, release,
+start, stop, restore, shutdown, and launch are never retried.
 
 ## Release verification
 
-`findRelease(metadata)` / `litebackup.FindRelease` verifies the package
-metadata served at `https://litebackup.com/pkg/metadata` with Litebackup's
-Ed25519 release keys. Invalid signatures raise `SignatureError` in TypeScript
-or return an error in Go. Verification happens before a release is selected.
+`findRelease(metadata)` in TypeScript, `litebackup.release.find_release` in
+Python (`litebackup[release]`), and `litebackup.FindRelease` in Go verify the
+package metadata served at `https://litebackup.com/pkg/metadata` with
+Litebackup's Ed25519 release keys and return the release from its signed
+document. A bad signature raises `SignatureError` or returns `ErrSignature`.

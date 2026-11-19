@@ -117,10 +117,15 @@ part and ignores any `-suffix`.
   An event long-poll's deadline is its wait plus 30 seconds.
 - A call without a timeout has no client-side deadline. It ends when the
   daemon answers or the caller cancels.
-- Cancellation (a Go context, a TypeScript `AbortSignal`, or Python task
-  cancellation) stops only the local wait. The error is `cancelled`, and its
-  message says the daemon may still finish the operation: an acquire may still
-  take the lock, and a release may still release it.
+- Cancellation (a Go context or a TypeScript `AbortSignal`) stops only the
+  local wait. The error is `cancelled`, and its message says the daemon may
+  still finish the operation: an acquire may still take the lock, and a
+  release may still release it. In async Python, cancelling the task raises
+  `asyncio.CancelledError` unchanged, as asyncio code expects; the sync Python
+  client has no cancellation, so the lifecycle fixtures with `cancel` run
+  only against the async client.
+- When a client-side deadline passes before the daemon answers, the error is
+  `timeout` with status 0, and its message says the daemon may still finish.
 
 ## Retries
 
@@ -172,6 +177,7 @@ A managed scope owns a database for the length of a block:
 `acquire → open → work → close → release`.
 
 ```text
+create(to)              when to is given and nothing is there: an empty file, and its directory
 acquire(name, to, acquire options)
 open(path)              adapter: open a connection
 work(connection)        the caller's code
@@ -179,6 +185,12 @@ close(connection)       adapter: roll back an unfinished transaction, then close
 release(name, wait: durability, offload, timeout_millis: cleanup timeout)
 ```
 
+- `create` defaults to true: when `to` is given and no file is there, the
+  scope creates an empty file (and missing directories) before acquiring. The
+  daemon treats an empty file as no copy: it becomes a new database when the
+  server has none and is replaced by the server's head otherwise. With
+  `create` false, a database neither the server nor this machine has fails
+  with `not_found`.
 - `durability` is required: `server` or `cloud`. It is the release's `wait`.
 - `offload` defaults to false, and is requested only when the work succeeded.
   A failed or cancelled run keeps its local copy for the retry.
@@ -209,4 +221,10 @@ details are `{step: "release", name, path, durability}`. Each
 When more than one error is raised, the first is the one that ended the work
 (the open or work error) and the rest follow in step order: Go returns
 `errors.Join(...)`, TypeScript throws an `AggregateError`, and Python raises an
-`ExceptionGroup`. A scope with one error raises that error alone.
+`ExceptionGroup`. A scope with one error raises that error alone. An async
+Python scope whose task was cancelled re-raises the `CancelledError` itself
+after cleanup, with any cleanup failure attached as a note and its cause.
+
+A fixture may carry `skip: {language: reason}` where a language's conventions
+differ: Go's zero values mean defaults, so a Go `Limit` or `CleanupTimeout` of
+0 cannot mean zero.

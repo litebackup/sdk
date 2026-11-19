@@ -25,6 +25,10 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+	// Opening the first connection creates the file, which registration needs.
+	if err := db.PingContext(ctx); err != nil {
+		log.Fatal(err)
+	}
 
 	path, err := sqlitedsn.Modernc(dsn)
 	if err != nil {

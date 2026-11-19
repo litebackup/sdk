@@ -67,12 +67,15 @@ def django_settings(daemon: ContractDaemon, name: str, litebackup: str) -> str:
 def test_django_registers_on_startup_and_again(cwd: str, daemon: ContractDaemon) -> None:
     settings = django_settings(daemon, "BASE / 'data' / 'app.sqlite'", '{"databases": {"default": {"prefix": "web/"}}}')
     settings = "from pathlib import Path\nBASE = Path(__file__).resolve().parent\n" + textwrap.dedent(settings)
+    os.mkdir(os.path.join(cwd, "data"))
     for _start in range(2):
         completed = run_django(cwd, settings)
         assert completed.returncode == 0, completed.stderr
         assert "ready" in completed.stdout
     starts = [received.json() for received in daemon.received if received.path == "/v1/backup-rules/start"]
     assert starts == [{"path": os.path.join(cwd, "data", "app.sqlite"), "prefix": "web/"}] * 2
+    # Before the first migrate, the app created the empty database file SQLite would.
+    assert os.path.getsize(os.path.join(cwd, "data", "app.sqlite")) == 0
 
 
 def test_django_refuses_memory_and_skips_when_disabled(cwd: str, daemon: ContractDaemon) -> None:
@@ -85,6 +88,8 @@ def test_django_refuses_memory_and_skips_when_disabled(cwd: str, daemon: Contrac
     assert completed.returncode == 0, completed.stderr
     completed = run_django(cwd, django_settings(daemon, "'app.sqlite'", '{"databases": {"other": {}}}'))
     assert completed.returncode != 0 and "not in DATABASES" in completed.stderr
+    completed = run_django(cwd, django_settings(daemon, "'missing/app.sqlite'", '{"databases": {"default": {}}}'))
+    assert completed.returncode != 0 and "does not exist" in completed.stderr
     assert daemon.received == []
 
 
@@ -104,8 +109,12 @@ def test_fastapi_lifespan_registers_then_runs_the_app_lifespan(cwd: str, daemon:
                 from fastapi import FastAPI, Request
                 from litebackup.integrations.fastapi import backup_lifespan
 
+                import os
+
                 @asynccontextmanager
                 async def own_lifespan(app):
+                    os.makedirs("data", exist_ok=True)
+                    open("data/main.sqlite", "a").close()  # the app creates its database before registration
                     yield {{"own": "ran"}}
 
                 app = FastAPI(lifespan=backup_lifespan("data/main.sqlite", socket_path={daemon.socket_path!r}, lifespan=own_lifespan))

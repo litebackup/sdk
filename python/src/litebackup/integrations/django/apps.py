@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from typing import Any
 
@@ -35,9 +36,17 @@ def sqlite_file(alias: str) -> str:
         )
     try:
         # Django's SQLite backend opens NAME with uri=True.
-        return file_from_uri(filename) if filename.startswith("file:") else plain_file(filename)
+        path = file_from_uri(filename) if filename.startswith("file:") else plain_file(filename)
     except LitebackupError as error:
         raise exceptions.ImproperlyConfigured(f"LITEBACKUP databases: {alias!r}: {error.message}") from error
+    if not os.path.isdir(os.path.dirname(path)):
+        raise exceptions.ImproperlyConfigured(f"LITEBACKUP databases: {alias!r}: the directory of {path} does not exist")
+    # Before the first migrate there is no file yet. An empty file is the empty
+    # database SQLite would create on first connect, and the daemon backs it up
+    # from its first write.
+    with contextlib.suppress(FileExistsError):
+        os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+    return path
 
 
 class LitebackupConfig(AppConfig):
