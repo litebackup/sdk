@@ -461,8 +461,8 @@ async def test_idle_release_releases_an_unused_lease_with_its_durability(
             unreleased_pool.close()
     else:
         async with (
-            AsyncLitebackup(socket_path=daemon.daemon.socket_path) as client,
-            client.databases.pool(AsyncStepAdapter(daemon.steps), idle_release=0.05) as async_pool,
+            AsyncLitebackup(socket_path=daemon.daemon.socket_path) as async_client,
+            async_client.databases.pool(AsyncStepAdapter(daemon.steps), idle_release=0.05) as async_pool,
         ):
             async with async_pool.lease(LEASED_NAME, path=path, durability="cloud"):
                 pass
@@ -550,8 +550,8 @@ async def test_lease_reopens_the_handle_after_a_failed_release(
                 assert db == "db"
     else:
         async with (
-            AsyncLitebackup(socket_path=daemon.daemon.socket_path) as client,
-            client.databases.pool(AsyncStepAdapter(daemon.steps)) as async_pool,
+            AsyncLitebackup(socket_path=daemon.daemon.socket_path) as async_client,
+            async_client.databases.pool(AsyncStepAdapter(daemon.steps)) as async_pool,
         ):
             async with async_pool.lease(LEASED_NAME, path=path):
                 pass

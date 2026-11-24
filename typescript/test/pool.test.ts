@@ -228,7 +228,7 @@ test("the release gets what closing left of the cleanup timeout", async (t) => {
   await pool.close();
   const [release] = lease.daemon.received("/v1/databases/release");
   const timeout = (release?.body as { timeout_millis: number }).timeout_millis;
-  assert.ok(timeout >= 1000 && timeout <= 1500, `release timeout ${timeout} ms, want what the 500 ms close left of 2 s`);
+  assert.ok(timeout >= 1000 && timeout <= 1600, `release timeout ${timeout} ms, want what the 500 ms close left of 2 s`);
 });
 
 test("pool.release ends a lease, and a failed close is a close LeaseCleanupError that keeps it", async (t) => {

@@ -31,7 +31,7 @@ def test_request_umask_checks_a_passed_umask() -> None:
     assert request_umask(0) == 0
     for umask in (-1, 0o1000, True, 1.5):
         with pytest.raises(LitebackupError) as raised:
-            request_umask(umask)
+            request_umask(umask)  # type: ignore[arg-type]
         assert raised.value.code == ErrorCode.INVALID_ARGUMENT
 
 

@@ -207,7 +207,7 @@ API_KEY = "litebackup_examplekeyvalue@backups.example.com"
 def test_invite_credentials_are_refused_without_echoing_them() -> None:
     for arguments in ({"api_key": INVITE}, {"environment": {API_KEY_ENVIRONMENT: INVITE}}):
         with pytest.raises(LitebackupError) as raised:
-            Litebackup(socket_path="/tmp/x.sock", **arguments)  # type: ignore[arg-type]
+            Litebackup(socket_path="/tmp/x.sock", **arguments)
         assert raised.value.code == "invalid_argument"
         assert "invite token" in raised.value.message and "exampleinvitevalue" not in raised.value.message
 
@@ -237,7 +237,8 @@ CONNECTS = [
 
 @pytest.mark.parametrize(("variable", "api_key", "launched"), CONNECTS)
 async def test_launch_gets_the_credential(tmp_path: Path, variable: str | None, api_key: str | None, launched: str) -> None:
-    for index, client_type in enumerate((Litebackup, AsyncLitebackup)):
+    client_types: list[type[Litebackup] | type[AsyncLitebackup]] = [Litebackup, AsyncLitebackup]
+    for index, client_type in enumerate(client_types):
         directory = tmp_path / str(index)
         directory.mkdir()
         binary, calls, environment = credential_stand_in(directory)
