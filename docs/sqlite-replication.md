@@ -21,7 +21,7 @@ import { Litebackup } from "@litebackup/sdk";
 const litebackup = new Litebackup();
 
 await mkdir("/var/lib/app/reporting", { recursive: true });
-await litebackup.replicas.start("main.sqlite", { to: "/var/lib/app/reporting/main.sqlite", timeout: "2m" });
+await litebackup.replicas.start("main.sqlite", { path: "/var/lib/app/reporting/main.sqlite", timeout: "2m" });
 const db = new DatabaseSync("/var/lib/app/reporting/main.sqlite", { readOnly: true });
 try {
   console.log(db.prepare("PRAGMA quick_check").get());
@@ -31,7 +31,7 @@ try {
 ```
 
 ```sh
-litebackup replicate main.sqlite --to /var/lib/app/reporting/main.sqlite --timeout 2m
+litebackup replicate main.sqlite /var/lib/app/reporting/main.sqlite --timeout 2m
 ```
 
 The call returns when the first version is local. Further versions stream in
@@ -45,7 +45,7 @@ Follow all databases under a prefix, including new ones:
 import { Litebackup } from "@litebackup/sdk";
 
 const client = new Litebackup();
-await client.replicas.startPrefix("tenants", { to: "/var/lib/app/reporting" });
+await client.replicas.startPrefix("tenants", { directory: "/var/lib/app/reporting" });
 // tenants/42.sqlite lands at /var/lib/app/reporting/42.sqlite.
 console.log(await client.replicas.list());
 client.close(); // replicas keep streaming in the daemon
@@ -53,7 +53,7 @@ client.close(); // replicas keep streaming in the daemon
 
 ```go
 rule, err := client.ReplicatePrefix(ctx, "tenants", &litebackup.ReplicatePrefixArgs{
-    To: "/var/lib/app/reporting",
+    Directory: "/var/lib/app/reporting",
 })
 if err != nil {
     return err
@@ -62,13 +62,14 @@ _ = rule
 ```
 
 ```sh
-litebackup replicate --prefix tenants --to /var/lib/app/reporting
+litebackup replicate tenants/ /var/lib/app/reporting
 ```
 
 Prefix registration returns before the files download. Check `replicas.list()`
 / `Replicas(ctx)` and the database's status before opening it. An empty prefix
-follows every database the client can access. For older SDKs, see
-[release compatibility](sdk-reference.md#release-compatibility).
+follows every database the client can access. Prefix replicas need the
+litebackup client and SDK of the same release
+([release compatibility](sdk-reference.md#release-compatibility)).
 
 ## Protect replica files
 
@@ -94,8 +95,8 @@ client.close();
 
 ```sh
 litebackup replicate stop main.sqlite
-litebackup replicate stop --prefix tenants --to /var/lib/app/reporting
+litebackup replicate stop tenants/ /var/lib/app/reporting
 ```
 
-Go uses `StopReplica(ctx, name)` and `StopReplicaPrefix(ctx, prefix, directory)`.
+Go uses `StopReplica(ctx, name)` and `StopReplicaPrefix(ctx, prefix, &litebackup.StopReplicaPrefixArgs{Directory: directory})`.
 Files stay at their last versions, with Litebackup's write protection removed.

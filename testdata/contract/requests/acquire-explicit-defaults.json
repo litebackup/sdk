@@ -3,11 +3,12 @@
   "operation": "databases.acquire",
   "args": {
     "name": "agents/42.sqlite",
-    "to": "/var/lib/app/agents/../agents/42.sqlite",
+    "path": "/var/lib/app/agents/../agents/42.sqlite",
     "maintenance": false,
-    "offload": "never",
-    "on_lost": "conflict",
-    "timeout": "0s"
+    "offload_on_release": false,
+    "offload_durability": "server",
+    "timeout": "0s",
+    "discard_local": false
   },
   "request": {
     "method": "POST",
@@ -15,7 +16,8 @@
     "query": {},
     "body": {
       "name": "agents/42.sqlite",
-      "path": "/var/lib/app/agents/42.sqlite"
+      "path": "/var/lib/app/agents/42.sqlite",
+      "umask": "{umask}"
     }
   },
   "response": {
@@ -38,6 +40,6 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   }
 }

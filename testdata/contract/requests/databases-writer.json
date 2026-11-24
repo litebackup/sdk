@@ -15,7 +15,7 @@
     "name": "main.sqlite",
     "active": true,
     "this_machine": true,
-    "machine": "worker-1",
+    "writer_machine_label": "worker-1",
     "lapsed": false
   }
 }

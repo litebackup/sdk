@@ -1,10 +1,12 @@
 {
-  "description": "A glob with a prefix and a local database limit.",
+  "description": "A glob with a prefix, a local database limit, an offload durability of cloud, and consent to offload rollback-journal databases, all of which are sent.",
   "operation": "backups.start",
   "args": {
     "source": "/var/lib/app/tenants/**/*.sqlite",
     "prefix": "tenants/",
-    "maximum_local_databases": 10
+    "maximum_local_databases": 10,
+    "offload_durability": "cloud",
+    "offload_rollback_journal": true
   },
   "request": {
     "method": "POST",
@@ -13,7 +15,9 @@
     "body": {
       "path": "/var/lib/app/tenants/**/*.sqlite",
       "prefix": "tenants/",
-      "maximum_local_databases": 10
+      "maximum_local_databases": 10,
+      "offload_durability": "cloud",
+      "offload_rollback_journal": true
     }
   },
   "response": {
@@ -23,6 +27,8 @@
     "prefix": "tenants/",
     "watch": "inotify",
     "maximum_local_databases": 0,
+    "offload_durability": "cloud",
+    "offload_rollback_journal": true,
     "failover": false
   }
 }

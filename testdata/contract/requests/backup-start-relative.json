@@ -19,6 +19,8 @@
     "prefix": "",
     "watch": "inotify",
     "maximum_local_databases": 0,
+    "offload_durability": "server",
+    "offload_rollback_journal": false,
     "failover": false
   }
 }

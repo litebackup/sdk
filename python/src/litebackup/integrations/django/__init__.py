@@ -12,7 +12,7 @@ the first migrate, when NAME does not exist yet, the app creates the empty file
 SQLite would create on first connect. ``backups.start()``
 returns the saved rule when the same settings were registered before, so every
 process start may call it. Keys of each entry are backups.start's: ``name``,
-``prefix``, and ``maximum_local_databases``. Other top-level keys: ``token``,
+``prefix``, ``maximum_local_databases``, ``offload_durability``, and ``offload_rollback_journal``. Other top-level keys: ``api_key``,
 ``session``, ``socket_path``, and ``binary_path`` for the client, and ``enabled``
 (true unless set; turn it off for tests and image builds). The app never shuts
 down the daemon. Needs the ``litebackup[django]`` extra.

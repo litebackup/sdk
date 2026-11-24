@@ -1,5 +1,8 @@
 import { LitebackupError } from "./types.js";
 
+/** Added to a server-side timeout for the client-side deadline, so the daemon's or CLI's own timeout answer arrives first. */
+export const deadlineGraceMillis = 30_000;
+
 /** Milliseconds as a number, or a duration such as "500ms", "60s", "2m", or "1h". */
 export type Duration = number | string;
 

@@ -1,0 +1,11 @@
+{
+  "description": "A revert to version 0 sends nothing: versions start at 1.",
+  "operation": "databases.revert",
+  "args": {
+    "name": "main.sqlite",
+    "version": 0
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

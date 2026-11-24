@@ -1,11 +1,5 @@
 {
   "description": "A failed acquire raises its error and releases nothing.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
-    "durability": "cloud",
-    "offload": true
-  },
   "fail": [
     "acquire"
   ],
@@ -29,7 +23,7 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [
@@ -37,7 +31,8 @@
     ],
     "acquire_body": {
       "name": "agents/42.sqlite",
-      "path": "{cwd}/agents/42.sqlite"
+      "path": "{cwd}/agents/42.sqlite",
+      "umask": "{umask}"
     },
     "release_body": null,
     "raised": [
@@ -45,6 +40,13 @@
         "source": "acquire",
         "code": "unavailable"
       }
-    ]
+    ],
+    "close_raised": []
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "cloud",
+    "offload": true
   }
 }

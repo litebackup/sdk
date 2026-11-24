@@ -1,6 +1,6 @@
 /**
  * node:sqlite support: the file a DatabaseSync has open, and an adapter for
- * managed databases.
+ * pools.
  *
  *   import { DatabaseSync } from "node:sqlite";
  *   import { databasePath } from "@litebackup/sdk/node-sqlite";
@@ -8,51 +8,78 @@
  *   await litebackup.backups.start(databasePath(db));
  */
 import { DatabaseSync, type DatabaseSyncOptions } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 
-import type { ScopeAdapter } from "./managed.js";
-import { LitebackupError } from "./types.js";
+import { requireExistingFile } from "./existing-file.js";
+import { ErrorCode, LitebackupError } from "./types.js";
+import type { Adapter } from "./pool.js";
 
-/** Options for databasePath. */
-export interface DatabasePathOptions {
-  /** The schema whose file to return: "main" (the default) or an attached database's name. */
-  schema?: string;
+export { databasePath, type DatabasePathOptions } from "./node-sqlite-path.js";
+
+/** Whether node:sqlite refused because the database is already closed. */
+function alreadyClosed(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException)?.code === "ERR_INVALID_STATE";
 }
 
 /**
- * Returns the absolute path of the file a DatabaseSync has open, or of an
- * attached database with `schema`, from `db.location()`. Throws
- * invalid_argument for in-memory and temporary databases.
+ * Opens an existing database through a file: URL in mode=rw, or mode=ro with
+ * readOnly, so SQLite never creates the file either. A Node whose
+ * DatabaseSync takes no URL is refused rather than opened by path, which
+ * could create the file.
  */
-export function databasePath(db: DatabaseSync, options: DatabasePathOptions = {}): string {
-  if (typeof db.location !== "function") {
-    throw new LitebackupError("invalid_argument", "this Node's node:sqlite has no DatabaseSync.location(); upgrade Node or pass the path you opened", 0);
+function openExisting(path: string, databaseOptions: DatabaseSyncOptions | undefined): DatabaseSync {
+  const location = pathToFileURL(path);
+  location.search = databaseOptions?.readOnly ? "mode=ro" : "mode=rw"; // vocabulary:allow node:sqlite's option name
+  try {
+    return databaseOptions === undefined ? new DatabaseSync(location) : new DatabaseSync(location, databaseOptions);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ERR_INVALID_ARG_TYPE") throw error;
+    throw new LitebackupError(
+      ErrorCode.invalidArgument,
+      `this Node (${process.version}) has a node:sqlite whose DatabaseSync takes no file: URL, which the adapter needs to open existing databases only; use Node 24 or later, or the better-sqlite3 adapter`,
+      0,
+      { cause: error },
+    );
   }
-  const schema = options.schema ?? "main";
-  const location = db.location(schema);
-  if (!location) {
-    throw new LitebackupError("invalid_argument", `the database ${JSON.stringify(schema)} is in memory, temporary, or not attached, and has no file to back up`, 0);
-  }
-  return location;
 }
 
 /**
- * A managed-database adapter that opens the path with node:sqlite. close
- * rolls back a transaction the work left unfinished, never commits it, and
- * closes the database.
+ * A pool adapter that opens the path with node:sqlite and the options
+ * given. open refuses a missing file with not_found and never creates one.
+ * close rolls back a transaction the work left unfinished, never commits
+ * it, and closes the database.
  */
-export function adapter(databaseOptions?: DatabaseSyncOptions): ScopeAdapter<DatabaseSync> {
+export function adapter(databaseOptions?: DatabaseSyncOptions): Adapter<DatabaseSync> {
   return {
-    open: (path) => (databaseOptions === undefined ? new DatabaseSync(path) : new DatabaseSync(path, databaseOptions)),
+    open: (path) => {
+      requireExistingFile(path);
+      return openExisting(path, databaseOptions);
+    },
     close: (db) => {
-      if (!db.isOpen) {
+      // isOpen and isTransaction are missing on older Node 22 releases;
+      // without them, try the rollback and the close and tolerate the
+      // errors that mean there was nothing to do.
+      if ((db.isOpen as boolean | undefined) === false) {
         return;
       }
       try {
-        if (db.isTransaction) {
-          db.exec("ROLLBACK");
+        if ((db.isTransaction as boolean | undefined) !== false) {
+          try {
+            db.exec("ROLLBACK");
+          } catch (error) {
+            if (!alreadyClosed(error) && !/no transaction is active/.test(String((error as Error)?.message))) {
+              throw error;
+            }
+          }
         }
       } finally {
-        db.close();
+        try {
+          db.close();
+        } catch (error) {
+          if (!alreadyClosed(error)) {
+            throw error;
+          }
+        }
       }
     },
   };

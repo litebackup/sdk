@@ -1,0 +1,10 @@
+{
+  "description": "A database page refuses a limit past 1000; nothing is sent.",
+  "operation": "databases.page",
+  "args": {
+    "limit": 1001
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

@@ -5,66 +5,30 @@ import (
 	"time"
 )
 
-// Defines values for AcquireRequestOffload.
+// Defines values for AcquireResultDecision.
 const (
-	AcquireRequestOffloadNever    AcquireRequestOffload = "never"
-	AcquireRequestOffloadReleased AcquireRequestOffload = "released"
+	AcquireResultDecisionCreated       AcquireResultDecision = "created"
+	AcquireResultDecisionDownloaded    AcquireResultDecision = "downloaded"
+	AcquireResultDecisionFastForwarded AcquireResultDecision = "fast_forwarded"
+	AcquireResultDecisionMatched       AcquireResultDecision = "matched"
+	AcquireResultDecisionReplaced      AcquireResultDecision = "replaced"
+	AcquireResultDecisionResumed       AcquireResultDecision = "resumed"
 )
 
-// Valid indicates whether the value is a known member of the AcquireRequestOffload enum.
-func (e AcquireRequestOffload) Valid() bool {
+// Valid indicates whether the value is a known member of the AcquireResultDecision enum.
+func (e AcquireResultDecision) Valid() bool {
 	switch e {
-	case AcquireRequestOffloadNever:
+	case AcquireResultDecisionCreated:
 		return true
-	case AcquireRequestOffloadReleased:
+	case AcquireResultDecisionDownloaded:
 		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AcquireRequestOnLost.
-const (
-	AcquireRequestOnLostBlock    AcquireRequestOnLost = "block"
-	AcquireRequestOnLostConflict AcquireRequestOnLost = "conflict"
-)
-
-// Valid indicates whether the value is a known member of the AcquireRequestOnLost enum.
-func (e AcquireRequestOnLost) Valid() bool {
-	switch e {
-	case AcquireRequestOnLostBlock:
+	case AcquireResultDecisionFastForwarded:
 		return true
-	case AcquireRequestOnLostConflict:
+	case AcquireResultDecisionMatched:
 		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AcquireResultOutcome.
-const (
-	AcquireResultOutcomeAdopted       AcquireResultOutcome = "adopted"
-	AcquireResultOutcomeCreated       AcquireResultOutcome = "created"
-	AcquireResultOutcomeDownloaded    AcquireResultOutcome = "downloaded"
-	AcquireResultOutcomeFastForwarded AcquireResultOutcome = "fast_forwarded"
-	AcquireResultOutcomeHealed        AcquireResultOutcome = "healed"
-	AcquireResultOutcomeResumed       AcquireResultOutcome = "resumed"
-)
-
-// Valid indicates whether the value is a known member of the AcquireResultOutcome enum.
-func (e AcquireResultOutcome) Valid() bool {
-	switch e {
-	case AcquireResultOutcomeAdopted:
+	case AcquireResultDecisionReplaced:
 		return true
-	case AcquireResultOutcomeCreated:
-		return true
-	case AcquireResultOutcomeDownloaded:
-		return true
-	case AcquireResultOutcomeFastForwarded:
-		return true
-	case AcquireResultOutcomeHealed:
-		return true
-	case AcquireResultOutcomeResumed:
+	case AcquireResultDecisionResumed:
 		return true
 	default:
 		return false
@@ -83,24 +47,6 @@ func (e BackupRequestWatch) Valid() bool {
 	case BackupRequestWatchInotify:
 		return true
 	case BackupRequestWatchPoll:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for DatabaseStatusOffload.
-const (
-	DatabaseStatusOffloadNever    DatabaseStatusOffload = "never"
-	DatabaseStatusOffloadReleased DatabaseStatusOffload = "released"
-)
-
-// Valid indicates whether the value is a known member of the DatabaseStatusOffload enum.
-func (e DatabaseStatusOffload) Valid() bool {
-	switch e {
-	case DatabaseStatusOffloadNever:
-		return true
-	case DatabaseStatusOffloadReleased:
 		return true
 	default:
 		return false
@@ -130,6 +76,7 @@ const (
 	DatabaseStatusStateConflicted DatabaseStatusState = "conflicted"
 	DatabaseStatusStateError      DatabaseStatusState = "error"
 	DatabaseStatusStateOffloaded  DatabaseStatusState = "offloaded"
+	DatabaseStatusStatePending    DatabaseStatusState = "pending"
 	DatabaseStatusStateRetrying   DatabaseStatusState = "retrying"
 	DatabaseStatusStateStopped    DatabaseStatusState = "stopped"
 	DatabaseStatusStateSynced     DatabaseStatusState = "synced"
@@ -146,6 +93,8 @@ func (e DatabaseStatusState) Valid() bool {
 		return true
 	case DatabaseStatusStateOffloaded:
 		return true
+	case DatabaseStatusStatePending:
+		return true
 	case DatabaseStatusStateRetrying:
 		return true
 	case DatabaseStatusStateStopped:
@@ -161,18 +110,189 @@ func (e DatabaseStatusState) Valid() bool {
 	}
 }
 
-// Defines values for ReleaseRequestWait.
+// Defines values for Durability.
 const (
-	ReleaseRequestWaitCloud  ReleaseRequestWait = "cloud"
-	ReleaseRequestWaitServer ReleaseRequestWait = "server"
+	DurabilityCloud  Durability = "cloud"
+	DurabilityServer Durability = "server"
 )
 
-// Valid indicates whether the value is a known member of the ReleaseRequestWait enum.
-func (e ReleaseRequestWait) Valid() bool {
+// Valid indicates whether the value is a known member of the Durability enum.
+func (e Durability) Valid() bool {
 	switch e {
-	case ReleaseRequestWaitCloud:
+	case DurabilityCloud:
 		return true
-	case ReleaseRequestWaitServer:
+	case DurabilityServer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ErrorCode.
+const (
+	ErrorCodeBusy              ErrorCode = "busy"
+	ErrorCodeCancelled         ErrorCode = "cancelled"
+	ErrorCodeChanged           ErrorCode = "changed"
+	ErrorCodeClientUnsupported ErrorCode = "client_unsupported"
+	ErrorCodeConflict          ErrorCode = "conflict"
+	ErrorCodeCursorExpired     ErrorCode = "cursor_expired"
+	ErrorCodeDrainRequired     ErrorCode = "drain_required"
+	ErrorCodeFileExists        ErrorCode = "file_exists"
+	ErrorCodeForbidden         ErrorCode = "forbidden"
+	ErrorCodeIntegrity         ErrorCode = "integrity"
+	ErrorCodeInternal          ErrorCode = "internal"
+	ErrorCodeInvalidArgument   ErrorCode = "invalid_argument"
+	ErrorCodeLaunchFailed      ErrorCode = "launch_failed"
+	ErrorCodeLimitExceeded     ErrorCode = "limit_exceeded"
+	ErrorCodeLockLost          ErrorCode = "lock_lost"
+	ErrorCodeLockUnavailable   ErrorCode = "lock_unavailable"
+	ErrorCodeMethodNotAllowed  ErrorCode = "method_not_allowed"
+	ErrorCodeNotConfigured     ErrorCode = "not_configured"
+	ErrorCodeNotDurable        ErrorCode = "not_durable"
+	ErrorCodeNotFound          ErrorCode = "not_found"
+	ErrorCodePlanLimit         ErrorCode = "plan_limit"
+	ErrorCodeRuleDatabase      ErrorCode = "rule_database"
+	ErrorCodeRuleExists        ErrorCode = "rule_exists"
+	ErrorCodeSDKUnsupported    ErrorCode = "sdk_unsupported"
+	ErrorCodeStillOpen         ErrorCode = "still_open"
+	ErrorCodeTimeout           ErrorCode = "timeout"
+	ErrorCodeUnauthenticated   ErrorCode = "unauthenticated"
+	ErrorCodeUnavailable       ErrorCode = "unavailable"
+	ErrorCodeWrongServer       ErrorCode = "wrong_server"
+)
+
+// Valid indicates whether the value is a known member of the ErrorCode enum.
+func (e ErrorCode) Valid() bool {
+	switch e {
+	case ErrorCodeBusy:
+		return true
+	case ErrorCodeCancelled:
+		return true
+	case ErrorCodeChanged:
+		return true
+	case ErrorCodeClientUnsupported:
+		return true
+	case ErrorCodeConflict:
+		return true
+	case ErrorCodeCursorExpired:
+		return true
+	case ErrorCodeDrainRequired:
+		return true
+	case ErrorCodeFileExists:
+		return true
+	case ErrorCodeForbidden:
+		return true
+	case ErrorCodeIntegrity:
+		return true
+	case ErrorCodeInternal:
+		return true
+	case ErrorCodeInvalidArgument:
+		return true
+	case ErrorCodeLaunchFailed:
+		return true
+	case ErrorCodeLimitExceeded:
+		return true
+	case ErrorCodeLockLost:
+		return true
+	case ErrorCodeLockUnavailable:
+		return true
+	case ErrorCodeMethodNotAllowed:
+		return true
+	case ErrorCodeNotConfigured:
+		return true
+	case ErrorCodeNotDurable:
+		return true
+	case ErrorCodeNotFound:
+		return true
+	case ErrorCodePlanLimit:
+		return true
+	case ErrorCodeRuleDatabase:
+		return true
+	case ErrorCodeRuleExists:
+		return true
+	case ErrorCodeSDKUnsupported:
+		return true
+	case ErrorCodeStillOpen:
+		return true
+	case ErrorCodeTimeout:
+		return true
+	case ErrorCodeUnauthenticated:
+		return true
+	case ErrorCodeUnavailable:
+		return true
+	case ErrorCodeWrongServer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EventType.
+const (
+	EventTypeAcquired         EventType = "acquired"
+	EventTypeDownloadFinished EventType = "download_finished"
+	EventTypeDownloadStarted  EventType = "download_started"
+	EventTypeDraining         EventType = "draining"
+	EventTypeImageWritten     EventType = "image_written"
+	EventTypeLocalWrite       EventType = "local_write"
+	EventTypeLockLost         EventType = "lock_lost"
+	EventTypeOffloaded        EventType = "offloaded"
+	EventTypePathUnreadable   EventType = "path_unreadable"
+	EventTypeRebased          EventType = "rebased"
+	EventTypeRefused          EventType = "refused"
+	EventTypeReleased         EventType = "released"
+	EventTypeReplicating      EventType = "replicating"
+	EventTypeRestored         EventType = "restored"
+	EventTypeReverted         EventType = "reverted"
+	EventTypeRoleChanged      EventType = "role_changed"
+	EventTypeRollbackScan     EventType = "rollback_scan"
+	EventTypeServerGeneration EventType = "server_generation"
+	EventTypeStopped          EventType = "stopped"
+	EventTypeTracked          EventType = "tracked"
+)
+
+// Valid indicates whether the value is a known member of the EventType enum.
+func (e EventType) Valid() bool {
+	switch e {
+	case EventTypeAcquired:
+		return true
+	case EventTypeDownloadFinished:
+		return true
+	case EventTypeDownloadStarted:
+		return true
+	case EventTypeDraining:
+		return true
+	case EventTypeImageWritten:
+		return true
+	case EventTypeLocalWrite:
+		return true
+	case EventTypeLockLost:
+		return true
+	case EventTypeOffloaded:
+		return true
+	case EventTypePathUnreadable:
+		return true
+	case EventTypeRebased:
+		return true
+	case EventTypeRefused:
+		return true
+	case EventTypeReleased:
+		return true
+	case EventTypeReplicating:
+		return true
+	case EventTypeRestored:
+		return true
+	case EventTypeReverted:
+		return true
+	case EventTypeRoleChanged:
+		return true
+	case EventTypeRollbackScan:
+		return true
+	case EventTypeServerGeneration:
+		return true
+	case EventTypeStopped:
+		return true
+	case EventTypeTracked:
 		return true
 	default:
 		return false
@@ -200,21 +320,21 @@ func (e ReplicaRequestWriteProtection) Valid() bool {
 	}
 }
 
-// Defines values for ShutdownRequestWait.
+// Defines values for ShutdownRequestDurability.
 const (
-	ShutdownRequestWaitCloud  ShutdownRequestWait = "cloud"
-	ShutdownRequestWaitNone   ShutdownRequestWait = "none"
-	ShutdownRequestWaitServer ShutdownRequestWait = "server"
+	ShutdownRequestDurabilityCloud  ShutdownRequestDurability = "cloud"
+	ShutdownRequestDurabilityNone   ShutdownRequestDurability = "none"
+	ShutdownRequestDurabilityServer ShutdownRequestDurability = "server"
 )
 
-// Valid indicates whether the value is a known member of the ShutdownRequestWait enum.
-func (e ShutdownRequestWait) Valid() bool {
+// Valid indicates whether the value is a known member of the ShutdownRequestDurability enum.
+func (e ShutdownRequestDurability) Valid() bool {
 	switch e {
-	case ShutdownRequestWaitCloud:
+	case ShutdownRequestDurabilityCloud:
 		return true
-	case ShutdownRequestWaitNone:
+	case ShutdownRequestDurabilityNone:
 		return true
-	case ShutdownRequestWaitServer:
+	case ShutdownRequestDurabilityServer:
 		return true
 	default:
 		return false
@@ -223,54 +343,71 @@ func (e ShutdownRequestWait) Valid() bool {
 
 // AcquireRequest defines model for AcquireRequest.
 type AcquireRequest struct {
-	// MachineLabel what other machines see as the writer
+	// DiscardLocal replace a local file that diverged from the server head with the head, discarding its writes the head lacks; without it such a file is refused with 409 conflict and left untouched
+	DiscardLocal bool `json:"discard_local,omitempty"`
+
+	// LockTimeoutMillis how long to wait for the write lock while another machine holds it, trying again until it is released; 0 refuses at once with lock_unavailable. It adds to the timeout.
+	LockTimeoutMillis int64 `json:"lock_timeout_millis,omitempty"`
+
+	// MachineLabel the name this machine shows on the server and as the writer of this database only
 	MachineLabel string `json:"machine_label,omitempty"`
 
 	// Maintenance checkpoint and, past the freelist threshold, VACUUM on release
 	Maintenance bool   `json:"maintenance,omitempty"`
 	Name        string `json:"name"`
 
-	// Offload released lets Litebackup delete the released copy once the bucket holds it
-	Offload AcquireRequestOffload `json:"offload,omitempty"`
+	// OffloadDurability how far a version must reach: server once the server holds it, cloud once the bucket holds it too
+	OffloadDurability Durability `json:"offload_durability,omitempty"`
 
-	// OnLost on a lost write lock, keep the copy as conflicted or block local writes until the lock is back
-	OnLost AcquireRequestOnLost `json:"on_lost,omitempty"`
+	// OffloadOnRelease lets Litebackup delete the released copy once offload_durability holds it
+	OffloadOnRelease bool `json:"offload_on_release,omitempty"`
 
 	// Path absolute path of the local file; defaults to the path this machine uses
 	Path string `json:"path,omitempty"`
 
 	// TimeoutMillis bound on downloading the head
 	TimeoutMillis int64 `json:"timeout_millis,omitempty"`
+
+	// Umask the caller's file mode creation mask, such as 18 for 022; a file the acquire creates, the head downloaded where none was or the empty file an offload removed, gets 0666 less it, as one the caller created would. A copy the head replaces keeps its bits. Absent uses the client's own umask. The litebackup command sends its own.
+	Umask *int32 `json:"umask,omitempty"`
 }
-
-// AcquireRequestOffload released lets Litebackup delete the released copy once the bucket holds it
-type AcquireRequestOffload string
-
-// AcquireRequestOnLost on a lost write lock, keep the copy as conflicted or block local writes until the lock is back
-type AcquireRequestOnLost string
 
 // AcquireResult defines model for AcquireResult.
 type AcquireResult struct {
-	Conflict Conflict             `json:"conflict,omitempty"`
-	Database DatabaseStatus       `json:"database"`
-	Outcome  AcquireResultOutcome `json:"outcome"`
+	Database DatabaseStatus `json:"database"`
+
+	// Decision what the acquire did to the local file
+	Decision AcquireResultDecision `json:"decision"`
 }
 
-// AcquireResultOutcome defines model for AcquireResult.Outcome.
-type AcquireResultOutcome string
+// AcquireResultDecision what the acquire did to the local file
+type AcquireResultDecision string
+
+// ArchivedVersion The newest version the server reported the primary bucket holds.
+type ArchivedVersion struct {
+	// Archived when the server recorded the version as archived
+	Archived time.Time `json:"archived,omitempty"`
+	Version  int64     `json:"version"`
+}
 
 // BackupList defines model for BackupList.
 type BackupList struct {
-	Backups []BackupRule `json:"backups"`
+	Rules []BackupRule `json:"rules"`
 }
 
 // BackupRequest defines model for BackupRequest.
 type BackupRequest struct {
-	// MaximumLocalDatabases when positive, offload the least recently changed idle databases past this count once the bucket holds them
+	// MaximumLocalDatabases when positive, offload the least recently changed idle databases past this count once offload_durability holds them
 	MaximumLocalDatabases int64 `json:"maximum_local_databases,omitempty"`
 
 	// Name the database name for a single path; must already be a valid name
 	Name string `json:"name,omitempty"`
+
+	// OffloadDurability how far a version must reach: server once the server holds it, cloud once the bucket holds it too
+	OffloadDurability Durability `json:"offload_durability,omitempty"`
+
+	// OffloadRollbackJournal lets maximum_local_databases offload rollback-journal databases too, on the operator's word that nothing keeps them open while idle; WAL databases are offloaded either way
+	OffloadRollbackJournal bool `json:"offload_rollback_journal,omitempty"`
 
 	// Path absolute file, directory, or glob with optional ** segments
 	Path string `json:"path"`
@@ -292,27 +429,14 @@ type BackupRule struct {
 	// Name the resolved remote name for a single file, or empty for a directory or glob
 	Name string `json:"name"`
 
+	// OffloadDurability how far a version must reach: server once the server holds it, cloud once the bucket holds it too
+	OffloadDurability      Durability `json:"offload_durability"`
+	OffloadRollbackJournal bool       `json:"offload_rollback_journal"`
+
 	// Path the path or glob
 	Path   string `json:"path"`
 	Prefix string `json:"prefix"`
 	Watch  string `json:"watch"`
-}
-
-// Conflict defines model for Conflict.
-type Conflict struct {
-	ConflictPath  string    `json:"conflict_path"`
-	Created       time.Time `json:"created"`
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Path          string    `json:"path"`
-	Reason        string    `json:"reason"`
-	ServerVersion int64     `json:"server_version"`
-	SyncedVersion int64     `json:"synced_version"`
-}
-
-// ConflictList defines model for ConflictList.
-type ConflictList struct {
-	Conflicts []Conflict `json:"conflicts"`
 }
 
 // DatabaseStatus defines model for DatabaseStatus.
@@ -320,53 +444,63 @@ type DatabaseStatus struct {
 	// Acquired the database is acquired and released by a worker rather than backed up continuously
 	Acquired bool `json:"acquired"`
 
+	// BackupRuleID the backup or failover rule that tracks the database on this machine; absent for an acquired database and a replica
+	BackupRuleID string `json:"backup_rule_id,omitempty"`
+
+	// Draining set on a failover origin while this machine drains, and on one a drain released, which holds no write lock until it takes one again; a failover then reports its role as unknown, as after a draining event
+	Draining bool `json:"draining,omitempty"`
+
 	// Failover the database belongs to a failover and changes role when the origin does
 	Failover bool `json:"failover"`
 
 	// FirstUnsyncedChangeTime when the first change the server lacks was seen; absent when the server has every change seen. It survives restarts and may be earlier than the real first change, never later.
 	FirstUnsyncedChangeTime time.Time `json:"first_unsynced_change_time,omitempty"`
 	HintMisses              int64     `json:"hint_misses"`
-	JournalMode             string    `json:"journal_mode"`
-	LastError               string    `json:"last_error,omitempty"`
-	LastErrorTime           time.Time `json:"last_error_time,omitempty"`
-	LastFullScanReason      string    `json:"last_full_scan_reason,omitempty"`
-	LocalChanged            bool      `json:"local_changed"`
 
-	// MachineLabel what other machines see as the writer while this machine writes
+	// JournalMode wal, rollback, or unknown before the first scan. A full scan of a rollback-journal database holds a read lock that blocks the app's writers until it ends, so it runs at full speed rather than at --scan-bytes-per-second, and the first scan past 256 MB records a rollback_scan event with its duration. Switch such a database to WAL mode (PRAGMA journal_mode = WAL), where scans never block writers; Litebackup never changes the journal mode itself.
+	JournalMode        string    `json:"journal_mode"`
+	LastError          string    `json:"last_error,omitempty"`
+	LastErrorTime      time.Time `json:"last_error_time,omitempty"`
+	LastFullScanReason string    `json:"last_full_scan_reason,omitempty"`
+	LocalChanged       bool      `json:"local_changed"`
+
+	// MachineLabel the name this machine shows on the server and as the writer of its databases
 	MachineLabel string `json:"machine_label,omitempty"`
 	Maintenance  bool   `json:"maintenance,omitempty"`
 	Name         string `json:"name"`
 
 	// NextRetryTime when the next attempt of a failed sync runs; absent when none is scheduled
-	NextRetryTime time.Time             `json:"next_retry_time,omitempty"`
-	Offload       DatabaseStatusOffload `json:"offload,omitempty"`
-	PageCount     int64                 `json:"page_count"`
-	Path          string                `json:"path"`
+	NextRetryTime time.Time `json:"next_retry_time,omitempty"`
+
+	// OffloadDurability how far a version must reach: server once the server holds it, cloud once the bucket holds it too
+	OffloadDurability Durability `json:"offload_durability,omitempty"`
+
+	// OffloadOnRelease the client deletes the released copy once offload_durability holds it
+	OffloadOnRelease bool   `json:"offload_on_release,omitempty"`
+	PageCount        int64  `json:"page_count"`
+	Path             string `json:"path"`
 
 	// Role origin when this machine writes the database and backs it up; replica for a live readonly copy
 	Role DatabaseStatusRole `json:"role"`
 
-	// State syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced once a released database's last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the bucket holds it; stopped for a stopped replica; conflicted when another machine wrote while this copy had changes; error with last_error
+	// State pending while a backup or failover origin holds no write lock, as after a start or a drain, until a sync takes it (a start takes back the lock of each backup a drain left pending while the head is still the version it last synced); syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced when the server holds every change: a backup or failover origin whose last sync landed with no change seen after it, until its next change, or a released database whose last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the server, or the bucket when the offload asked for it, holds its last version; stopped for a stopped replica; conflicted when this copy was refused and left as it is, because its file differs from the server head or its write lock was lost or broken; error with last_error
 	State     DatabaseStatusState `json:"state"`
 	SyncCount int64               `json:"sync_count"`
 
-	// SyncedCloud A version the server acknowledged. Clients decide what durability is enough.
-	SyncedCloud SyncedState `json:"synced_cloud"`
+	// SyncedCloud The newest version the server reported the primary bucket holds.
+	SyncedCloud ArchivedVersion `json:"synced_cloud"`
 
 	// SyncedServer A version the server acknowledged. Clients decide what durability is enough.
 	SyncedServer SyncedState `json:"synced_server"`
 
-	// Writer the machine label of the last writer this machine saw
-	Writer string `json:"writer,omitempty"`
+	// WriterMachineLabel the machine label of the last writer this machine saw; empty once this machine released the database, drained it, or offloaded a copy whose write lock it held, as no writer is known then
+	WriterMachineLabel string `json:"writer_machine_label,omitempty"`
 }
-
-// DatabaseStatusOffload defines model for DatabaseStatus.Offload.
-type DatabaseStatusOffload string
 
 // DatabaseStatusRole origin when this machine writes the database and backs it up; replica for a live readonly copy
 type DatabaseStatusRole string
 
-// DatabaseStatusState syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced once a released database's last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the bucket holds it; stopped for a stopped replica; conflicted when another machine wrote while this copy had changes; error with last_error
+// DatabaseStatusState pending while a backup or failover origin holds no write lock, as after a start or a drain, until a sync takes it (a start takes back the lock of each backup a drain left pending while the head is still the version it last synced); syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced when the server holds every change: a backup or failover origin whose last sync landed with no change seen after it, until its next change, or a released database whose last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the server, or the bucket when the offload asked for it, holds its last version; stopped for a stopped replica; conflicted when this copy was refused and left as it is, because its file differs from the server head or its write lock was lost or broken; error with last_error
 type DatabaseStatusState string
 
 // DatabaseStatusList defines model for DatabaseStatusList.
@@ -377,21 +511,35 @@ type DatabaseStatusList struct {
 	Next string `json:"next,omitempty"`
 }
 
+// DrainFailure defines model for DrainFailure.
+type DrainFailure struct {
+	// Code What went wrong, in one word. The socket answers with file_exists (the file a restore or an acquire would write, or a -journal, -wal, or -shm beside it, already exists), rule_exists (a backup rule with other settings already covers the path, and the error carries that rule), lock_unavailable (another machine holds the write lock a command asks for, as an acquire, a revert, or a failover does), not_found, still_open, invalid_argument, timeout, cursor_expired (an events cursor older than the oldest event kept), changed (an offload or acquire refused because the local file changed under it: written after its last sync, never synced, or written while an acquire replaced it), rule_database (a release of a database a backup rule on this machine keeps, whose write lock the rule never gives up; stop its backup to hand it off), not_durable (an offload refused until the server, or the bucket when it waits for cloud, holds the synced version, or a cloud wait whose name now holds another server database), and the others by their names; busy (a foreground backup refused because another job, a continuous backup, or another machine writes the database), cancelled (a command interrupted before it finished), drain_required (a credential other than the one the client took its write locks with, refused until a drain released them), and launch_failed (the command could not start the client on this machine, or the client exited before it listened) come from the litebackup command alone, which also answers unauthenticated when this machine has not joined a server. A refusal from the server becomes client_unsupported (426: the server needs a newer litebackup on this machine) or, with 503, not_configured (the server waits for setup), wrong_server (the server this machine reached is not the one its session joined, or does not own the database), unauthenticated (the server no longer accepts this machine's key), forbidden (the key may not do this), plan_limit (the server's plan has no room for another database), or integrity (the version's bucket objects failed an integrity check). lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is unavailable. A client treats a code it does not know as a failure.
+	Code    ErrorCode `json:"code"`
+	Message string    `json:"message"`
+	Name    string    `json:"name"`
+}
+
+// Durability how far a version must reach: server once the server holds it, cloud once the bucket holds it too
+type Durability string
+
+// ErrorCode What went wrong, in one word. The socket answers with file_exists (the file a restore or an acquire would write, or a -journal, -wal, or -shm beside it, already exists), rule_exists (a backup rule with other settings already covers the path, and the error carries that rule), lock_unavailable (another machine holds the write lock a command asks for, as an acquire, a revert, or a failover does), not_found, still_open, invalid_argument, timeout, cursor_expired (an events cursor older than the oldest event kept), changed (an offload or acquire refused because the local file changed under it: written after its last sync, never synced, or written while an acquire replaced it), rule_database (a release of a database a backup rule on this machine keeps, whose write lock the rule never gives up; stop its backup to hand it off), not_durable (an offload refused until the server, or the bucket when it waits for cloud, holds the synced version, or a cloud wait whose name now holds another server database), and the others by their names; busy (a foreground backup refused because another job, a continuous backup, or another machine writes the database), cancelled (a command interrupted before it finished), drain_required (a credential other than the one the client took its write locks with, refused until a drain released them), and launch_failed (the command could not start the client on this machine, or the client exited before it listened) come from the litebackup command alone, which also answers unauthenticated when this machine has not joined a server. A refusal from the server becomes client_unsupported (426: the server needs a newer litebackup on this machine) or, with 503, not_configured (the server waits for setup), wrong_server (the server this machine reached is not the one its session joined, or does not own the database), unauthenticated (the server no longer accepts this machine's key), forbidden (the key may not do this), plan_limit (the server's plan has no room for another database), or integrity (the version's bucket objects failed an integrity check). lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is unavailable. A client treats a code it does not know as a failure.
+type ErrorCode string
+
 // Event defines model for Event.
 type Event struct {
 	ID      int64  `json:"id"`
 	Message string `json:"message"`
 	Name    string `json:"name,omitempty"`
 
-	// Path for conflict_saved, the conflict copy
+	// Path for refused, the refused file; for path_unreadable, the path the rule could not read
 	Path string `json:"path,omitempty"`
 
 	// Role for role_changed, the new role
 	Role string    `json:"role,omitempty"`
 	Time time.Time `json:"time"`
 
-	// Type such as role_changed (message is origin or replica), conflict_saved (path names the conflict copy), discovery_failed (path names the failed match), synced, downloaded
-	Type string `json:"type"`
+	// Type What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), refused (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
+	Type EventType `json:"type"`
 }
 
 // EventList defines model for EventList.
@@ -402,8 +550,14 @@ type EventList struct {
 	Next int64 `json:"next"`
 }
 
+// EventType What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), refused (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
+type EventType string
+
 // FailoverRequest defines model for FailoverRequest.
 type FailoverRequest struct {
+	// DiscardLocal replace a file at the path that differs from the server head with the head, discarding its writes the head lacks; without it such a file is refused with 409 conflict and left untouched
+	DiscardLocal bool `json:"discard_local,omitempty"`
+
 	// Name the database name; defaults to the relative file path
 	Name string `json:"name,omitempty"`
 
@@ -414,41 +568,42 @@ type FailoverRequest struct {
 	TimeoutMillis int64 `json:"timeout_millis,omitempty"`
 }
 
-// IDRequest defines model for IDRequest.
-type IDRequest struct {
-	ID string `json:"id"`
-}
-
 // NameRequest defines model for NameRequest.
 type NameRequest struct {
 	Name string `json:"name"`
 }
 
+// OffloadRequest defines model for OffloadRequest.
+type OffloadRequest struct {
+	// Durability how far a version must reach: server once the server holds it, cloud once the bucket holds it too
+	Durability Durability `json:"durability,omitempty"`
+	Name       string     `json:"name"`
+}
+
 // PrefixReplica defines model for PrefixReplica.
 type PrefixReplica struct {
-	Databases       int64  `json:"databases"`
+	// DatabaseCount how many databases under the prefix this machine replicates
+	DatabaseCount int64 `json:"database_count"`
+
+	// Directory the directory that receives <directory>/<name relative to the prefix>
+	Directory       string `json:"directory"`
 	ID              string `json:"id"`
 	Prefix          string `json:"prefix"`
-	To              string `json:"to"`
 	WriteProtection string `json:"write_protection"`
 }
 
 // ReleaseRequest defines model for ReleaseRequest.
 type ReleaseRequest struct {
-	Name string `json:"name"`
+	// Durability how far a version must reach: server once the server holds it, cloud once the bucket holds it too
+	Durability Durability `json:"durability,omitempty"`
+	Name       string     `json:"name"`
 
-	// Offload remove the local file once the bucket holds the released version
+	// Offload remove the local file once durability holds the released version, the server with server and the bucket with cloud; an offload refused as not_durable is left to a later offload pass
 	Offload bool `json:"offload,omitempty"`
 
 	// TimeoutMillis how long to wait for the database to close and for the chosen durability
 	TimeoutMillis int64 `json:"timeout_millis,omitempty"`
-
-	// Wait server returns once the final sync is acknowledged; cloud waits for the bucket too
-	Wait ReleaseRequestWait `json:"wait,omitempty"`
 }
-
-// ReleaseRequestWait server returns once the final sync is acknowledged; cloud waits for the bucket too
-type ReleaseRequestWait string
 
 // ReleaseResult defines model for ReleaseResult.
 type ReleaseResult struct {
@@ -464,18 +619,20 @@ type ReplicaList struct {
 	Replicas []DatabaseStatus `json:"replicas"`
 }
 
-// ReplicaRequest Either name, for one database, or prefix, for every database under it.
+// ReplicaRequest Either name and path, for one database, or prefix and directory, for every database under it.
 type ReplicaRequest struct {
-	Name string `json:"name,omitempty"`
+	// Directory with prefix, the directory that receives <directory>/<name relative to the prefix>
+	Directory string `json:"directory,omitempty"`
+	Name      string `json:"name,omitempty"`
+
+	// Path with name, the replica file, defaulting to the path this machine uses
+	Path string `json:"path,omitempty"`
 
 	// Prefix name prefix such as app; replicates every database under it
 	Prefix string `json:"prefix,omitempty"`
 
 	// TimeoutMillis bound on downloading the first version of a single replica
 	TimeoutMillis int64 `json:"timeout_millis,omitempty"`
-
-	// To for name, the replica file, defaulting to the path this machine uses; for prefix, the directory that receives <to>/<name relative to the prefix>
-	To string `json:"to,omitempty"`
 
 	// WriteProtection lock (default) holds the SQLite write lock so app writes get SQLITE_BUSY while readers carry on; detect rebases after a local write; none trusts apps to open with mode=ro
 	WriteProtection ReplicaRequestWriteProtection `json:"write_protection,omitempty"`
@@ -486,13 +643,15 @@ type ReplicaRequestWriteProtection string
 
 // ReplicaResult The replica for a name, or the prefix replica for a prefix.
 type ReplicaResult struct {
-	Database DatabaseStatus `json:"database,omitempty"`
-	Prefix   PrefixReplica  `json:"prefix,omitempty"`
+	Database      DatabaseStatus `json:"database,omitempty"`
+	PrefixReplica PrefixReplica  `json:"prefix_replica,omitempty"`
 }
 
 // RestorableVersion defines model for RestorableVersion.
 type RestorableVersion struct {
-	StateDigest string `json:"state_digest"`
+	// Archived when the server recorded the primary bucket's object of this version as archived; absent when the primary bucket does not hold the version, as for one synced between archive passes, which restores only until history pruning removes its segment
+	Archived    time.Time `json:"archived,omitempty"`
+	StateDigest string    `json:"state_digest"`
 
 	// Time when the version was synced
 	Time    time.Time `json:"time"`
@@ -509,6 +668,9 @@ type RestoreRequest struct {
 	// Time restore the newest version at or before this time
 	Time time.Time `json:"time,omitempty"`
 
+	// Umask the caller's file mode creation mask, such as 18 for 022; the file gets 0666 less it, as one the caller created would. Absent uses the client's own umask. The litebackup command sends its own.
+	Umask *int32 `json:"umask,omitempty"`
+
 	// Version the version to restore; the head when neither version nor time is set
 	Version int64 `json:"version,omitempty"`
 }
@@ -523,19 +685,47 @@ type RestoreResult struct {
 	Version     int64  `json:"version"`
 }
 
-// ShutdownRequest defines model for ShutdownRequest.
-type ShutdownRequest struct {
-	TimeoutMillis int64               `json:"timeout_millis,omitempty"`
-	Wait          ShutdownRequestWait `json:"wait,omitempty"`
+// RevertRequest defines model for RevertRequest.
+type RevertRequest struct {
+	Name string `json:"name"`
+
+	// Time revert to the newest version at or before this time; set version or time
+	Time time.Time `json:"time,omitempty"`
+
+	// Version the version whose content the new head holds; set version or time
+	Version int64 `json:"version,omitempty"`
 }
 
-// ShutdownRequestWait defines model for ShutdownRequest.Wait.
-type ShutdownRequestWait string
+// RevertResult defines model for RevertResult.
+type RevertResult struct {
+	Database DatabaseStatus `json:"database"`
+
+	// SourceVersion the version whose content the new head holds; it and every version after it stay restorable
+	SourceVersion int64 `json:"source_version"`
+
+	// StateDigest the new head's state digest, which is the source version's
+	StateDigest string `json:"state_digest"`
+
+	// Version the new head, one past the head before the revert
+	Version int64 `json:"version"`
+}
+
+// ShutdownRequest defines model for ShutdownRequest.
+type ShutdownRequest struct {
+	Durability    ShutdownRequestDurability `json:"durability,omitempty"`
+	TimeoutMillis int64                     `json:"timeout_millis,omitempty"`
+}
+
+// ShutdownRequestDurability defines model for ShutdownRequest.Durability.
+type ShutdownRequestDurability string
 
 // ShutdownResult defines model for ShutdownResult.
 type ShutdownResult struct {
-	Failed   []string `json:"failed"`
-	Released int64    `json:"released"`
+	// Failed every database the drain could not sync, wait for, or release, each keeping any write lock it holds, and every conflicted copy whose writes are not on the server, with conflict; empty only when the drain released every database it covers, which is the one case the daemon stops
+	Failed []DrainFailure `json:"failed"`
+
+	// Released how many databases the drain synced as asked and released
+	Released int64 `json:"released"`
 }
 
 // Status defines model for Status.
@@ -547,12 +737,15 @@ type Status struct {
 	// Next Pass this name as after to read the next page. Omitted on the last page.
 	Next string `json:"next,omitempty"`
 
-	// RecentDiscoveryErrors Most recent file discovery failures. The events API provides the paginated history.
-	RecentDiscoveryErrors []Event `json:"recent_discovery_errors,omitempty"`
-	Server                string  `json:"server"`
-	Session               string  `json:"session"`
-	SessionID             string  `json:"session_id"`
-	Watch                 string  `json:"watch"`
+	// OpenFileLimit The soft limit on open files the daemon runs with. Each active backup holds about four, and the daemon lowers its default number of active backups to fit.
+	OpenFileLimit int64  `json:"open_file_limit,omitempty"`
+	Server        string `json:"server"`
+	Session       string `json:"session"`
+	SessionID     string `json:"session_id"`
+
+	// UnreadablePaths the paths a backup rule cannot read, most recent first; the events API has the history
+	UnreadablePaths []Event `json:"unreadable_paths,omitempty"`
+	Watch           string  `json:"watch"`
 }
 
 // StopBackupRequest defines model for StopBackupRequest.
@@ -569,11 +762,12 @@ type StopBackupResult struct {
 	LeasePending bool `json:"lease_pending"`
 }
 
-// StopReplicaRequest Either name for one replica, or prefix and to for a prefix.
+// StopReplicaRequest Either name for one replica, or prefix and directory for a prefix.
 type StopReplicaRequest struct {
-	Name   string `json:"name,omitempty"`
-	Prefix string `json:"prefix,omitempty"`
-	To     string `json:"to,omitempty"`
+	// Directory with prefix, the directory the prefix replica was started with
+	Directory string `json:"directory,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Prefix    string `json:"prefix,omitempty"`
 }
 
 // SyncedState A version the server acknowledged. Clients decide what durability is enough.
@@ -591,7 +785,8 @@ type VersionList struct {
 
 // Writer defines model for Writer.
 type Writer struct {
-	Acquired time.Time `json:"acquired,omitempty"`
+	// AcquiredTime when the writer took the lock
+	AcquiredTime time.Time `json:"acquired_time,omitempty"`
 
 	// Active whether some machine holds the write lock and its lease still runs
 	Active bool `json:"active"`
@@ -603,12 +798,21 @@ type Writer struct {
 	LeaseExpires time.Time `json:"lease_expires,omitempty"`
 
 	// LeaseRemainingMillis how long the lease still runs, negative once it ran out
-	LeaseRemainingMillis int64 `json:"lease_remaining_millis,omitempty"`
-
-	// Machine the machine label of the writer, or empty when nobody holds the lock
-	Machine string `json:"machine"`
-	Name    string `json:"name"`
+	LeaseRemainingMillis int64  `json:"lease_remaining_millis,omitempty"`
+	Name                 string `json:"name"`
 
 	// ThisMachine whether this machine's session holds the write lock
 	ThisMachine bool `json:"this_machine"`
+
+	// WriterMachineLabel the machine label of the writer, or empty when nobody holds the lock
+	WriterMachineLabel string `json:"writer_machine_label"`
 }
+
+// RevertDatabaseParams defines parameters for RevertDatabase.
+type RevertDatabaseParams struct {
+	// SDKVersion the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported
+	SDKVersion string `json:"Litebackup-SDK-Version"`
+}
+
+// RevertDatabaseJSONRequestBody defines body for RevertDatabase for application/json ContentType.
+type RevertDatabaseJSONRequestBody = RevertRequest

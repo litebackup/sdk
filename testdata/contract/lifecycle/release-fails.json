@@ -1,11 +1,5 @@
 {
-  "description": "A failed release raises a cleanup error with its durability.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
-    "durability": "cloud",
-    "offload": true
-  },
+  "description": "A release that fails when the pool closes raises a cleanup error with its durability.",
   "fail": [
     "release"
   ],
@@ -29,29 +23,32 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [
       "acquire",
       "open",
       "work",
+      "sync",
       "close",
       "release"
     ],
     "acquire_body": {
       "name": "agents/42.sqlite",
-      "path": "{cwd}/agents/42.sqlite"
+      "path": "{cwd}/agents/42.sqlite",
+      "umask": "{umask}"
     },
     "release_body": {
       "name": "agents/42.sqlite",
-      "wait": "cloud",
+      "durability": "cloud",
       "timeout_millis": 600000,
       "offload": true
     },
-    "raised": [
+    "raised": [],
+    "close_raised": [
       {
-        "code": "scope_cleanup_failed",
+        "code": "lease_cleanup_failed",
         "step": "release",
         "cause": "release",
         "details": {
@@ -62,5 +59,11 @@
         }
       }
     ]
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "cloud",
+    "offload": true
   }
 }

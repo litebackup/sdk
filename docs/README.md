@@ -21,7 +21,7 @@ Start with the [README](../README.md), or pick a guide below.
 | Integrate from Go | [Go examples](sqlite-go.md) |
 | Integrate from Python | [Python guide](../python/README.md) |
 | Look up a method or error | [API](sdk-reference.md), [troubleshooting](sqlite-backup-errors.md) |
-| Work on this SDK | [Development](sdk-development.md), [SDK contract](sdk-contract.md) |
+| Check the cross-language contract | [SDK contract](sdk-contract.md) |
 
 TypeScript examples use ESM. Examples importing `node:sqlite` require Node.js
 22.13+ (Node 24 is used for the runnable examples); the SDK itself supports

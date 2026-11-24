@@ -1,0 +1,26 @@
+{
+  "description": "An empty prefix replicates all databases and is sent explicitly.",
+  "operation": "replicas.start_prefix",
+  "args": {
+    "prefix": "",
+    "directory": "replicas"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/replicas/start",
+    "query": {},
+    "body": {
+      "prefix": "",
+      "directory": "{cwd}/replicas"
+    }
+  },
+  "response": {
+    "prefix_replica": {
+      "id": "p1",
+      "prefix": "",
+      "directory": "{cwd}/replicas",
+      "write_protection": "lock",
+      "database_count": 0
+    }
+  }
+}

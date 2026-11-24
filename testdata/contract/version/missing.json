@@ -3,7 +3,7 @@
   "client_version": null,
   "accepted": false,
   "expect": {
-    "code": "incompatible_version",
+    "code": "daemon_unsupported",
     "status": 0
   }
 }

@@ -15,7 +15,7 @@ COPY --from=cli /usr/local/bin/litebackup /usr/local/bin/litebackup
 ENV LITEBACKUP_PATH=/usr/local/bin/litebackup
 RUN litebackup start --help >/dev/null
 COPY examples/docker/app.mjs ./
-RUN mkdir -p /data /state && chown node:node /data /state
+RUN mkdir --parents /data /state && chown node:node /data /state
 ENV XDG_STATE_HOME=/state XDG_RUNTIME_DIR=/tmp/litebackup-runtime
 USER node
 EXPOSE 3000

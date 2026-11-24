@@ -8,7 +8,7 @@
     "query": {}
   },
   "response": {
-    "backups": [
+    "rules": [
       {
         "id": "01a1-rule",
         "path": "/var/lib/app/main.sqlite",
@@ -16,6 +16,8 @@
         "prefix": "",
         "watch": "inotify",
         "maximum_local_databases": 0,
+        "offload_durability": "server",
+        "offload_rollback_journal": false,
         "failover": false
       }
     ]

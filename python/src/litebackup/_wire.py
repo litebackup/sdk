@@ -12,18 +12,19 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Final, Generic, Literal, TypeVar, get_args
 from urllib.parse import urlencode
 
 from . import _decode
 from ._generated import models
+from ._umask import request_umask
 from ._version import MINIMUM_DAEMON_VERSION, SDK_VERSION
 from .errors import ErrorCode, LitebackupError, invalid_argument
 
 Result = TypeVar("Result")
 
-SDK_VERSION_HEADER = "X-Litebackup-SDK-Version"
-CLIENT_VERSION_HEADER = "x-litebackup-client-version"
+SDK_VERSION_HEADER = "Litebackup-SDK-Version"
+CLIENT_VERSION_HEADER = "litebackup-client-version"
 SDK_VERSION_VALUE = f"python/{SDK_VERSION}"
 DEADLINE_GRACE_SECONDS = 30.0
 """Added to a call's server-side timeout for its client-side deadline, so the daemon's own timeout answer arrives first."""
@@ -40,6 +41,16 @@ PathSource = str | os.PathLike[str]
 Durability = Literal["server", "cloud"]
 WriteProtection = Literal["lock", "detect", "none"]
 
+DatabaseRole = Literal["origin", "replica"]
+DatabaseState = Literal["pending", "syncing", "retrying", "synced", "waiting", "offloaded", "stopped", "conflicted", "error"]
+DURABILITY_SERVER: Final[Durability] = "server"
+DURABILITY_CLOUD: Final[Durability] = "cloud"
+ROLE_ORIGIN: Final[DatabaseRole] = "origin"
+STATE_OFFLOADED: Final[DatabaseState] = "offloaded"
+STATE_CONFLICTED: Final[DatabaseState] = "conflicted"
+JOURNAL_MODE_ROLLBACK: Final = "rollback"
+"""Wire values the SDK compares; tests check each against the generated models' literals."""
+
 
 @dataclass(frozen=True, slots=True)
 class Call(Generic[Result]):
@@ -52,6 +63,8 @@ class Call(Generic[Result]):
     timeout_seconds: float | None = None
     """The server-side timeout; the client waits this plus DEADLINE_GRACE_SECONDS."""
     decode: Callable[[Any], Result] = field(default=lambda value: value)
+    answer_deadline_seconds: float | None = None
+    """A client-side deadline that replaces the one timeout_seconds gives, as a failover's role confirmation limit."""
 
     @property
     def target(self) -> str:
@@ -59,6 +72,8 @@ class Call(Generic[Result]):
 
     @property
     def deadline_seconds(self) -> float | None:
+        if self.answer_deadline_seconds is not None:
+            return self.answer_deadline_seconds
         return None if self.timeout_seconds is None else self.timeout_seconds + DEADLINE_GRACE_SECONDS
 
     def encoded_body(self) -> bytes | None:
@@ -127,7 +142,7 @@ def check_daemon_version(client_version: str, session: str | None) -> None:
     reported = f"is version {client_version}" if client_version else "does not report its version"
     drain = f"litebackup drain --session {session}" if session else "litebackup drain"
     raise LitebackupError(
-        ErrorCode.INCOMPATIBLE_VERSION,
+        ErrorCode.DAEMON_UNSUPPORTED,
         f"the litebackup daemon {reported}, and this SDK needs {MINIMUM_DAEMON_VERSION} or later. "
         f"Stop it with `{drain}` so the next call starts the new binary, "
         "or restart the service if `litebackup install service` runs it",
@@ -172,7 +187,7 @@ def wire_time(time: datetime | str) -> str:
         except ValueError:
             raise invalid_argument(f"expected an ISO 8601 time, got {time!r}") from None
     if time.tzinfo is None:
-        raise invalid_argument("restore needs an aware datetime, such as datetime.now(UTC)")
+        raise invalid_argument("a version time needs an aware datetime, such as datetime.now(UTC)")
     time = time.astimezone(UTC)
     text = time.strftime("%Y-%m-%dT%H:%M:%S")
     if time.microsecond:
@@ -188,12 +203,19 @@ def _body(**fields: Any) -> dict[str, Any]:
 # Operations.
 
 
+def _page_limit(limit: int) -> str:
+    """A page limit the daemon takes: a whole number from 1 to 1000."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+        raise invalid_argument("the limit must be a whole number from 1 to 1000")
+    return str(limit)
+
+
 def status(*, after: str = "", limit: int = 100) -> Call[models.Status]:
-    return Call("GET", "/v1/status/show", {"after": after, "limit": str(limit)}, decode=model(models.Status))
+    return Call("GET", "/v1/status/show", {"after": after, "limit": _page_limit(limit)}, decode=model(models.Status))
 
 
 def databases_page(*, after: str = "", limit: int = 100) -> Call[models.DatabaseStatusList]:
-    return Call("GET", "/v1/databases/list", {"after": after, "limit": str(limit)}, decode=model(models.DatabaseStatusList))
+    return Call("GET", "/v1/databases/list", {"after": after, "limit": _page_limit(limit)}, decode=model(models.DatabaseStatusList))
 
 
 def database(name: str) -> Call[models.DatabaseStatus]:
@@ -204,8 +226,18 @@ def sync(name: str) -> Call[models.DatabaseStatus]:
     return Call("POST", "/v1/databases/sync", body={"name": name}, decode=model(models.DatabaseStatus))
 
 
-def offload(name: str) -> Call[models.DatabaseStatus]:
-    return Call("POST", "/v1/databases/offload", body={"name": name}, decode=model(models.DatabaseStatus))
+def offload_durability_choice(durability: Durability | None) -> Durability | None:
+    """Checks an offload durability and returns it, or None for the daemon's default, server."""
+    if durability is not None and durability not in get_args(Durability):
+        raise invalid_argument("offload durability must be server or cloud")
+    return None if durability == "server" else durability
+
+
+def offload(name: str, *, durability: Durability | None = None) -> Call[models.DatabaseStatus]:
+    if durability is not None and durability not in get_args(Durability):
+        raise invalid_argument("offload durability must be server or cloud")
+    body = {"name": name} | _body(durability=durability)
+    return Call("POST", "/v1/databases/offload", body=body, decode=model(models.DatabaseStatus))
 
 
 def writer(name: str) -> Call[models.Writer]:
@@ -222,102 +254,149 @@ def versions_page(name: str, *, after: int = 0, limit: int | None = None) -> Cal
 
 
 def restore(
-    name: str, *, to: PathSource | None, version: int | None = None, time: datetime | str | None = None
+    name: str,
+    *,
+    path: PathSource | None,
+    version: int | None = None,
+    time: datetime | str | None = None,
+    umask: int | None = None,
 ) -> Call[models.RestoreResult]:
-    if not to:
+    if not path:
         raise invalid_argument("restore needs a path to write to")
     if version is not None and time is not None:
         raise invalid_argument("restore takes a version or a time, not both")
-    body: dict[str, Any] = {"name": name, "path": absolute_path(to)}
+    body: dict[str, Any] = {"name": name, "path": absolute_path(path)}
     if version is not None:
         body["version"] = version
     if time is not None:
         body["time"] = wire_time(time)
+    body["umask"] = request_umask(umask)
     return Call("POST", "/v1/databases/restore", body=body, decode=model(models.RestoreResult))
+
+
+def revert(name: str, *, version: int | None = None, time: datetime | str | None = None) -> Call[models.RevertResult]:
+    if (version is None) == (time is None):
+        raise invalid_argument("revert takes a version or a time, one of them")
+    body: dict[str, Any] = {"name": name}
+    if version is not None:
+        if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+            raise invalid_argument("revert needs a positive whole version")
+        body["version"] = version
+    if time is not None:
+        body["time"] = wire_time(time)
+    return Call("POST", "/v1/databases/revert", body=body, decode=model(models.RevertResult))
 
 
 def acquire(
     name: str,
     *,
-    to: PathSource | None = None,
+    path: PathSource | None = None,
     maintenance: bool = False,
-    offload: Literal["never", "released"] = "never",
+    offload_on_release: bool = False,
+    offload_durability: Durability = "server",
     machine_label: str | None = None,
-    on_lost: Literal["conflict", "block"] = "conflict",
     timeout: Duration | None = None,
+    lock_timeout: Duration | None = None,
+    umask: int | None = None,
+    discard_local: bool = False,
 ) -> Call[models.AcquireResult]:
     timeout_seconds = seconds(timeout, "the acquire timeout")
-    body = _body(
-        name=name,
-        path=absolute_path(to) if to else None,
+    lock_timeout_seconds = seconds(lock_timeout, "the lock timeout")
+    # name is required, so it is sent even when empty and the daemon answers for it.
+    body = {"name": name} | _body(
+        path=absolute_path(path) if path else None,
         maintenance=maintenance,
-        offload="released" if offload == "released" else None,
+        discard_local=discard_local,
+        offload_on_release=offload_on_release,
+        offload_durability=offload_durability_choice(offload_durability),
         machine_label=machine_label,
-        on_lost="block" if on_lost == "block" else None,
         timeout_millis=millis(timeout_seconds),
+        lock_timeout_millis=millis(lock_timeout_seconds),
     )
-    return Call("POST", "/v1/databases/acquire", body=body, timeout_seconds=timeout_seconds, decode=model(models.AcquireResult))
+    body["umask"] = request_umask(umask)
+    # No timeout leaves the call unbounded, as the daemon applies its own.
+    call_seconds = timeout_seconds + (lock_timeout_seconds or 0) if timeout_seconds else None
+    return Call("POST", "/v1/databases/acquire", body=body, timeout_seconds=call_seconds, decode=model(models.AcquireResult))
 
 
 def release(
-    name: str, *, wait: Durability | None = None, offload: bool = False, timeout: Duration | None = None
+    name: str, *, durability: Durability | None = None, offload: bool = False, timeout: Duration | None = None
 ) -> Call[models.ReleaseResult]:
     timeout_seconds = seconds(timeout, "the release timeout")
-    body = _body(name=name, wait=wait, offload=offload, timeout_millis=millis(timeout_seconds))
+    body = {"name": name} | _body(durability=durability, offload=offload, timeout_millis=millis(timeout_seconds))
     return Call("POST", "/v1/databases/release", body=body, timeout_seconds=timeout_seconds, decode=model(models.ReleaseResult))
 
 
 def start_backup(
-    source: PathSource, *, name: str | None = None, prefix: str | None = None, maximum_local_databases: int | None = None
+    source: PathSource,
+    *,
+    name: str | None = None,
+    prefix: str | None = None,
+    maximum_local_databases: int | None = None,
+    offload_durability: Durability = "server",
+    offload_rollback_journal: bool = False,
 ) -> Call[models.BackupRule]:
     if source == "" or source is None:
         raise invalid_argument("backup needs a path")
     if name and prefix:
         raise invalid_argument("choose a name or a prefix")
-    body = _body(path=absolute_path(source), name=name, prefix=prefix, maximum_local_databases=maximum_local_databases or None)
+    body = _body(
+        path=absolute_path(source),
+        name=name,
+        prefix=prefix,
+        maximum_local_databases=maximum_local_databases or None,
+        offload_durability=offload_durability_choice(offload_durability),
+        offload_rollback_journal=offload_rollback_journal,
+    )
     return Call("POST", "/v1/backup-rules/start", body=body, decode=model(models.BackupRule))
 
 
 def stop_backup(name: str) -> Call[models.StopBackupResult]:
+    if not name:
+        raise invalid_argument("stopping a backup needs a name")
     return Call("POST", "/v1/backup-rules/stop", body={"name": name}, decode=model(models.StopBackupResult))
 
 
 def stop_rule(rule_id: str) -> Call[models.StopBackupResult]:
+    if not rule_id:
+        raise invalid_argument("stopping a rule needs its ID")
     return Call("POST", "/v1/backup-rules/stop", body={"rule_id": rule_id}, decode=model(models.StopBackupResult))
 
 
 def list_rules() -> Call[list[models.BackupRule]]:
-    return Call("GET", "/v1/backup-rules/list", decode=lambda value: _decode.decode(models.BackupList, value).backups)
+    return Call("GET", "/v1/backup-rules/list", decode=lambda value: _decode.decode(models.BackupList, value).rules)
 
 
 def start_replica(
-    name: str, *, to: PathSource | None = None, write_protection: WriteProtection | None = None, timeout: Duration | None = None
+    name: str, *, path: PathSource | None = None, write_protection: WriteProtection | None = None, timeout: Duration | None = None
 ) -> Call[models.DatabaseStatus]:
     timeout_seconds = seconds(timeout, "the replica timeout")
-    body = _body(name=name, to=absolute_path(to) if to else None, write_protection=write_protection, timeout_millis=millis(timeout_seconds))
+    body = _body(
+        name=name, path=absolute_path(path) if path else None, write_protection=write_protection, timeout_millis=millis(timeout_seconds)
+    )
 
     def replica(value: Any) -> models.DatabaseStatus:
-        result = _decode.decode(models.ReplicaResult, value)
-        if result.database is None:
+        started = _decode.decode(models.ReplicaResult, value)
+        if started.database is None:
             raise LitebackupError(ErrorCode.INVALID_RESPONSE, "the daemon did not return the replica", 200)
-        return result.database
+        return started.database
 
     return Call("POST", "/v1/replicas/start", body=body, timeout_seconds=timeout_seconds, decode=replica)
 
 
 def start_prefix_replica(
-    prefix: str, *, to: PathSource | None, write_protection: WriteProtection | None = None
+    prefix: str, *, directory: PathSource | None, write_protection: WriteProtection | None = None
 ) -> Call[models.PrefixReplica]:
-    if not to:
+    if not directory:
         raise invalid_argument("replicating a prefix needs a directory")
-    body = _body(prefix=prefix, to=absolute_path(to), write_protection=write_protection)
+    body = _body(prefix=prefix, directory=absolute_path(directory), write_protection=write_protection)
     body["prefix"] = prefix
 
     def prefix_replica(value: Any) -> models.PrefixReplica:
-        result = _decode.decode(models.ReplicaResult, value)
-        if result.prefix is None:
+        started = _decode.decode(models.ReplicaResult, value)
+        if started.prefix_replica is None:
             raise LitebackupError(ErrorCode.INVALID_RESPONSE, "the daemon did not return the prefix replica", 200)
-        return result.prefix
+        return started.prefix_replica
 
     return Call("POST", "/v1/replicas/start", body=body, decode=prefix_replica)
 
@@ -330,18 +409,10 @@ def stop_replica(name: str) -> Call[None]:
     return Call("POST", "/v1/replicas/stop", body={"name": name}, decode=nothing)
 
 
-def stop_prefix_replica(prefix: str, *, to: PathSource | None) -> Call[None]:
-    if not to:
+def stop_prefix_replica(prefix: str, *, directory: PathSource | None) -> Call[None]:
+    if not directory:
         raise invalid_argument("stopping a prefix replica needs a directory")
-    return Call("POST", "/v1/replicas/stop", body={"prefix": prefix, "to": absolute_path(to)}, decode=nothing)
-
-
-def list_conflicts() -> Call[list[models.Conflict]]:
-    return Call("GET", "/v1/conflicts/list", decode=lambda value: _decode.decode(models.ConflictList, value).conflicts)
-
-
-def delete_conflict(conflict_id: str) -> Call[None]:
-    return Call("POST", "/v1/conflicts/delete", body={"id": conflict_id}, decode=nothing)
+    return Call("POST", "/v1/replicas/stop", body={"prefix": prefix, "directory": absolute_path(directory)}, decode=nothing)
 
 
 def events_page(*, after: int = 0, wait: Duration | None = None, limit: int | None = None) -> Call[models.EventList]:
@@ -356,20 +427,30 @@ def events_page(*, after: int = 0, wait: Duration | None = None, limit: int | No
     return Call("GET", "/v1/events/list", query, timeout_seconds=wait_seconds, decode=model(models.EventList))
 
 
-def shutdown(*, wait: Literal["none", "server", "cloud"] | None = None, timeout: Duration | None = None) -> Call[models.ShutdownResult]:
+def shutdown(
+    *, durability: Literal["none", "server", "cloud"] | None = None, timeout: Duration | None = None
+) -> Call[models.ShutdownResult]:
     timeout_seconds = seconds(timeout, "the shutdown timeout")
-    body = _body(wait=wait, timeout_millis=millis(timeout_seconds))
+    body = _body(durability=durability, timeout_millis=millis(timeout_seconds))
     return Call("POST", "/v1/session/shutdown", body=body, timeout_seconds=timeout_seconds, decode=model(models.ShutdownResult))
 
 
-def start_failover(path: PathSource, *, name: str | None = None, timeout: Duration | None = None) -> Call[models.Failover]:
+def start_failover(
+    path: PathSource, *, name: str | None = None, timeout: Duration | None = None, discard_local: bool = False
+) -> Call[models.Failover]:
     if not path:
         raise invalid_argument("failover needs a path")
     timeout_seconds = seconds(timeout, "the failover timeout")
-    body = _body(path=absolute_path(path), name=name, timeout_millis=millis(timeout_seconds))
+    body = _body(path=absolute_path(path), name=name, timeout_millis=millis(timeout_seconds), discard_local=discard_local)
     return Call("POST", "/v1/failovers/start", body=body, timeout_seconds=timeout_seconds, decode=model(models.Failover))
 
 
 def is_terminal_watch_error(error: LitebackupError) -> bool:
     """Errors that end an event watch instead of being retried."""
-    return error.code in (ErrorCode.SDK_UNSUPPORTED, ErrorCode.CLOSED, ErrorCode.CANCELLED, ErrorCode.INVALID_ARGUMENT)
+    return error.code in (
+        ErrorCode.SDK_UNSUPPORTED,
+        ErrorCode.CLOSED,
+        ErrorCode.CANCELLED,
+        ErrorCode.INVALID_ARGUMENT,
+        ErrorCode.CURSOR_EXPIRED,
+    )

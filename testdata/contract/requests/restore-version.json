@@ -3,7 +3,7 @@
   "operation": "databases.restore",
   "args": {
     "name": "main.sqlite",
-    "to": "/tmp/r.sqlite",
+    "path": "/tmp/r.sqlite",
     "version": 7
   },
   "request": {
@@ -13,7 +13,8 @@
     "body": {
       "name": "main.sqlite",
       "path": "/tmp/r.sqlite",
-      "version": 7
+      "version": 7,
+      "umask": "{umask}"
     }
   },
   "response": {

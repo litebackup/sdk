@@ -12,7 +12,7 @@ func (c *Client) AllDatabases(ctx context.Context) iter.Seq2[DatabaseStatus, err
 	return func(yield func(DatabaseStatus, error) bool) {
 		after := ""
 		for {
-			page, err := c.DatabasesPage(ctx, after, 100)
+			page, err := c.DatabasesPage(ctx, &DatabasesPageArgs{After: after})
 			if err != nil {
 				yield(DatabaseStatus{}, err)
 				return
@@ -33,7 +33,11 @@ func (c *Client) AllDatabases(ctx context.Context) iter.Seq2[DatabaseStatus, err
 // AllVersions iterates the versions of a database the server can restore,
 // oldest first, after args.After and at most args.Limit when positive. It
 // ends after yielding an error.
-func (c *Client) AllVersions(ctx context.Context, name string, args *VersionsArgs) iter.Seq2[RestorableVersion, error] {
+func (c *Client) AllVersions(
+	ctx context.Context,
+	name string,
+	args *VersionsArgs,
+) iter.Seq2[RestorableVersion, error] {
 	if args == nil {
 		args = &VersionsArgs{}
 	}
@@ -83,21 +87,22 @@ const (
 	// firstRetryDelay and maximumRetryDelay bound the backoff between failed long-polls.
 	firstRetryDelay   = 250 * time.Millisecond
 	maximumRetryDelay = 10 * time.Second
-	// eventWait is how long one events long-poll waits by default.
-	eventWait = 30 * time.Second
+	// defaultEventWait is how long one events long-poll waits by default.
+	defaultEventWait = 30 * time.Second
 )
 
 // WatchEvents yields events, oldest first, by long-polling the daemon until
 // the caller stops or ctx ends. A failed long-poll is retried with backoff
-// from the same cursor; cancellation, a closed client, and sdk_unsupported
-// are yielded as the last error.
+// from the same cursor; cancellation, a closed client, sdk_unsupported,
+// invalid_argument, and cursor_expired (the cursor is older than the oldest
+// event kept; choose a new one) are yielded as the last error.
 func (c *Client) WatchEvents(ctx context.Context, args *WatchEventsArgs) iter.Seq2[Event, error] {
 	if args == nil {
 		args = &WatchEventsArgs{}
 	}
 	settings := *args
 	if settings.Wait == 0 {
-		settings.Wait = eventWait
+		settings.Wait = defaultEventWait
 	}
 	return func(yield func(Event, error) bool) {
 		cursor := settings.After
@@ -105,7 +110,9 @@ func (c *Client) WatchEvents(ctx context.Context, args *WatchEventsArgs) iter.Se
 		for {
 			page, err := c.Events(ctx, &EventsArgs{After: cursor, Wait: settings.Wait})
 			if err != nil {
-				if ctx.Err() != nil || IsCode(err, CodeCancelled) || IsCode(err, CodeClosed) || IsCode(err, CodeSDKUnsupported) || IsCode(err, CodeInvalidArgument) {
+				if ctx.Err() != nil || IsCode(err, CodeCancelled) || IsCode(err, CodeClosed) ||
+					IsCode(err, CodeSDKUnsupported) ||
+					IsCode(err, CodeInvalidArgument) || IsCode(err, CodeCursorExpired) {
 					yield(Event{}, err)
 					return
 				}
@@ -114,7 +121,14 @@ func (c *Client) WatchEvents(ctx context.Context, args *WatchEventsArgs) iter.Se
 				}
 				select {
 				case <-ctx.Done():
-					yield(Event{}, &Error{Code: CodeCancelled, Message: "the watch was cancelled", Err: ctx.Err()})
+					yield(
+						Event{},
+						&Error{
+							Code:    CodeCancelled,
+							Message: "the watch was cancelled",
+							Err:     ctx.Err(),
+						},
+					)
 					return
 				case <-time.After(delay):
 				}

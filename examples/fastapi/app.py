@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, text
 from litebackup.integrations.fastapi import backup_lifespan
 from litebackup.integrations.sqlalchemy import database_path
 
+os.makedirs("data", exist_ok=True)
 engine = create_engine(os.environ.get("DATABASE_URL", "sqlite:///data/app.sqlite"))
 
 

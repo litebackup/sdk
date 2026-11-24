@@ -4,7 +4,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "${0}")/.."
 uvx --from datamodel-code-generator==0.98.0 datamodel-codegen \
     --input ../client-openapi.yaml \
     --input-file-type openapi \

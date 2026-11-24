@@ -5,17 +5,40 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, TypeAlias
+
+EventType: TypeAlias = Literal[
+    "acquired",
+    "download_finished",
+    "download_started",
+    "draining",
+    "image_written",
+    "local_write",
+    "lock_lost",
+    "offloaded",
+    "path_unreadable",
+    "rebased",
+    "refused",
+    "released",
+    "replicating",
+    "restored",
+    "reverted",
+    "role_changed",
+    "rollback_scan",
+    "server_generation",
+    "stopped",
+    "tracked",
+]
+"""
+What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), refused (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
+"""
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class Event:
     id: int
     time: datetime
-    type: str
-    """
-    such as role_changed (message is origin or replica), conflict_saved (path names the conflict copy), discovery_failed (path names the failed match), synced, downloaded
-    """
+    type: EventType
     message: str
     name: str | None = None
     role: str | None = None
@@ -24,7 +47,7 @@ class Event:
     """
     path: str | None = None
     """
-    for conflict_saved, the conflict copy
+    for refused, the refused file; for path_unreadable, the path the rule could not read
     """
 
 
@@ -32,6 +55,21 @@ class Event:
 class SyncedState:
     version: int
     time: datetime | None = None
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class ArchivedVersion:
+    version: int
+    archived: datetime | None = None
+    """
+    when the server recorded the version as archived
+    """
+
+
+Durability: TypeAlias = Literal["server", "cloud"]
+"""
+how far a version must reach: server once the server holds it, cloud once the bucket holds it too
+"""
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -43,6 +81,7 @@ class DatabaseStatus:
     origin when this machine writes the database and backs it up; replica for a live readonly copy
     """
     state: Literal[
+        "pending",
         "syncing",
         "retrying",
         "synced",
@@ -53,7 +92,7 @@ class DatabaseStatus:
         "error",
     ]
     """
-    syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced once a released database's last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the bucket holds it; stopped for a stopped replica; conflicted when another machine wrote while this copy had changes; error with last_error
+    pending while a backup or failover origin holds no write lock, as after a start or a drain, until a sync takes it (a start takes back the lock of each backup a drain left pending while the head is still the version it last synced); syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced when the server holds every change: a backup or failover origin whose last sync landed with no change seen after it, until its next change, or a released database whose last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the server, or the bucket when the offload asked for it, holds its last version; stopped for a stopped replica; conflicted when this copy was refused and left as it is, because its file differs from the server head or its write lock was lost or broken; error with last_error
     """
     acquired: bool
     """
@@ -65,15 +104,22 @@ class DatabaseStatus:
     """
     local_changed: bool
     synced_server: SyncedState
-    synced_cloud: SyncedState
+    synced_cloud: ArchivedVersion
     journal_mode: str
+    """
+    wal, rollback, or unknown before the first scan. A full scan of a rollback-journal database holds a read lock that blocks the app's writers until it ends, so it runs at full speed rather than at --scan-bytes-per-second, and the first scan past 256 MB records a rollback_scan event with its duration. Switch such a database to WAL mode (PRAGMA journal_mode = WAL), where scans never block writers; Litebackup never changes the journal mode itself.
+    """
     page_count: int
     sync_count: int
     hint_misses: int
-    last_full_scan_reason: str | None = None
-    writer: str | None = None
+    backup_rule_id: str | None = None
     """
-    the machine label of the last writer this machine saw
+    the backup or failover rule that tracks the database on this machine; absent for an acquired database and a replica
+    """
+    last_full_scan_reason: str | None = None
+    writer_machine_label: str | None = None
+    """
+    the machine label of the last writer this machine saw; empty once this machine released the database, drained it, or offloaded a copy whose write lock it held, as no writer is known then
     """
     last_error: str | None = None
     last_error_time: datetime | None = None
@@ -85,12 +131,23 @@ class DatabaseStatus:
     """
     when the next attempt of a failed sync runs; absent when none is scheduled
     """
+    draining: bool | None = None
+    """
+    set on a failover origin while this machine drains, and on one a drain released, which holds no write lock until it takes one again; a failover then reports its role as unknown, as after a draining event
+    """
     machine_label: str | None = None
     """
-    what other machines see as the writer while this machine writes
+    the name this machine shows on the server and as the writer of its databases
     """
     maintenance: bool | None = None
-    offload: Literal["never", "released"] | None = None
+    offload_on_release: bool | None = None
+    """
+    the client deletes the released copy once offload_durability holds it
+    """
+    offload_durability: Durability | None = None
+    """
+    what an offload of this acquired copy waits for: server removes the released copy once the server holds its last version, cloud once the bucket holds it too. An acquire, a release with offload, and an explicit offload each save the durability they asked for. Absent when the database is not acquired
+    """
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -106,10 +163,50 @@ class Status:
     Pass this name as after to read the next page. Omitted on the last page.
     """
     lease_expires: datetime | None = None
-    recent_discovery_errors: list[Event] | None = None
+    open_file_limit: int | None = None
     """
-    Most recent file discovery failures. The events API provides the paginated history.
+    The soft limit on open files the daemon runs with. Each active backup holds about four, and the daemon lowers its default number of active backups to fit.
     """
+    unreadable_paths: list[Event] | None = None
+    """
+    the paths a backup rule cannot read, most recent first; the events API has the history
+    """
+
+
+ErrorCode: TypeAlias = Literal[
+    "busy",
+    "cancelled",
+    "changed",
+    "client_unsupported",
+    "conflict",
+    "cursor_expired",
+    "drain_required",
+    "file_exists",
+    "forbidden",
+    "integrity",
+    "internal",
+    "invalid_argument",
+    "launch_failed",
+    "limit_exceeded",
+    "lock_lost",
+    "lock_unavailable",
+    "method_not_allowed",
+    "not_configured",
+    "not_durable",
+    "not_found",
+    "plan_limit",
+    "rule_database",
+    "rule_exists",
+    "sdk_unsupported",
+    "still_open",
+    "timeout",
+    "unauthenticated",
+    "unavailable",
+    "wrong_server",
+]
+"""
+What went wrong, in one word. The socket answers with file_exists (the file a restore or an acquire would write, or a -journal, -wal, or -shm beside it, already exists), rule_exists (a backup rule with other settings already covers the path, and the error carries that rule), lock_unavailable (another machine holds the write lock a command asks for, as an acquire, a revert, or a failover does), not_found, still_open, invalid_argument, timeout, cursor_expired (an events cursor older than the oldest event kept), changed (an offload or acquire refused because the local file changed under it: written after its last sync, never synced, or written while an acquire replaced it), rule_database (a release of a database a backup rule on this machine keeps, whose write lock the rule never gives up; stop its backup to hand it off), not_durable (an offload refused until the server, or the bucket when it waits for cloud, holds the synced version, or a cloud wait whose name now holds another server database), and the others by their names; busy (a foreground backup refused because another job, a continuous backup, or another machine writes the database), cancelled (a command interrupted before it finished), drain_required (a credential other than the one the client took its write locks with, refused until a drain released them), and launch_failed (the command could not start the client on this machine, or the client exited before it listened) come from the litebackup command alone, which also answers unauthenticated when this machine has not joined a server. A refusal from the server becomes client_unsupported (426: the server needs a newer litebackup on this machine) or, with 503, not_configured (the server waits for setup), wrong_server (the server this machine reached is not the one its session joined, or does not own the database), unauthenticated (the server no longer accepts this machine's key), forbidden (the key may not do this), plan_limit (the server's plan has no room for another database), or integrity (the version's bucket objects failed an integrity check). lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is unavailable. A client treats a code it does not know as a failure.
+"""
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -126,19 +223,21 @@ class BackupRule:
     prefix: str
     watch: str
     maximum_local_databases: int
+    offload_durability: Durability
+    """
+    what maximum_local_databases waits for before it removes a copy
+    """
+    offload_rollback_journal: bool
     failover: bool
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class Error:
-    code: str
-    """
-    such as exists (a restore target exists, or a backup rule with other settings already covers the path), in_use (another machine writes the database), not_found, still_open, invalid_argument, timeout
-    """
+    code: ErrorCode
     message: str
     rule: BackupRule | None = None
     """
-    for exists from backup-rules/start, the rule already saved for the path; stop it by its ID before saving different settings
+    for rule_exists from backup-rules/start, the rule already saved for the path; stop it by its ID before saving different settings
     """
 
 
@@ -158,6 +257,10 @@ class RestorableVersion:
     time: datetime
     """
     when the version was synced
+    """
+    archived: datetime | None = None
+    """
+    when the server recorded the primary bucket's object of this version as archived; absent when the primary bucket does not hold the version, as for one synced between archive passes, which restores only until history pruning removes its segment
     """
 
 
@@ -185,6 +288,10 @@ class RestoreRequest:
     """
     restore the newest version at or before this time
     """
+    umask: int | None = None
+    """
+    the caller's file mode creation mask, such as 18 for 022; the file gets 0666 less it, as one the caller created would. Absent uses the client's own umask. The litebackup command sends its own.
+    """
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -195,6 +302,36 @@ class RestoreResult:
     page_count: int
     page_size: int
     state_digest: str
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class RevertRequest:
+    name: str
+    version: int | None = None
+    """
+    the version whose content the new head holds; set version or time
+    """
+    time: datetime | None = None
+    """
+    revert to the newest version at or before this time; set version or time
+    """
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class RevertResult:
+    database: DatabaseStatus
+    source_version: int
+    """
+    the version whose content the new head holds; it and every version after it stay restorable
+    """
+    version: int
+    """
+    the new head, one past the head before the revert
+    """
+    state_digest: str
+    """
+    the new head's state digest, which is the source version's
+    """
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -213,55 +350,57 @@ class AcquireRequest:
     """
     checkpoint and, past the freelist threshold, VACUUM on release
     """
-    offload: Literal["never", "released"] | None = None
+    discard_local: bool | None = None
     """
-    released lets Litebackup delete the released copy once the bucket holds it
+    replace a local file that diverged from the server head with the head, discarding its writes the head lacks; without it such a file is refused with 409 conflict and left untouched
+    """
+    offload_on_release: bool | None = None
+    """
+    lets Litebackup delete the released copy once offload_durability holds it
+    """
+    offload_durability: Durability | None = None
+    """
+    what an offload of the released copy waits for; server, the default, once the server holds its last version, cloud once the bucket holds it too. A release with offload sets it to the release's durability.
     """
     machine_label: str | None = None
     """
-    what other machines see as the writer
-    """
-    on_lost: Literal["conflict", "block"] | None = None
-    """
-    on a lost write lock, keep the copy as conflicted or block local writes until the lock is back
+    the name this machine shows on the server and as the writer of this database only
     """
     timeout_millis: int | None = None
     """
     bound on downloading the head
     """
-
-
-@dataclass(frozen=True, kw_only=True, slots=True)
-class Conflict:
-    id: str
-    name: str
-    path: str
-    conflict_path: str
-    synced_version: int
-    server_version: int
-    reason: str
-    created: datetime
+    lock_timeout_millis: int | None = None
+    """
+    how long to wait for the write lock while another machine holds it, trying again until it is released; 0 refuses at once with lock_unavailable. It adds to the timeout.
+    """
+    umask: int | None = None
+    """
+    the caller's file mode creation mask, such as 18 for 022; a file the acquire creates, the head downloaded where none was or the empty file an offload removed, gets 0666 less it, as one the caller created would. A copy the head replaces keeps its bits. Absent uses the client's own umask. The litebackup command sends its own.
+    """
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class AcquireResult:
     database: DatabaseStatus
-    outcome: Literal[
-        "created", "adopted", "resumed", "downloaded", "fast_forwarded", "healed"
+    decision: Literal[
+        "created", "matched", "resumed", "downloaded", "fast_forwarded", "replaced"
     ]
-    conflict: Conflict | None = None
+    """
+    what the acquire did to the local file
+    """
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class ReleaseRequest:
     name: str
-    wait: Literal["server", "cloud"] | None = None
+    durability: Durability | None = None
     """
     server returns once the final sync is acknowledged; cloud waits for the bucket too
     """
     offload: bool | None = None
     """
-    remove the local file once the bucket holds the released version
+    remove the local file once durability holds the released version, the server with server and the bucket with cloud; an offload refused as not_durable is left to a later offload pass
     """
     timeout_millis: int | None = None
     """
@@ -278,6 +417,15 @@ class ReleaseResult:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class OffloadRequest:
+    name: str
+    durability: Durability | None = None
+    """
+    what the offload waits for before it removes the copy: server, the default, once the server holds its synced version; cloud once the bucket holds it too. Until then it is refused with not_durable.
+    """
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
 class Writer:
     name: str
     active: bool
@@ -288,7 +436,7 @@ class Writer:
     """
     whether this machine's session holds the write lock
     """
-    machine: str
+    writer_machine_label: str
     """
     the machine label of the writer, or empty when nobody holds the lock
     """
@@ -296,7 +444,10 @@ class Writer:
     """
     the writer's lease ran out, so another machine may take over
     """
-    acquired: datetime | None = None
+    acquired_time: datetime | None = None
+    """
+    when the writer took the lock
+    """
     lease_expires: datetime | None = None
     """
     on the server's clock
@@ -324,13 +475,21 @@ class BackupRequest:
     watch: Literal["inotify", "poll"] | None = None
     maximum_local_databases: int | None = None
     """
-    when positive, offload the least recently changed idle databases past this count once the bucket holds them
+    when positive, offload the least recently changed idle databases past this count once offload_durability holds them
+    """
+    offload_durability: Durability | None = None
+    """
+    what maximum_local_databases waits for before it removes a copy; server, the default, once the server holds its last version, cloud once the bucket holds it too
+    """
+    offload_rollback_journal: bool | None = None
+    """
+    lets maximum_local_databases offload rollback-journal databases too, on the operator's word that nothing keeps them open while idle; WAL databases are offloaded either way
     """
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class BackupList:
-    backups: list[BackupRule]
+    rules: list[BackupRule]
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -364,6 +523,10 @@ class FailoverRequest:
     """
     bound on the first download of a replica
     """
+    discard_local: bool | None = None
+    """
+    replace a file at the path that differs from the server head with the head, discarding its writes the head lacks; without it such a file is refused with 409 conflict and left untouched
+    """
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -378,13 +541,17 @@ class Failover:
 @dataclass(frozen=True, kw_only=True, slots=True)
 class ReplicaRequest:
     name: str | None = None
+    path: str | None = None
+    """
+    with name, the replica file, defaulting to the path this machine uses
+    """
     prefix: str | None = None
     """
     name prefix such as app; replicates every database under it
     """
-    to: str | None = None
+    directory: str | None = None
     """
-    for name, the replica file, defaulting to the path this machine uses; for prefix, the directory that receives <to>/<name relative to the prefix>
+    with prefix, the directory that receives <directory>/<name relative to the prefix>
     """
     write_protection: Literal["lock", "detect", "none"] | None = None
     """
@@ -400,15 +567,21 @@ class ReplicaRequest:
 class PrefixReplica:
     id: str
     prefix: str
-    to: str
+    directory: str
+    """
+    the directory that receives <directory>/<name relative to the prefix>
+    """
     write_protection: str
-    databases: int
+    database_count: int
+    """
+    how many databases under the prefix this machine replicates
+    """
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class ReplicaResult:
     database: DatabaseStatus | None = None
-    prefix: PrefixReplica | None = None
+    prefix_replica: PrefixReplica | None = None
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -421,22 +594,15 @@ class ReplicaList:
 class StopReplicaRequest:
     name: str | None = None
     prefix: str | None = None
-    to: str | None = None
+    directory: str | None = None
+    """
+    with prefix, the directory the prefix replica was started with
+    """
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class Empty:
     pass
-
-
-@dataclass(frozen=True, kw_only=True, slots=True)
-class ConflictList:
-    conflicts: list[Conflict]
-
-
-@dataclass(frozen=True, kw_only=True, slots=True)
-class IDRequest:
-    id: str
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -450,11 +616,24 @@ class EventList:
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class ShutdownRequest:
-    wait: Literal["none", "server", "cloud"] | None = None
+    durability: Literal["none", "server", "cloud"] | None = None
     timeout_millis: int | None = None
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class DrainFailure:
+    name: str
+    code: ErrorCode
+    message: str
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class ShutdownResult:
     released: int
-    failed: list[str]
+    """
+    how many databases the drain synced as asked and released
+    """
+    failed: list[DrainFailure]
+    """
+    every database the drain could not sync, wait for, or release, each keeping any write lock it holds, and every conflicted copy whose writes are not on the server, with conflict; empty only when the drain released every database it covers, which is the one case the daemon stops
+    """

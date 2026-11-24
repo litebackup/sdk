@@ -16,8 +16,8 @@ from ...client import Litebackup
 from ...errors import LitebackupError
 from .._sqlite_uri import file_from_uri, plain_file
 
-_CLIENT_KEYS = ("token", "session", "socket_path", "binary_path")
-_START_KEYS = ("name", "prefix", "maximum_local_databases")
+_CLIENT_KEYS = ("api_key", "session", "socket_path", "binary_path")
+_START_KEYS = ("name", "prefix", "maximum_local_databases", "offload_durability", "offload_rollback_journal")
 
 
 def sqlite_file(alias: str) -> str:

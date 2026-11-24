@@ -3,7 +3,7 @@
   "operation": "databases.restore",
   "args": {
     "name": "main.sqlite",
-    "to": {
+    "path": {
       "$path": "out/restored.sqlite"
     }
   },
@@ -13,7 +13,8 @@
     "query": {},
     "body": {
       "name": "main.sqlite",
-      "path": "{cwd}/out/restored.sqlite"
+      "path": "{cwd}/out/restored.sqlite",
+      "umask": "{umask}"
     }
   },
   "response": {

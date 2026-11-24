@@ -3,7 +3,7 @@
   "operation": "databases.restore",
   "args": {
     "name": "main.sqlite",
-    "to": "/tmp/r.sqlite",
+    "path": "/tmp/r.sqlite",
     "version": 3,
     "time": "2026-11-15T09:30:00Z"
   },

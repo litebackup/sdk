@@ -1,11 +1,5 @@
 {
-  "description": "A failed close does not release; the database stays acquired.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
-    "durability": "cloud",
-    "offload": true
-  },
+  "description": "A close that fails when the pool closes does not release; the database stays acquired.",
   "fail": [
     "close"
   ],
@@ -29,23 +23,26 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [
       "acquire",
       "open",
       "work",
+      "sync",
       "close"
     ],
     "acquire_body": {
       "name": "agents/42.sqlite",
-      "path": "{cwd}/agents/42.sqlite"
+      "path": "{cwd}/agents/42.sqlite",
+      "umask": "{umask}"
     },
     "release_body": null,
-    "raised": [
+    "raised": [],
+    "close_raised": [
       {
-        "code": "scope_cleanup_failed",
+        "code": "lease_cleanup_failed",
         "step": "close",
         "cause": "close",
         "details": {
@@ -56,5 +53,11 @@
         }
       }
     ]
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "cloud",
+    "offload": true
   }
 }

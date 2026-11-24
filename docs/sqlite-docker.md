@@ -24,14 +24,16 @@ RUN litebackup version
 Build the [standalone example](../examples/docker/cli.Dockerfile) with those two values. For a multi-platform release, supply the matching checksum in each platform's build.
 
 ```sh
+# artifacts[].sha256 of litebackup-linux-amd64 for 1.1.0 in the release metadata
+LITEBACKUP_SHA256=...
 docker build -f examples/docker/cli.Dockerfile --platform linux/amd64 \
-  --build-arg LITEBACKUP_VERSION=0.7.0 \
-  --build-arg LITEBACKUP_SHA256=762d9cc3fc11248629bbd3c59d1d68827a7a164de5f80ed02a5c53940bcfcf35 \
+  --build-arg LITEBACKUP_VERSION=1.1.0 \
+  --build-arg LITEBACKUP_SHA256="$LITEBACKUP_SHA256" \
   -t litebackup-cli:pinned .
 docker run --rm litebackup-cli:pinned litebackup version
 ```
 
-Supply `LITEBACKUP_TOKEN` at container runtime. A scheduled container can run `litebackup backup /data/main.sqlite --wait cloud` as its command. Applications can register continuous backup with the matching SDK as shown below.
+Supply `LITEBACKUP_API_KEY` at container runtime. A scheduled container can run `litebackup backup /data/main.sqlite` as its command. Applications can register continuous backup with the matching SDK as shown below.
 
 ## Run the example app
 
@@ -39,7 +41,7 @@ Supply `LITEBACKUP_TOKEN` at container runtime. A scheduled container can run `l
 **Machines → Add machine**. Build `litebackup-cli:pinned` as above using a CLI release matching the SDK. From the SDK repository root, run
 
 ```sh
-export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
+export LITEBACKUP_API_KEY='JOIN_TOKEN@your-instance.litebackup.cloud'
 docker compose -f examples/docker/compose.yaml up --build -d
 curl -X POST http://localhost:3000
 curl http://localhost:3000
@@ -51,9 +53,9 @@ a GET returns the count. It binds the host port to localhost. You can set
 
 The [app](../examples/docker/app.mjs) uses Node's SQLite driver and registers
 the file with `backups.start()`. Its [Dockerfile](../examples/docker/Dockerfile)
-builds the SDK from this checkout, copies the matching Linux CLI, and runs as `node` (UID 1000).
+builds the SDK from this repository, copies the matching Linux CLI, and runs as `node` (UID 1000).
 [Compose](../examples/docker/compose.yaml) starts the container again after a
-host reboot. The join token is only needed for the client's first join.
+host reboot. The join token is only needed for the client's first join; the client keeps its key while the variable holds the same token.
 
 ## Persist the database and client state
 

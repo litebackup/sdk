@@ -1,0 +1,12 @@
+{
+  "description": "An offload durability other than server or cloud sends nothing.",
+  "operation": "backups.start",
+  "args": {
+    "source": "/var/lib/app/tenants/**/*.sqlite",
+    "maximum_local_databases": 10,
+    "offload_durability": "bucket"
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

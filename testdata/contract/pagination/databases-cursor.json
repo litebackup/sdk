@@ -1,6 +1,6 @@
 {
   "description": "Database iteration follows next until it is absent.",
-  "operation": "databases.iterate",
+  "operation": "databases.all",
   "args": {},
   "item_key": "name",
   "exchanges": [

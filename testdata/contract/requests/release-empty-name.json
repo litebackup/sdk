@@ -1,0 +1,39 @@
+{
+  "description": "An empty name is sent as is, because name is required; the daemon answers for it.",
+  "operation": "databases.release",
+  "args": {
+    "name": ""
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/databases/release",
+    "query": {},
+    "body": {
+      "name": ""
+    }
+  },
+  "response": {
+    "database": {
+      "name": "agents/42.sqlite",
+      "path": "/var/lib/app/main.sqlite",
+      "role": "origin",
+      "state": "synced",
+      "acquired": true,
+      "failover": false,
+      "local_changed": false,
+      "synced_server": {
+        "version": 3
+      },
+      "synced_cloud": {
+        "version": 2
+      },
+      "journal_mode": "wal",
+      "page_count": 2,
+      "sync_count": 3,
+      "hint_misses": 0
+    },
+    "checkpointed": false,
+    "vacuumed": false,
+    "offloaded": false
+  }
+}

@@ -5,18 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
 const (
-	// TokenEnvironment holds the join token, TOKEN@HOST, a daemon joins with on its first start.
-	TokenEnvironment = "LITEBACKUP_TOKEN"
+	// APIKeyEnvironment holds the credential the daemon uses when it starts,
+	// when ConnectArgs.APIKey is empty: an API key, or a join token the
+	// daemon exchanges once for a key of the machine, then @ and the
+	// server's address.
+	APIKeyEnvironment = "LITEBACKUP_API_KEY"
 	// SessionEnvironment names the session when ConnectArgs.Session is empty.
 	SessionEnvironment = "LITEBACKUP_SESSION"
 	// BinaryPathEnvironment overrides the litebackup binary the SDK starts.
@@ -27,6 +32,9 @@ const (
 	socketName = "client.sock"
 	// launchTimeout bounds litebackup launch.
 	launchTimeout = 30 * time.Second
+	// launchOutputDelay is how long launch waits for its output once its
+	// context ended and the command was killed.
+	launchOutputDelay = time.Second
 )
 
 // SystemConfigurationPath records a `litebackup install service` install.
@@ -89,7 +97,7 @@ func loadUserConfiguration() *userConfiguration {
 // installed a service of their own, that user uses the directory it
 // recorded, whatever this process's environment. Everyone else uses
 // $XDG_RUNTIME_DIR/litebackup/<session>/client.sock, or a per-user directory
-// under the temporary directory.
+// under the temporary directory, which must be this user's alone.
 func SessionSocket(session string) (string, string, error) {
 	name := session
 	if name == "" {
@@ -99,9 +107,14 @@ func SessionSocket(session string) (string, string, error) {
 		name = DefaultSession
 	}
 	for index, character := range name {
-		letterOrDigit := character >= 'a' && character <= 'z' || character >= '0' && character <= '9'
-		if index == 0 && !letterOrDigit || !letterOrDigit && character != '-' && character != '_' && character != '.' {
-			return "", "", fmt.Errorf("session names use [a-z0-9._-] and start with a letter or digit, got %q", name)
+		letterOrDigit := character >= 'a' && character <= 'z' ||
+			character >= '0' && character <= '9'
+		if index == 0 && !letterOrDigit ||
+			!letterOrDigit && character != '-' && character != '_' && character != '.' {
+			return "", "", fmt.Errorf(
+				"session names use [a-z0-9._-] and start with a letter or digit, got %q",
+				name,
+			)
 		}
 	}
 	uid := os.Getuid()
@@ -116,6 +129,9 @@ func SessionSocket(session string) (string, string, error) {
 	runtimeRoot := os.Getenv("XDG_RUNTIME_DIR")
 	if runtimeRoot == "" {
 		runtimeRoot = filepath.Join(os.TempDir(), "litebackup-"+strconv.Itoa(uid))
+		if err := privateRuntimeDirectory(runtimeRoot); err != nil {
+			return "", "", err
+		}
 	}
 	return name, filepath.Join(runtimeRoot, "litebackup", name, socketName), nil
 }
@@ -135,13 +151,15 @@ func Binary() (string, error) {
 	return resolveBinary("")
 }
 
-// resolveBinary is Binary with an explicit override taking precedence.
+// resolveBinary is Binary with an explicit override taking precedence. An
+// override, the option or LITEBACKUP_PATH, that names no file is
+// binary_not_found; it never falls back to another binary.
 func resolveBinary(override string) (string, error) {
 	if override = strings.TrimSpace(override); override != "" {
-		return override, nil
+		return existingOverride(override)
 	}
 	if override = strings.TrimSpace(os.Getenv(BinaryPathEnvironment)); override != "" {
-		return override, nil
+		return existingOverride(override)
 	}
 	found, err := exec.LookPath("litebackup")
 	if err == nil {
@@ -150,12 +168,38 @@ func resolveBinary(override string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err == nil {
 		local := filepath.Join(home, ".local", "bin", "litebackup")
-		info, statErr := os.Stat(local)
-		if statErr == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+		stat, statErr := os.Stat(local)
+		if statErr == nil && !stat.IsDir() && stat.Mode()&0o111 != 0 {
 			return local, nil
 		}
 	}
-	return "", &Error{Code: CodeBinaryNotFound, Message: fmt.Sprintf("the litebackup command is not installed; set %s or install it with: %s", BinaryPathEnvironment, InstallCommand())}
+	return "", &Error{
+		Code: CodeBinaryNotFound,
+		Message: fmt.Sprintf(
+			"the litebackup command is not installed; set %s or install it with: %s",
+			BinaryPathEnvironment,
+			InstallCommand(),
+		),
+	}
+}
+
+// existingOverride returns an explicit binary path, or binary_not_found when
+// no file is there. A file that cannot run fails later, as launch_failed.
+func existingOverride(override string) (string, error) {
+	_, err := os.Stat(override)
+	if missingPath(err) {
+		return "", &Error{
+			Code: CodeBinaryNotFound,
+			Message: fmt.Sprintf(
+				"the litebackup binary %s does not exist; "+
+					"set BinaryPath or %s to it, or install it with: %s",
+				override,
+				BinaryPathEnvironment,
+				InstallCommand(),
+			),
+		}
+	}
+	return override, nil
 }
 
 // socketListening reports whether something accepts connections on the socket.
@@ -167,13 +211,52 @@ func socketListening(path string) bool {
 	return connection.Close() == nil
 }
 
+// launchRefusal is the code and message of the last error the launch
+// command reported as JSON, or launch_failed and its whole output when it
+// reported none. The code is drain_required when the launch refused another
+// credential for a client that holds write locks, and launch_failed
+// otherwise.
+func launchRefusal(output []byte) (code string, message string) {
+	code = CodeLaunchFailed
+	var refusal string
+	for line := range strings.SplitSeq(string(output), "\n") {
+		var launchDiagnostic struct {
+			Event   string `json:"event"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal([]byte(line), &launchDiagnostic) != nil {
+			continue
+		}
+		// A warning carries an event; an error does not.
+		if launchDiagnostic.Event == "" && launchDiagnostic.Code != "" &&
+			launchDiagnostic.Message != "" {
+			refusal = launchDiagnostic.Message
+			code = CodeLaunchFailed
+			if launchDiagnostic.Code == CodeDrainRequired {
+				code = CodeDrainRequired
+			}
+		}
+	}
+	if refusal == "" {
+		return CodeLaunchFailed, strings.TrimSpace(string(output))
+	}
+	return code, refusal
+}
+
 // launchDaemon starts the session daemon when nothing listens. It runs
 // `litebackup launch --session`, which takes the session's launch lock and
 // starts `litebackup daemon`, so concurrent processes start one daemon. The
-// daemon joins with token on its first start. Where `litebackup install
+// daemon uses apiKey, when set, as LITEBACKUP_API_KEY. Where `litebackup install
 // service` ran, systemd or launchd owns the daemon and the launch command says how to
 // reach or start the service instead.
-func launchDaemon(ctx context.Context, session string, socket string, token string, binaryPath string) error {
+func launchDaemon(
+	ctx context.Context,
+	session string,
+	socket string,
+	apiKey string,
+	binaryPath string,
+) error {
 	if socketListening(socket) {
 		return nil
 	}
@@ -181,20 +264,54 @@ func launchDaemon(ctx context.Context, session string, socket string, token stri
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, launchTimeout)
+	launchContext, cancel := context.WithTimeout(ctx, launchTimeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, binary, "launch", "--session", session)
+	command := exec.CommandContext(
+		launchContext,
+		binary,
+		"launch",
+		"--session",
+		session,
+		"--stdout-format",
+		"json",
+	)
+	// Once the context ends and the command is killed, stop waiting for its
+	// output too: a process it started may still hold the pipes open.
+	command.WaitDelay = launchOutputDelay
 	command.Env = append(os.Environ(), BinaryPathEnvironment+"="+binary)
-	if token != "" {
-		command.Env = append(command.Env, TokenEnvironment+"="+token)
+	if apiKey != "" {
+		command.Env = append(command.Env, APIKeyEnvironment+"="+apiKey)
 	}
 	output, err := command.CombinedOutput()
+	if err != nil && ctx.Err() != nil {
+		return &Error{
+			Code:    CodeCancelled,
+			Message: "starting Litebackup was cancelled: " + ctx.Err().Error(),
+			Err:     ctx.Err(),
+		}
+	}
 	if err != nil {
 		var exitError *exec.ExitError
 		if errors.As(err, &exitError) && len(strings.TrimSpace(string(output))) > 0 {
-			return &Error{Code: CodeLaunchFailed, Message: "starting Litebackup failed: " + strings.TrimSpace(string(output)), Err: err}
+			code, refusal := launchRefusal(output)
+			return &Error{
+				Code:    code,
+				Message: "starting Litebackup failed: " + refusal,
+				Err:     err,
+			}
 		}
-		return &Error{Code: CodeLaunchFailed, Message: "starting Litebackup failed: " + err.Error(), Err: err}
+		return &Error{
+			Code:    CodeLaunchFailed,
+			Message: startFailureMessage(binary, err),
+			Err:     err,
+		}
 	}
 	return nil
+}
+
+// missingPath reports whether a stat failed because nothing is at the path:
+// it, or a directory on its way, does not exist. A permission error is not
+// a missing path.
+func missingPath(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
 }

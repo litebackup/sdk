@@ -1,0 +1,33 @@
+{
+  "description": "cursor_expired ends a watch with that error, without retrying the same cursor, so the caller can choose a new one.",
+  "operation": "events.watch",
+  "args": {
+    "after": 7
+  },
+  "item_key": "id",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/events/list",
+        "query": {
+          "after": "7",
+          "wait_millis": "30000"
+        }
+      },
+      "response": {
+        "status": 410,
+        "body": {
+          "code": "cursor_expired",
+          "message": "events after 7 are no longer kept"
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [],
+    "error": {
+      "code": "cursor_expired"
+    }
+  }
+}

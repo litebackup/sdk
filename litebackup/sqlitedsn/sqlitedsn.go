@@ -21,7 +21,9 @@ import (
 )
 
 // ErrNoFile reports a DSN that opens an in-memory or temporary database.
-var ErrNoFile = errors.New("the DSN opens an in-memory or temporary database, which has no file to back up; open it from a path")
+var ErrNoFile = errors.New(
+	"the DSN opens an in-memory or temporary database, which has no file to back up; open it from a path",
+)
 
 // Modernc returns the absolute path of the file modernc.org/sqlite (driver
 // "sqlite") opens for dsn. Relative paths resolve against the working directory.
@@ -72,7 +74,11 @@ func resolveURI(uri string) (string, error) {
 			authority = rest[2 : 2+authorityEnd]
 		}
 		if authority != "" && authority != "localhost" {
-			return "", fmt.Errorf("SQLite opens only local files, and %q names host %q", uri, authority)
+			return "", fmt.Errorf(
+				"SQLite opens only local files, and %q names host %q",
+				uri,
+				authority,
+			)
 		}
 		rest = rest[2+len(authority):]
 	}
@@ -90,7 +96,11 @@ func resolveURI(uri string) (string, error) {
 		key, keyErr := decode(encodedKey)
 		value, valueErr := decode(encodedValue)
 		if keyErr != nil || valueErr != nil {
-			return "", fmt.Errorf("decoding the parameters of %q: %w", uri, errors.Join(keyErr, valueErr))
+			return "", fmt.Errorf(
+				"decoding the parameters of %q: %w",
+				uri,
+				errors.Join(keyErr, valueErr),
+			)
 		}
 		if key == "mode" && value == "memory" || key == "vfs" && value == "memdb" {
 			return "", ErrNoFile

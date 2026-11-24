@@ -1,0 +1,10 @@
+{
+  "description": "Status refuses a limit past 1000; nothing is sent.",
+  "operation": "session.status",
+  "args": {
+    "limit": 1001
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

@@ -41,7 +41,7 @@ export class FakeDaemon {
         const text = Buffer.concat(chunks).toString("utf8");
         const request: FakeRequest = { method: req.method ?? "", path: url.pathname, query: url.searchParams, body: text ? JSON.parse(text) : undefined, headers: req.headers };
         daemon!.requests.push(request);
-        res.setHeader("x-litebackup-client-version", "1.0.0");
+        res.setHeader("litebackup-client-version", "1.1.0");
         res.setHeader("content-type", "application/json");
         const route = daemon!.routes.get(`${request.method} ${request.path}`);
         if (!route) {
@@ -55,14 +55,26 @@ export class FakeDaemon {
       });
     });
     daemon = new FakeDaemon(directory, socketPath, server);
-    daemon.route("GET /v1/status/show", () => [200, { session, server: "http://example", client_version: "1.0.0", session_id: "s", watch: "inotify", databases: [] }]);
-    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    daemon.route("GET /v1/status/show", () => [200, { session, server: "http://example", client_version: "1.1.0", session_id: "s", watch: "inotify", databases: [] }]);
+    await daemon.serve();
     t.after(async () => {
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await daemon!.stop();
       await rm(directory, { recursive: true, force: true });
     });
     return daemon;
+  }
+
+  /** Listens on the daemon's socket and answers there until stop. */
+  async serve(): Promise<void> {
+    await new Promise<void>((resolve) => this.server.listen(this.socketPath, resolve));
+  }
+
+  /** Closes the socket and every connection, as a daemon that exits does; calls then fail with connection_failed until serve. */
+  async stop(): Promise<void> {
+    if (!this.server.listening) return;
+    this.server.closeAllConnections();
+    await new Promise<void>((resolve) => this.server.close(() => resolve()));
+    await rm(this.socketPath, { force: true });
   }
 
   /** Sets the answer for "METHOD /path". */

@@ -1,8 +1,17 @@
 {
   "name": "@litebackup/sdk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Back up, replicate, and restore SQLite databases with Litebackup",
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/litebackup/sdk.git",
+    "directory": "typescript"
+  },
+  "bugs": {
+    "url": "https://github.com/litebackup/sdk/issues"
+  },
+  "homepage": "https://litebackup.com/sdk",
   "type": "module",
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -37,10 +46,10 @@
     "prepack": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\" && npm run build"
   },
   "optionalDependencies": {
-    "@litebackup/bin-darwin-arm64": "1.0.0",
-    "@litebackup/bin-darwin-x64": "1.0.0",
-    "@litebackup/bin-linux-arm64": "1.0.0",
-    "@litebackup/bin-linux-x64": "1.0.0"
+    "@litebackup/bin-darwin-arm64": "1.1.0",
+    "@litebackup/bin-darwin-x64": "1.1.0",
+    "@litebackup/bin-linux-arm64": "1.1.0",
+    "@litebackup/bin-linux-x64": "1.1.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "7.6.13",

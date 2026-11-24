@@ -5,273 +5,200 @@
 Back up SQLite to your own server and bucket, keep live readonly replicas,
 and move databases between machines. Your app keeps using its SQLite driver.
 
-```ts
-import Database from "better-sqlite3";
-import { Litebackup } from "@litebackup/sdk";
-import { databasePath } from "@litebackup/sdk/better-sqlite3";
-
-const litebackup = new Litebackup();
-
-const db = new Database("/var/lib/app/main.sqlite");
-await litebackup.backups.start(databasePath(db)); // Continuous backup runs in the litebackup background process.
-```
-
-```python
-import sqlite3
-from litebackup import Litebackup
-from litebackup.integrations.sqlite3 import database_path
-
-db = sqlite3.connect("/var/lib/app/main.sqlite")
-with Litebackup() as litebackup:
-    litebackup.backups.start(database_path(db))
-```
-
-Or add backups to an existing app with the CLI:
-
-```sh
-litebackup start /var/lib/app/main.sqlite
-```
+Litebackup has three parts: a **server** you run, which keeps versions and
+uploads them encrypted to **your bucket**, and a **client** on each app
+machine, which the SDKs start for you and which backs up your SQLite files
+while your app keeps writing to them.
 
 https://github.com/user-attachments/assets/0a48622a-4a70-4f28-a99f-5cfa109ce421
 
 [Website](https://litebackup.com) · [Pricing](https://litebackup.com/pricing) ·
 [Documentation](docs/README.md) · [API reference](docs/sdk-reference.md)
 
-## Install your Litebackup server
+## Quickstart
 
-Litebackup is self-hosted. Run the server daemon on a dedicated Linux VM on AWS,
-Google Cloud, DigitalOcean, Hetzner, or another provider. It receives changes
-from your app machines and uploads encrypted backups to your own bucket.
+### 1. Install your server
 
-For a small deployment, start with **2 vCPUs, 2–4 GB RAM, and an SSD** on a fresh
-Debian 13 or Ubuntu 26.04 LTS VM, with a public IP and inbound TCP 443 open.
-Size the disk for your databases, write volume, and recent history.
-
-<a href="https://cloud.digitalocean.com/droplets/new?image=debian-13-x64&amp;refcode=13cb93d1ec16"><img src="docs/assets/digitalocean.svg" width="20" height="20" alt=""> Create a Debian 13 Droplet on DigitalOcean</a> (referral link). Follow the [DigitalOcean setup guide](https://litebackup.com/install-digitalocean) for firewall and sizing details.
-
-SSH into the VM and run:
+On a fresh Debian 13 or Ubuntu 26.04 LTS VM with a public IP and inbound TCP
+443 open (2 vCPUs, 2–4 GB RAM, and an SSD is plenty to start), run:
 
 ```sh
 curl -fsSL https://litebackup.com/server.sh | bash
 ```
 
-1. Open the link the installer prints and claim your instance.
-2. Add an **Amazon S3, Cloudflare R2, Google Cloud Storage, or S3-compatible bucket**.
-3. Save your recovery kit or set a recovery passphrase, and choose retention.
-4. Open **Machines → Add machine** to get a join token.
+<a href="https://cloud.digitalocean.com/droplets/new?image=debian-13-x64&amp;refcode=13cb93d1ec16"><img src="docs/assets/digitalocean.svg" width="20" height="20" alt=""> Create a Debian 13 Droplet on DigitalOcean</a> (referral link), or use AWS, Google Cloud, Hetzner, or any other provider.
 
-The installer gives you an HTTPS address and a web console. Your server
-encrypts backups before uploading them. Keep your recovery kit or passphrase
-off the VM; you'll need it if you lose the server.
+Open the link it prints, claim your instance, add an S3, R2, Google Cloud
+Storage, or S3-compatible bucket, and save your recovery kit or set a recovery
+passphrase; keep it off the VM. Then open **Machines → Add machine** and copy
+the token.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/console-dark.png">
   <img src="docs/assets/console.png" alt="Litebackup console showing database backup status, versions, and the machine writing each database">
 </picture>
 
-[Server setup, networking, and sizing →](docs/litebackup-server.md)
+[Server setup, networking, and sizing →](docs/litebackup-server.md) ·
 [Bucket providers and permissions →](docs/sqlite-cloud-backup.md)
 
-## Connect your app
-
-**TypeScript / Node.js 22+**
+### 2. Install the SDK on your app machine
 
 ```sh
-npm install @litebackup/sdk
-export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
-```
+# TypeScript, Node.js 22+
+npm install @litebackup/sdk better-sqlite3
 
-The package includes the Linux and macOS client (x64 and arm64). It starts
-and joins automatically on first use. Keep npm optional dependencies enabled.
-
-`LITEBACKUP_TOKEN` is the **join token plus server address** from Machines →
-Add machine. A persistent session joins once and reuses its machine identity
-across restarts. A fresh foreground job uses a temporary identity for that run.
-See [agent fleets](docs/sqlite-fleet.md) and [serverless jobs](docs/sqlite-serverless.md).
-
-**Python 3.11+**
-
-```sh
+# Python 3.11+
 pip install litebackup
-export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
-```
 
-Wheels for Linux (glibc and musl) and macOS, on x64 and arm64, include the
-client. Elsewhere pip installs the source package, which uses an installed
-`litebackup` command. Django, FastAPI, SQLAlchemy, and aiosqlite support is
-in `litebackup.integrations`; see the [Python guide](python/README.md).
-
-**CLI / Go**
-
-Install the command on each app machine, then join as the user running your app:
-
-```sh
+# Go: the SDK runs the litebackup command, so install it too
 curl -fsSL https://litebackup.com/cli.sh | bash
-export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
-litebackup up "$LITEBACKUP_TOKEN"
+go mod init example.com/app && go get github.com/litebackup/sdk/litebackup modernc.org/sqlite
+
+# Every language: the join token from Machines → Add machine, or an API key
+export LITEBACKUP_API_KEY='JOIN_TOKEN@your-instance.litebackup.cloud'
 ```
 
-```sh
-go get github.com/litebackup/sdk/litebackup
+The npm package and the Linux and macOS wheels include the client; it starts
+and joins your server on first use.
+
+### 3. Back up a database
+
+Register the file your app opens. `backups.start` returns once the rule is
+saved; the client then backs up every change in the background. Call it on
+every start: the same path and settings return the saved rule.
+
+```ts
+import { mkdirSync } from "node:fs";
+import Database from "better-sqlite3";
+import { Litebackup } from "@litebackup/sdk";
+
+mkdirSync("data", { recursive: true });
+const path = "data/main.sqlite";
+const db = new Database(path);
+db.exec("CREATE TABLE IF NOT EXISTS notes (body TEXT)");
+db.prepare("INSERT INTO notes (body) VALUES (?)").run("hello");
+
+const litebackup = new Litebackup();
+const rule = await litebackup.backups.start(path);
+const status = await litebackup.databases.sync(rule.name); // optional: wait until your server has it
+console.log(`${rule.name} version ${status.syncedServer.version} is on your server`);
 ```
 
-For backups that resume after a reboot, [install the client as a service](docs/litebackup-client.md#join-and-register).
-The [client guide](docs/litebackup-client.md) also covers sessions, permissions, and containers.
+```python
+import os
+import sqlite3
 
-## Back up without slowing startup
+from litebackup import Litebackup
 
-Pass the database's path to `backups.start`. It returns when the daemon saves
-the local rule; discovery and uploads run in the background. Call it on every
-start: the same path and settings return the saved rule.
+os.makedirs("data", exist_ok=True)
+path = "data/main.sqlite"
+db = sqlite3.connect(path)
+db.execute("CREATE TABLE IF NOT EXISTS notes (body TEXT)")
+db.execute("INSERT INTO notes (body) VALUES (?)", ("hello",))
+db.commit()
 
-The opening example uses `better-sqlite3`. `@litebackup/sdk/node-sqlite`,
-`@litebackup/sdk/drizzle`, and the Python integrations for sqlite3, aiosqlite,
-SQLAlchemy, Django, and FastAPI get the path from the handle or configuration
-the app already has. With any other driver, pass the filename. In Go,
-`sqlitedsn` resolves the DSN you open:
+with Litebackup() as litebackup:
+    rule = litebackup.backups.start(path)
+    status = litebackup.databases.sync(rule.name)  # optional: wait until your server has it
+    print(f"{rule.name} version {status.synced_server.version} is on your server")
+```
 
 ```go
-import "github.com/litebackup/sdk/litebackup"
+// main.go; run it with: go run .
+package main
 
-// ctx is your application's context; the SQLite file already exists.
-_, err := litebackup.StartBackup(ctx, "/var/lib/app/main.sqlite", nil)
-if err != nil {
-    return err
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/litebackup/sdk/litebackup"
+	_ "modernc.org/sqlite"
+)
+
+func main() {
+	ctx := context.Background()
+	if err := os.MkdirAll("data", 0o755); err != nil {
+		log.Fatal(err)
+	}
+	path := "data/main.sqlite"
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS notes (body TEXT)"); err != nil {
+		log.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO notes (body) VALUES (?)", "hello"); err != nil {
+		log.Fatal(err)
+	}
+
+	rule, err := litebackup.StartBackup(ctx, path, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	client, err := litebackup.Default(ctx) // the client the package functions share
+	if err != nil {
+		log.Fatal(err)
+	}
+	status, err := client.Sync(ctx, rule.Name) // optional: wait until your server has it
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("%s version %d is on your server\n", rule.Name, status.SyncedServer.Version)
 }
 ```
 
-Your app writes to its local SQLite files as usual, and Litebackup syncs changes
-in the background. Keep those files on a persistent disk or volume so they
-remain available across restarts and redeploys.
+Or, with no code changes: `litebackup start data/main.sqlite`. When your code
+has only a connection, not its path, see [what the path helpers do](docs/sqlite-integrations.md#what-the-path-helpers-do).
 
-[Drivers, frameworks, and writing an adapter →](docs/sqlite-integrations.md)
-[Continuous backup, globs, and durability →](docs/sqlite-backup.md)
-[Complete Go examples →](docs/sqlite-go.md)
+### 4. Restore it
 
-## A database per tenant
-
-Keep customers in separate SQLite files and give their backups stable names:
+Restore the newest version, or one from any time your retention keeps, into a
+new file, on this or any joined machine:
 
 ```ts
+import Database from "better-sqlite3";
 import { Litebackup } from "@litebackup/sdk";
 
 const litebackup = new Litebackup();
+await litebackup.databases.restore("main.sqlite", { path: "data/restored.sqlite" });
+console.log(new Database("data/restored.sqlite").prepare("SELECT body FROM notes").all());
+```
 
-await litebackup.backups.start("/var/lib/app/tenants/**/*.sqlite", { prefix: "tenants/" });
+```python
+with Litebackup() as litebackup:
+    litebackup.databases.restore("main.sqlite", path="data/restored.sqlite")
+print(sqlite3.connect("data/restored.sqlite").execute("SELECT body FROM notes").fetchall())
 ```
 
 ```sh
-litebackup start '/var/lib/app/tenants/**/*.sqlite' tenants/
+litebackup restore main.sqlite "${PWD}/data/restored.sqlite"
+sqlite3 data/restored.sqlite 'SELECT body FROM notes'
 ```
 
-Use `litebackup rules` to find the saved backup rule. Run `litebackup stop --rule ID` to stop the entire glob, including future matches. For a file registered individually, use its remote name, such as `litebackup stop main.sqlite`.
+Restore checks the new file and never overwrites an existing one. Pass `time`
+(`--time 2026-11-15T09:30:00Z`) or `version` for an earlier version.
+To roll back under the same name, revert: `databases.revert(name, { version })`
+(`litebackup revert main.sqlite --version 2`) publishes that version's
+content again as the newest version, and every later version stays
+restorable.
+[Point-in-time restore and server recovery →](docs/sqlite-restore.md)
 
-`42.sqlite` becomes `tenants/42.sqlite`; new matching files are picked up too.
-Each name has one writer. Use a prefix per shard; a second machine trying
-to back up the same name reports `busy` in status.
+## What else you can do
 
-[Tenant routing, naming, and moving a tenant between machines →](docs/sqlite-multitenancy.md)
-
-## A database per agent
-
-Take the agent's database for one run. The managed scope acquires it, opens
-it, runs your code, closes it, and releases it; the next machine continues
-from the released version.
-
-```ts
-import { mkdir } from "node:fs/promises";
-import { Litebackup } from "@litebackup/sdk";
-import { adapter } from "@litebackup/sdk/node-sqlite";
-
-const litebackup = new Litebackup();
-
-await mkdir("/var/lib/app/agents", { recursive: true });
-await litebackup.databases.managed("agents/42.sqlite",
-  { to: "/var/lib/app/agents/42.sqlite", durability: "cloud", offload: true, adapter: adapter() },
-  (db) => {
-    db.exec("CREATE TABLE IF NOT EXISTS memory (body TEXT)");
-    db.prepare("INSERT INTO memory (body) VALUES (?)").run("Tests passed on main");
-  });
-```
-
-`durability: "cloud"` returns once the bucket holds the run's last version;
-`offload: true` then removes the local file. What the work does not commit is
-rolled back. If closing the database fails, it is not released, so no other
-machine writes while a connection may still be open.
-
-[Complete agent examples, failures, retries, and local disk →](docs/sqlite-agent-state.md)
-
-## Read from another machine
-
-On a second machine joined to the same server:
-
-```ts
-import { Litebackup } from "@litebackup/sdk";
-
-const litebackup = new Litebackup();
-
-await litebackup.replicas.start("main.sqlite", { to: "/var/lib/app/reporting.sqlite" });
-// The first version is local. Open reporting.sqlite with your driver in readonly mode.
-```
-
-```sh
-litebackup replicate main.sqlite --to /var/lib/app/reporting.sqlite
-# Or follow a whole namespace, including new databases:
-litebackup replicate --prefix tenants --to /var/lib/app/replicas
-```
-
-The replica keeps updating in the background and can be behind the writer.
-
-[Readonly connections, namespace replication, and stopping replicas →](docs/sqlite-replication.md)
-
-## Restore a previous version
-
-```ts
-import { Litebackup } from "@litebackup/sdk";
-
-const litebackup = new Litebackup();
-
-console.log(await litebackup.databases.versions("main.sqlite"));
-await litebackup.databases.restore("main.sqlite", {
-  to: "/tmp/main-restored.sqlite",
-  time: new Date("2026-11-15T09:30:00Z"),
-});
-```
-
-```sh
-litebackup restore main.sqlite --to /tmp/main-restored.sqlite \
-  --time 2026-11-15T09:30:00Z
-```
-
-Restore checks the new file and never overwrites an existing one. Retention
-settings determine which versions you can restore.
-
-[Restore drills, point-in-time selection, and server recovery →](docs/sqlite-restore.md)
-
-## Back up once, then finish
-
-For recurring jobs on fresh workers, choose **Multiple machines** in
-**Machines → Add machine**. Each foreground command or `backups.once()` call
-that enrolls spends one use, including retries. A single glob can back up
-many files with one enrollment. A previously joined session reuses its identity.
-
-Use foreground `backup` in scheduled jobs. The job holds its writer lock until the selected destination acknowledges the version. To wait for the bucket:
-
-```sh
-litebackup backup /var/lib/app/exports/main.sqlite scheduled/ --wait cloud
-```
-
-```ts
-import { Litebackup } from "@litebackup/sdk";
-
-const litebackup = new Litebackup();
-
-await litebackup.backups.once("/var/lib/app/exports/main.sqlite", { prefix: "scheduled/", wait: "cloud" });
-```
-
-[One-shot jobs and bounded waits →](docs/sqlite-backup-script.md) ·
-[Cron and Kubernetes CronJob →](docs/sqlite-cron-backup.md) ·
-[Temporal activities and schedules →](docs/sqlite-temporal.md)
+| Task | Guide |
+| --- | --- |
+| Back up every tenant's database with one glob, including new ones | [Multitenancy](docs/sqlite-multitenancy.md) |
+| Move an agent's or customer's database between machines, one writer at a time | [Agent state](docs/sqlite-agent-state.md) |
+| Keep live readonly replicas on other machines | [Replication](docs/sqlite-replication.md) |
+| Keep writing when an app server goes down | [High availability](https://litebackup.com/failover) |
+| Back up once from a cron job, CI, or a serverless function | [One-shot jobs](docs/sqlite-backup-script.md), [cron](docs/sqlite-cron-backup.md), [serverless](docs/sqlite-serverless.md) |
+| Use your driver or framework: better-sqlite3, node:sqlite, Drizzle, sqlite3, aiosqlite, SQLAlchemy, Django, FastAPI, Go | [Integrations](docs/sqlite-integrations.md) |
+| Run the client as a service, in Docker, or under its own user | [Client runtime](docs/litebackup-client.md), [Docker](docs/sqlite-docker.md) |
 
 ## Frequently asked questions
 
@@ -302,13 +229,22 @@ for details.
 
 ### When should I wait for a backup?
 
-Foreground `backup` waits for the server. Pass `--wait cloud` to wait for bucket storage. Applications can await `backups.start` during startup and monitor upload progress through status.
+`backups.start` only saves the rule; uploads run in the background, and status
+shows how far each database got. Foreground jobs (`backups.once`, `litebackup
+backup`) and the release that ends a pool's lease wait for your server by default. That is enough
+in most cases: your server keeps the version and archives it to your bucket
+after its archive delay. Until it does, losing the server's disk and the app's copy at
+the same time loses those changes, so wait for `cloud` when a job is the only
+copy and its machine goes away afterwards.
 
-### What is LITEBACKUP_TOKEN?
+### What is LITEBACKUP_API_KEY?
 
-A join token plus your server address (`JOIN_TOKEN@HOST`), used when the client
-joins. Persistent sessions save their identity. Fresh foreground jobs use a temporary identity. See
-[join tokens and client credentials](docs/litebackup-client.md#join-and-register).
+The one credential a machine needs, then @ and your server address: a join
+token (`JOIN_TOKEN@HOST`), which the client exchanges once for a key of the
+machine, or an API key (`API_KEY@HOST`), which it uses as it is. Persistent
+sessions save their key and use it until the variable holds a different
+credential. Fresh foreground jobs use a temporary identity. See
+[client credentials](docs/litebackup-client.md#join-and-register).
 
 ## Go further
 
@@ -322,4 +258,3 @@ joins. Persistent sessions save their identity. Fresh foreground jobs use a temp
 | [Client runtime](docs/litebackup-client.md) | Sessions, credentials, service installs, Docker, shutdown |
 | [Storage providers](docs/sqlite-cloud-backup.md) | S3, R2, GCS, and other S3-compatible buckets |
 | [Troubleshooting](docs/sqlite-backup-errors.md) | Join failures, name conflicts, timeouts, and diagnostics |
-| [Development](docs/sdk-development.md) | Build, tests, API generation, and release verification |

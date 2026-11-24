@@ -4,11 +4,11 @@
   "response": {
     "status": 426,
     "content_type": "application/json",
-    "body": "{\"code\":\"sdk_unsupported\",\"message\":\"SDK version 0.1.0 is older than the minimum 0.4.0 this client supports; upgrade the SDK\"}"
+    "body": "{\"code\":\"sdk_unsupported\",\"message\":\"SDK version 1.0.0 is older than the minimum 1.1.0 this client supports; upgrade the SDK\"}"
   },
   "expect": {
     "code": "sdk_unsupported",
-    "message": "SDK version 0.1.0 is older than the minimum 0.4.0 this client supports; upgrade the SDK",
+    "message": "SDK version 1.0.0 is older than the minimum 1.1.0 this client supports; upgrade the SDK",
     "status": 426,
     "details": {}
   }

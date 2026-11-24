@@ -1,9 +1,5 @@
 {
-  "description": "Without to, the scope opens the path acquire returned.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "durability": "server"
-  },
+  "description": "Without a path, the lease opens the path acquire returned.",
   "fail": [],
   "acquire_response": {
     "database": {
@@ -25,25 +21,32 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [
       "acquire",
       "open",
       "work",
+      "sync",
       "close",
       "release"
     ],
     "acquire_body": {
-      "name": "agents/42.sqlite"
+      "name": "agents/42.sqlite",
+      "umask": "{umask}"
     },
     "open_path": "/var/lib/app/agents/42.sqlite",
     "release_body": {
       "name": "agents/42.sqlite",
-      "wait": "server",
+      "durability": "server",
       "timeout_millis": 600000
     },
-    "raised": []
+    "raised": [],
+    "close_raised": []
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "durability": "server"
   }
 }

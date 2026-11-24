@@ -28,6 +28,8 @@ for (let index = 2; index < process.argv.length; index++) {
   else positional.push(argument);
 }
 if (positional.length !== 2 || !version) fail(usage);
+const packageVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+if (version !== packageVersion) fail(`--version ${version} is not the package's version ${packageVersion}; every release is lockstep`);
 const [releaseDirectory, metadataPath] = positional;
 
 function fail(message) {
@@ -52,10 +54,10 @@ for (const platform of platforms) {
   const file = release.files.find((candidate) => candidate.name === platform.release_file);
   if (!file) fail(`release ${version} has no ${platform.release_file}`);
   const source = join(releaseDirectory, file.filename);
-  if (!existsSync(source)) {
-    console.warn(`skipping ${platform.os}-${platform.arch}: ${source} is missing`);
-    continue;
-  }
+  if (!existsSync(source)) fail(`${source} is missing; every platform is staged together`);
+  const platformPackage = join(npmRoot, `${platform.os}-${platform.arch}`, "package.json");
+  const platformVersion = JSON.parse(readFileSync(platformPackage, "utf8")).version;
+  if (platformVersion !== version) fail(`${platformPackage} is version ${platformVersion}, not ${version}`);
   const content = readFileSync(source);
   const digest = createHash("sha256").update(content).digest("hex");
   if (digest !== file.sha256 || content.length !== file.size) {
@@ -63,7 +65,6 @@ for (const platform of platforms) {
   }
   verified.push({ platform, source });
 }
-if (verified.length === 0) fail(`no files of release ${version} found in ${releaseDirectory}`);
 
 for (const { platform, source } of verified) {
   const target = join(npmRoot, `${platform.os}-${platform.arch}`, "bin", "litebackup");

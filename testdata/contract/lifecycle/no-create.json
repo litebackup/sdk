@@ -1,12 +1,5 @@
 {
-  "description": "With create false, a missing file is left missing and acquire decides.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
-    "durability": "cloud",
-    "offload": true,
-    "create": false
-  },
+  "description": "With require_existing, a missing file is left missing and acquire decides.",
   "fail": [],
   "acquire_response": {
     "database": {
@@ -28,28 +21,38 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [
       "acquire",
       "open",
       "work",
+      "sync",
       "close",
       "release"
     ],
     "acquire_body": {
       "name": "agents/42.sqlite",
-      "path": "{cwd}/agents/42.sqlite"
+      "path": "{cwd}/agents/42.sqlite",
+      "umask": "{umask}"
     },
     "open_path": "{cwd}/agents/42.sqlite",
     "release_body": {
       "name": "agents/42.sqlite",
-      "wait": "cloud",
+      "durability": "cloud",
       "timeout_millis": 600000,
       "offload": true
     },
     "raised": [],
-    "missing_file": "{cwd}/agents/42.sqlite"
+    "missing_file": "{cwd}/agents/42.sqlite",
+    "close_raised": []
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "cloud",
+    "offload": true,
+    "require_existing": true
   }
 }

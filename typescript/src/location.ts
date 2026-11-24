@@ -17,6 +17,21 @@ export function absolutePath(source: PathSource): string {
   return isAbsolute(source) ? resolve(source) : resolve(process.cwd(), source);
 }
 
+/**
+ * Refuses a path that begins or ends with whitespace. Some SQLite drivers,
+ * such as better-sqlite3, trim the path they are given, so they would open a
+ * different file than the one named.
+ */
+export function assertDriverSafePath(path: string): void {
+  if (path !== path.trim()) {
+    throw new LitebackupError(
+      "invalid_argument",
+      `the path ${JSON.stringify(path)} begins or ends with whitespace, which the SQLite driver would strip and so open a different file; remove the whitespace`,
+      0,
+    );
+  }
+}
+
 /** Renders a time as the API wants it: UTC with Z, fractional seconds only when they are not zero. */
 export function wireTime(time: Date | string): string {
   const date = time instanceof Date ? time : new Date(time);

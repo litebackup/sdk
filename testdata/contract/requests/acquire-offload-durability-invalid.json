@@ -1,0 +1,12 @@
+{
+  "description": "An offload durability other than server or cloud sends nothing.",
+  "operation": "databases.acquire",
+  "args": {
+    "name": "agents/42.sqlite",
+    "offload_on_release": true,
+    "offload_durability": "Cloud"
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

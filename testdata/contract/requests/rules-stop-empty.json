@@ -1,0 +1,10 @@
+{
+  "description": "Stopping a rule needs its ID; nothing is sent.",
+  "operation": "rules.stop",
+  "args": {
+    "id": ""
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

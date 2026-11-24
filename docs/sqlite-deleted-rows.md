@@ -11,7 +11,7 @@ versions and restore the one just before the change:
 
 ```sh
 litebackup versions main.sqlite
-litebackup restore main.sqlite --to /tmp/main-before-delete.sqlite \
+litebackup restore main.sqlite /tmp/main-before-delete.sqlite \
   --time 2026-11-15T09:30:00Z
 ```
 

@@ -4,10 +4,10 @@
   "response": {
     "status": 409,
     "content_type": "application/json",
-    "body": "{\"code\":\"exists\",\"message\":\"/var/lib/app/main.sqlite already has a backup rule with other settings\",\"rule\":{\"id\":\"01a1-rule\",\"path\":\"/var/lib/app/main.sqlite\",\"name\":\"main.sqlite\",\"prefix\":\"\",\"watch\":\"inotify\",\"maximum_local_databases\":0,\"failover\":false}}"
+    "body": "{\"code\":\"rule_exists\",\"message\":\"/var/lib/app/main.sqlite already has a backup rule with other settings\",\"rule\":{\"id\":\"01a1-rule\",\"path\":\"/var/lib/app/main.sqlite\",\"name\":\"main.sqlite\",\"prefix\":\"\",\"watch\":\"inotify\",\"maximum_local_databases\":0,\"offload_durability\":\"server\",\"offload_rollback_journal\":false,\"failover\":false}}"
   },
   "expect": {
-    "code": "exists",
+    "code": "rule_exists",
     "message": "/var/lib/app/main.sqlite already has a backup rule with other settings",
     "status": 409,
     "details": {
@@ -18,6 +18,8 @@
         "prefix": "",
         "watch": "inotify",
         "maximum_local_databases": 0,
+        "offload_durability": "server",
+        "offload_rollback_journal": false,
         "failover": false
       }
     }

@@ -1,4 +1,4 @@
-"""The standard library's sqlite3: the file a connection has open, and a managed-database adapter.
+"""The standard library's sqlite3: the file a connection has open, and a pool adapter.
 
 ::
 
@@ -14,8 +14,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from .._managed import ScopeAdapter
-from ._sqlite_uri import file_from_database_list
+from .._pool import Adapter
+from ._sqlite_uri import existing_file_uri, file_from_database_list, require_existing_file
 
 
 def database_path(connection: sqlite3.Connection, schema: str = "main") -> str:
@@ -29,24 +29,29 @@ def database_path(connection: sqlite3.Connection, schema: str = "main") -> str:
 
 class _Sqlite3Adapter:
     def __init__(self, connect_options: dict[str, Any]) -> None:
-        self._connect_options = connect_options
+        self._connect_options = {"check_same_thread": False, **connect_options, "uri": True}
 
     def open(self, path: str) -> sqlite3.Connection:
-        connection: sqlite3.Connection = sqlite3.connect(path, **self._connect_options)
+        require_existing_file(path)
+        connection: sqlite3.Connection = sqlite3.connect(existing_file_uri(path), **self._connect_options)
         return connection
 
-    def close(self, connection: sqlite3.Connection) -> None:
+    def close(self, db: sqlite3.Connection) -> None:
         try:
-            if connection.in_transaction:
-                connection.rollback()
+            if db.in_transaction:
+                db.rollback()
         finally:
-            connection.close()
+            db.close()
 
 
-def adapter(**connect_options: Any) -> ScopeAdapter[sqlite3.Connection]:
-    """A managed-database adapter: opens with ``sqlite3.connect(path, **connect_options)``.
+def adapter(**connect_options: Any) -> Adapter[sqlite3.Connection]:
+    """A pool adapter: opens an existing file with ``sqlite3.connect(uri, uri=True, **connect_options)``.
 
-    Closing rolls back a transaction the block left uncommitted, never commits it,
-    and closes the connection. Commit what the block should keep.
+    The URI is the file's ``file:`` URI with ``mode=rw``, so a missing file is never
+    created: it raises LitebackupError with code not_found. ``check_same_thread``
+    is False unless connect_options sets it, because a pool may open, use, and close
+    a connection on different threads; use it from one thread at a time. Closing
+    rolls back a transaction the block left uncommitted, never commits it, and
+    closes the connection. Commit what the block should keep.
     """
     return _Sqlite3Adapter(connect_options)

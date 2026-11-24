@@ -1,11 +1,5 @@
 {
   "description": "offload defaults to false and the cleanup timeout is sent.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
-    "durability": "server",
-    "cleanup_timeout": "2m"
-  },
   "fail": [],
   "acquire_response": {
     "database": {
@@ -27,26 +21,35 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [
       "acquire",
       "open",
       "work",
+      "sync",
       "close",
       "release"
     ],
     "acquire_body": {
       "name": "agents/42.sqlite",
-      "path": "{cwd}/agents/42.sqlite"
+      "path": "{cwd}/agents/42.sqlite",
+      "umask": "{umask}"
     },
     "open_path": "{cwd}/agents/42.sqlite",
     "release_body": {
       "name": "agents/42.sqlite",
-      "wait": "server",
+      "durability": "server",
       "timeout_millis": 120000
     },
-    "raised": []
+    "raised": [],
+    "close_raised": []
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "server",
+    "cleanup_timeout": "2m"
   }
 }

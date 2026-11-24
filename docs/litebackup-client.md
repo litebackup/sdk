@@ -23,27 +23,66 @@ With a join token from **Machines → Add machine**:
 
 ```sh
 curl -fsSL https://litebackup.com/cli.sh | bash
-export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
-litebackup up "$LITEBACKUP_TOKEN"
+export LITEBACKUP_API_KEY='JOIN_TOKEN@your-instance.litebackup.cloud'
+litebackup up "$LITEBACKUP_API_KEY"
 litebackup start '/var/lib/app/*.sqlite' app/
 ```
 
-`LITEBACKUP_TOKEN` and the SDK's `token` option accept a join token and server
-address: `JOIN_TOKEN@HOST`. They do not accept a server API key. On first join,
-the server gives the client its own machine API key, which it saves locally
-and uses for later requests. You can omit the join token after that as long
-as the client's saved state remains available.
+`LITEBACKUP_API_KEY`, the SDK's API key option, and `--api-key` take one
+credential, then @ and the server address: a join token (`JOIN_TOKEN@HOST`) or
+an API key (`API_KEY@HOST`). The client tells them apart by prefix: a join token
+starts with `litebackup_join_`, an API key with `litebackup_`. It exchanges a
+join token once for the machine's own API key; it uses an API key as it is.
+Either is saved locally and used for later requests, so you can omit the
+variable as long as the client's saved state remains available. An invite
+token, or any other value, is refused with `invalid_argument`.
 
-The SDK can join on first use, so `up` is optional for SDK apps. A client that
-already joined keeps its existing server and identity; changing the token
-does not move that session to another server. Server API keys are for direct
-requests to the [HTTPS API](http-api.md); this SDK talks to the local client.
+The SDK can join on first use, so `up` is optional for SDK apps. When the
+client starts, it uses the key it saved unless the variable holds a different
+credential: the same join token, or the same API key, for the same server
+address keeps the saved key and joins nothing. A different one replaces the
+saved key, joining again for a join token, and can move the session to
+another server. A client that is already running keeps its key until it
+restarts. `litebackup up` follows the same rule: run again with the
+credential the session joined with, it keeps the machine and joins nothing.
+With another credential, `up` saves the new key and restarts a running
+client in place.
+
+A write lock belongs to the key it was taken with. While the client holds
+any, a different credential is refused with `drain_required`, and nothing
+is sent or saved: from `up`, from a client start with another
+`LITEBACKUP_API_KEY`, and from an SDK that passes another `apiKey`. To
+change the key, drain first, then use the new credential:
+
+```sh
+litebackup drain
+litebackup up "$NEW_API_KEY"
+```
+
+An SDK app calls its shutdown (`Shutdown`, `session.shutdown()`) with the
+current credential, then connects with the new one. With no write lock held,
+the new credential is used at once. A client that stopped without a drain
+is started with its stored credential by `litebackup drain`, which then
+drains it. With a service, remove it, which drains it first and keeps
+this machine's join, then install it again with the new credential, as the
+same user and with the same session and state directory:
+
+```sh
+litebackup uninstall service
+litebackup install service --api-key "$NEW_API_KEY"
+```
+
+When the old key does not work, as once it is revoked, no drain can
+release its locks. `litebackup up --drop-locks "$NEW_API_KEY"` saves the new
+key and drops them at the client's next start; each database takes a new
+lock at its next sync, once the old session's lease ran out, and is checked
+against the server's head as after any drain.
 
 To keep backing up across reboots, install the client as a service. Run it as
 the user that owns your app's databases:
 
 ```sh
-litebackup install service --join "$LITEBACKUP_TOKEN"
+litebackup install service --api-key "$LITEBACKUP_API_KEY"
 litebackup start '/var/lib/app/*.sqlite' app/
 systemctl --user status litebackup
 journalctl --user -u litebackup -f
@@ -59,7 +98,7 @@ Run it as root for a system service that reaches every database, with
 `--user app` to run it as your app's user:
 
 ```sh
-sudo litebackup install service --user app --join "$LITEBACKUP_TOKEN"
+sudo litebackup install service --user app --api-key "$LITEBACKUP_API_KEY"
 sudo systemctl status litebackup
 ```
 
@@ -72,15 +111,15 @@ replica, acquire, and offload also need directory write permissions.
 
 | Setting | Meaning |
 | --- | --- |
-| `LITEBACKUP_TOKEN` | `JOIN_TOKEN@HOST` used when the client first joins |
+| `LITEBACKUP_API_KEY` | `JOIN_TOKEN@HOST` or `API_KEY@HOST`, used when the client starts |
 | `LITEBACKUP_SESSION` | Session name; `default` when unset |
 | `LITEBACKUP_PATH` | Override the client binary path |
 | `XDG_RUNTIME_DIR` | Root for per-user sockets when no service install recorded one |
 | `XDG_STATE_HOME` | Root for the client's persistent per-user state |
 
-A TypeScript `token` or `session` option overrides the environment. Use
-`new Litebackup({ token, session })` for an explicit client; Go uses
-`litebackup.Connect(ctx, &litebackup.ConnectArgs{Token: token, Session: session})`.
+A TypeScript `apiKey` or `session` option overrides the environment. Use
+`new Litebackup({ apiKey, session })` for an explicit client; Go uses
+`litebackup.Connect(ctx, &litebackup.ConnectArgs{APIKey: apiKey, Session: session})`.
 Each TypeScript client connects on its first socket operation. Go's socket
 helpers use a single process-wide client.
 
@@ -102,8 +141,16 @@ Use `backups.stop(name)` or Go `StopBackup(ctx, name)` for a single database by 
 Use `release()` for databases obtained with `acquire()`. Close every SQLite connection before releasing.
 
 `session.shutdown()` / `Shutdown()` drains and stops the entire session. Only use it
-when your process owns that session; another app can be sharing it. A service
-install handles daemon restarts and reboot startup through systemd or launchd.
+when your process owns that session; another app can be sharing it. A backup
+another machine writes holds no lock to release, so the drain leaves it
+waiting, and the next start waits for the lock again. A database the drain
+cannot sync or release is listed in `failed` with its code and message, and
+keeps any write lock it holds, and so is a conflicted copy whose writes
+are not on the server, with `conflict` and a message naming its file; then
+the session and the daemon stay, so
+check `failed`: it is empty only when every database was synced as asked
+and released.
+A service install handles daemon restarts and reboot startup through systemd or launchd.
 
 ## Containers and short-lived jobs
 

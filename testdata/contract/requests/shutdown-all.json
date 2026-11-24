@@ -1,8 +1,8 @@
 {
-  "description": "Shutdown with a wait and a timeout.",
+  "description": "Shutdown with a durability and a timeout, which could not drain one database.",
   "operation": "session.shutdown",
   "args": {
-    "wait": "cloud",
+    "durability": "cloud",
     "timeout": "1m"
   },
   "request": {
@@ -10,12 +10,18 @@
     "path": "/v1/session/shutdown",
     "query": {},
     "body": {
-      "wait": "cloud",
+      "durability": "cloud",
       "timeout_millis": 60000
     }
   },
   "response": {
     "released": 2,
-    "failed": []
+    "failed": [
+      {
+        "name": "orders.sqlite",
+        "code": "lock_unavailable",
+        "message": "another machine writes the database (worker-3)"
+      }
+    ]
   }
 }

@@ -1,27 +1,28 @@
 # Schedule SQLite backups with Cron or Kubernetes
 
 Run a backup script on a schedule when you need a job that backs up files
-and exits. Each run syncs the files to your bucket; later writes stay in the
+and exits. Each run syncs the files to your server; later writes stay in the
 local SQLite files for the next run. Keep them on [persistent storage](sqlite-backup.md#keep-the-files-on-persistent-storage).
 For apps that stay up, consider [continuous backup](sqlite-backup.md).
 
 ## Prepare the database host
 
-Install a [server](litebackup-server.md) and the CLI. Give the job access to the database directory and set `LITEBACKUP_TOKEN` in its environment. An existing joined session can reuse its machine identity.
+Install a [server](litebackup-server.md) and the CLI. Give the job access to the database directory and set `LITEBACKUP_API_KEY` in its environment. An existing joined session reuses its machine identity while the variable holds the credential it joined with.
 
 For disposable workers, select **Multiple machines** in **Machines → Add machine**.
-Each foreground command that enrolls spends one token use. The script below runs
+Each foreground command that joins spends one token use. The script below runs
 one command per path, so two paths on an hourly schedule need 48 uses per day,
-plus any retries that enroll. Set an expiry covering the schedule.
+plus any retries that join. Set an expiry covering the schedule.
 
 ```sh
-litebackup backup ./main.sqlite scheduled/ --wait cloud
+litebackup backup ./main.sqlite scheduled/
 ```
 
 ## Back up a list with the CLI
 
 The [script](../examples/cron/backup-sqlite.sh) backs up each path, waits for
-the bucket, and releases its writer lock. Install it somewhere
+your server, and releases its writer lock. Add `--durability cloud` to wait for the
+bucket too. Install it somewhere
 the cron user can run it, such as `/opt/app/backup-sqlite.sh`.
 
 ```sh
@@ -104,7 +105,7 @@ spec:
               image: YOUR_REGISTRY/litebackup-job:latest
               args: ["/data/exports/main.sqlite", "/data/exports/audit.sqlite"]
               env:
-                - name: LITEBACKUP_TOKEN
+                - name: LITEBACKUP_API_KEY
                   valueFrom:
                     secretKeyRef:
                       name: litebackup-join
@@ -123,7 +124,7 @@ app and grant that user access to the database volume. The app must create the
 export files before this job runs.
 
 `Forbid` only prevents overlap within this CronJob. It does not coordinate
-other CronJobs or writers using the same backup names. A fresh pod spends one use of the token for each foreground job. Each foreground job has its own writer session. A successful pod has waited for the bucket and released its locks.
+other CronJobs or writers using the same backup names. A fresh pod spends one use of the token for each foreground job. Each foreground job has its own writer session. A successful pod has waited for your server and released its locks.
 
 Kubernetes schedules are approximate and Jobs may be retried. Keep the job
 idempotent, use stable names, and alert on failed Jobs. See the

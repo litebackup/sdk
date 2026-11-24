@@ -1,5 +1,5 @@
 {
-  "description": "Offload posts the name.",
+  "description": "Offload posts the name; the daemon waits for the server by default.",
   "operation": "databases.offload",
   "args": {
     "name": "main.sqlite"

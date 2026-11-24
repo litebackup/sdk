@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  license:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every package ships the repository's license
+        run: for copy in python/LICENSE typescript/LICENSE typescript/npm/*/LICENSE; do cmp LICENSE "$copy"; done
+
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Vet and test
+        run: |
+          go vet ./...
+          go test -race ./...
+      - name: Test against the real SQLite drivers
+        working-directory: litebackup/internal/drivertest
+        run: go test ./...
+      - name: Build the Go example
+        working-directory: examples/goapp
+        run: go vet ./...
+      - name: Generated code is current
+        run: |
+          go generate ./litebackup
+          git diff --exit-code
+
+  typescript:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # The lockfile lists the platform binary packages of the release being built.
+      - run: npm install --no-package-lock --no-save --no-audit --no-fund
+      - run: npm test
+      - name: Generated types are current
+        run: |
+          npm run generate
+          git diff --exit-code src/generated
+      - name: Package contents
+        run: npm pack --dry-run
+
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Test
+        run: |
+          uv run --python ${{ matrix.python }} pytest
+          uv run --python ${{ matrix.python }} mypy src tests
+      - name: Lint
+        run: |
+          uv run ruff check
+          uv run ruff format --check src tests
+      - name: Generated models are current
+        if: matrix.python == '3.11'
+        run: |
+          scripts/generate
+          git diff --exit-code src/litebackup/_generated
+      - name: Build the source package and a wheel
+        if: matrix.python == '3.11'
+        run: uv build

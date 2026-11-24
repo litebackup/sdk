@@ -81,8 +81,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Write a version of a database to a new file and run quick_check. The path must be absolute, its directory must exist, and an existing file is never overwritten (409 exists). The file belongs to the user the daemon runs as. */
+        /** @description Write a version of a database to a new file and run quick_check. The path must be absolute, its directory must exist, and an existing file is never overwritten (409 file_exists). The file belongs to the user the daemon runs as. */
         post: operations["restoreDatabase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/databases/revert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Publish the content of a past version again as a new head, one past the current head, as git revert adds a commit; the head is not rewound, and the versions after the chosen one stay restorable. Set version or time. The database must be an origin this machine acquired or backs up, and its file closed; a file a process has open is refused with 409 still_open, a replica or a failover standby with 400 invalid_argument, and a file holding writes the server lacks with 409 conflict naming the file, which is left untouched. The client takes the write lock when it does not hold it (423 lock_unavailable when another machine holds its write lock), downloads the version, puts it in place of the file only while the file is closed and unchanged, syncs it at once, and gives back a lock it took once the new head is synced. When that sync fails for any reason but a lost lock or a refused file, which are final, the version stays in place and the client keeps the lock and syncs again on its own. Before it gives back a lock it took, it makes the checks a release makes, so writes an app made meanwhile sync first, and a file still open keeps the lock (409 still_open, or 409 changed when it changes during every sync), so release an acquired database once its app closes it. The server sees an ordinary sync. */
+        post: operations["revertDatabase"];
         delete?: never;
         options?: never;
         head?: never;
@@ -98,7 +115,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Sync a database now and wait for the server acknowledgement. */
+        /** @description Sync a database now and wait for the server acknowledgement. An acquired database that is released, by a release or a drain, does not sync and is refused with 400 invalid_argument; acquire it to sync its writes. */
         post: operations["syncDatabase"];
         delete?: never;
         options?: never;
@@ -115,7 +132,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Take the write lock on a database and make the local file the server head, for worker pools that move databases between machines. An existing file becomes the first version when the server has none, is adopted when its hashes match the head, and is fast-forwarded when it is a clean but stale copy. An empty file, as an app leaves after opening a new database without writing, counts as no copy; it becomes a new database when the server has none and is replaced by the head otherwise. Any other existing file is a conflict and is left untouched. A copy this machine wrote that diverged is saved as the conflict copy <path>.conflict-<time>.sqlite and the head is written in its place. Without a path, the path this machine already uses is taken, which brings an offloaded database back. */
+        /** @description Take the write lock on a database and make the local file the server head, for worker pools that move databases between machines. An existing file becomes the first version when the server has none, is kept when its hashes match the head, and is fast-forwarded when it is a clean but stale copy. An empty file, as an app leaves after opening a new database without writing, counts as no copy; it becomes a new database when the server has none and is replaced by the head otherwise. A copy this machine wrote on top of the head it last synced is resumed. Any other file that differs from the head is refused with 409 conflict naming the file, which is left untouched; with discard_local the head replaces it instead. Without a path, the path this machine already uses is taken, which brings an offloaded database back. */
         post: operations["acquireDatabase"];
         delete?: never;
         options?: never;
@@ -132,7 +149,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Sync an acquired database a final time, run its maintenance, and release its write lock. */
+        /** @description Sync an acquired database a final time, run its maintenance, and release its write lock. A write the app made during an upload syncs again before the lock goes back, up to 3 times; a file open again keeps the lock (409 still_open), and so does one that changes during every sync (409 changed). A copy without its write lock, as after a drain, whose file holds writes the server lacks is refused with 409 changed and left as it is; acquire it again, then release it. */
         post: operations["releaseDatabase"];
         delete?: never;
         options?: never;
@@ -149,7 +166,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Remove the local file of a released database once the server reports its last version is in the bucket. acquire brings it back. */
+        /** @description Remove the local file of a released database once the server holds its last version, or, with durability cloud, once the server reports the bucket holds it. acquire brings it back. */
         post: operations["offloadDatabase"];
         delete?: never;
         options?: never;
@@ -183,7 +200,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Persist a continuous backup rule. Matching and uploading happen in the background. Starting the same path again with the same name, prefix, watch, and maximum_local_databases returns the saved rule, so apps can call it on every start. Other settings for a saved path are refused with 409 exists, and the error's rule is the saved rule. */
+        /** @description Persist a continuous backup rule. Matching and uploading happen in the background. Starting the same path again with the same name, prefix, watch, and maximum_local_databases returns the saved rule, so apps can call it on every start; a start without watch matches a saved rule of either mode, and a new rule without one takes the daemon's --watch. A rule with watch poll has its files polled once a second whatever the daemon's --watch. Other settings for a saved path are refused with 409 rule_exists, and the error's rule is the saved rule. */
         post: operations["startBackup"];
         delete?: never;
         options?: never;
@@ -234,7 +251,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Run a database on several identical machines. The machine that holds the write lock is the origin and backs the file up; the others keep live readonly replicas at the same path. Each replica asks for the lock about once a second, so one of them takes over once the origin's lease runs out. */
+        /** @description Run a database on several identical machines. The machine that holds the write lock is the origin and backs the file up; the others keep live readonly replicas at the same path. Each replica asks for the lock about once a second, so one of them takes over once the origin's lease runs out. A file at the path that differs from the server head, and is not a clean copy of the version this machine last synced, is refused with 409 conflict naming the file, which is left untouched; with discard_local the head replaces it. */
         post: operations["startFailover"];
         delete?: never;
         options?: never;
@@ -293,15 +310,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/conflicts/list": {
+    "/v1/events/list": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** @description Conflict copies, the local copies saved because they diverged from the server. */
-        get: operations["listConflicts"];
+        /** @description Events after an event ID, oldest first. With wait_millis, the call waits up to that long for the first new event. Failovers report role_changed and refused here. Every hour the client deletes events older than its --event-retention and the oldest past its --maximum-events. A current path_unreadable event (one per backup rule and path it cannot read) is added again as a new event when its old one goes, so those failures stay and can take the count past --maximum-events. */
+        get: operations["listEvents"];
         put?: never;
         post?: never;
         delete?: never;
@@ -310,7 +327,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/conflicts/delete": {
+    "/v1/session/restart": {
         parameters: {
             query?: never;
             header?: never;
@@ -319,25 +336,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Delete a conflict copy and its -wal and -shm files. */
-        post: operations["deleteConflict"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/events/list": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description Events after an event ID, oldest first. With wait_millis, the call waits up to that long for the first new event. Failovers report role_changed and conflict_saved here. */
-        get: operations["listEvents"];
-        put?: never;
-        post?: never;
+        /** @description Restart the client in place, in the same process, with the credentials the session saved now, as litebackup up asks after it saved another credential. Syncs under way stop, and write locks stay held under the session's lease. With the same key the client takes the locks up again once it is back. A client holding write locks never starts with another key; up refuses such a credential with drain_required before it saves it, and a client whose saved key changed while it held locks refuses to start, so no upload goes out under a lock taken with another key. A service manager sees no exit. The answer comes before the restart. */
+        post: operations["restartSession"];
         delete?: never;
         options?: never;
         head?: never;
@@ -353,7 +353,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Final-sync every database, release every write lock, end the session, and stop the daemon. */
+        /** @description Final-sync every database this machine writes, wait for the requested durability, release its write lock, end the session, and stop the daemon. It covers every origin that is not conflicted, offloaded, or waiting; a backup another machine writes (waiting) holds no lock, stays waiting, and is not listed. Each covered database it cannot sync, wait for, or release is listed in failed with its code and keeps any write lock it holds; unless wait is none, so is a released acquired copy whose file holds writes the server lacks (changed), and an acquired copy whose file is open again (still_open) or changes during every final sync (changed); then the session stays and the daemon keeps running. Any other failure, such as the timeout ending before the drain could begin, is an error answer. */
         post: operations["shutdownSession"];
         delete?: never;
         options?: never;
@@ -365,18 +365,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), refused (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
+         * @enum {string}
+         */
+        EventType: "acquired" | "download_finished" | "download_started" | "draining" | "image_written" | "local_write" | "lock_lost" | "offloaded" | "path_unreadable" | "rebased" | "refused" | "released" | "replicating" | "restored" | "reverted" | "role_changed" | "rollback_scan" | "server_generation" | "stopped" | "tracked";
         Event: {
             /** Format: int64 */
             id: number;
             /** Format: date-time */
             time: string;
             name?: string;
-            /** @description such as role_changed (message is origin or replica), conflict_saved (path names the conflict copy), discovery_failed (path names the failed match), synced, downloaded */
-            type: string;
+            type: components["schemas"]["EventType"];
             message: string;
             /** @description for role_changed, the new role */
             role?: string;
-            /** @description for conflict_saved, the conflict copy */
+            /** @description for refused, the refused file; for path_unreadable, the path the rule could not read */
             path?: string;
         };
         /** @description A version the server acknowledged. Clients decide what durability is enough. */
@@ -386,6 +390,21 @@ export interface components {
             /** Format: date-time */
             time?: string;
         };
+        /** @description The newest version the server reported the primary bucket holds. */
+        ArchivedVersion: {
+            /** Format: int64 */
+            version: number;
+            /**
+             * Format: date-time
+             * @description when the server recorded the version as archived
+             */
+            archived?: string;
+        };
+        /**
+         * @description how far a version must reach: server once the server holds it, cloud once the bucket holds it too
+         * @enum {string}
+         */
+        Durability: "server" | "cloud";
         DatabaseStatus: {
             name: string;
             path: string;
@@ -395,17 +414,20 @@ export interface components {
              */
             role: "origin" | "replica";
             /**
-             * @description syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced once a released database's last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the bucket holds it; stopped for a stopped replica; conflicted when another machine wrote while this copy had changes; error with last_error
+             * @description pending while a backup or failover origin holds no write lock, as after a start or a drain, until a sync takes it (a start takes back the lock of each backup a drain left pending while the head is still the version it last synced); syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced when the server holds every change: a backup or failover origin whose last sync landed with no change seen after it, until its next change, or a released database whose last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the server, or the bucket when the offload asked for it, holds its last version; stopped for a stopped replica; conflicted when this copy was refused and left as it is, because its file differs from the server head or its write lock was lost or broken; error with last_error
              * @enum {string}
              */
-            state: "syncing" | "retrying" | "synced" | "waiting" | "offloaded" | "stopped" | "conflicted" | "error";
+            state: "pending" | "syncing" | "retrying" | "synced" | "waiting" | "offloaded" | "stopped" | "conflicted" | "error";
             /** @description the database is acquired and released by a worker rather than backed up continuously */
             acquired: boolean;
             /** @description the database belongs to a failover and changes role when the origin does */
             failover: boolean;
+            /** @description the backup or failover rule that tracks the database on this machine; absent for an acquired database and a replica */
+            backup_rule_id?: string;
             local_changed: boolean;
             synced_server: components["schemas"]["SyncedState"];
-            synced_cloud: components["schemas"]["SyncedState"];
+            synced_cloud: components["schemas"]["ArchivedVersion"];
+            /** @description wal, rollback, or unknown before the first scan. A full scan of a rollback-journal database holds a read lock that blocks the app's writers until it ends, so it runs at full speed rather than at --scan-bytes-per-second, and the first scan past 256 MB records a rollback_scan event with its duration. Switch such a database to WAL mode (PRAGMA journal_mode = WAL), where scans never block writers; Litebackup never changes the journal mode itself. */
             journal_mode: string;
             /** Format: int64 */
             page_count: number;
@@ -414,8 +436,8 @@ export interface components {
             /** Format: int64 */
             hint_misses: number;
             last_full_scan_reason?: string;
-            /** @description the machine label of the last writer this machine saw */
-            writer?: string;
+            /** @description the machine label of the last writer this machine saw; empty once this machine released the database, drained it, or offloaded a copy whose write lock it held, as no writer is known then */
+            writer_machine_label?: string;
             last_error?: string;
             /** Format: date-time */
             last_error_time?: string;
@@ -429,11 +451,15 @@ export interface components {
              * @description when the next attempt of a failed sync runs; absent when none is scheduled
              */
             next_retry_time?: string;
-            /** @description what other machines see as the writer while this machine writes */
+            /** @description set on a failover origin while this machine drains, and on one a drain released, which holds no write lock until it takes one again; a failover then reports its role as unknown, as after a draining event */
+            draining?: boolean;
+            /** @description the name this machine shows on the server and as the writer of its databases */
             machine_label?: string;
             maintenance?: boolean;
-            /** @enum {string} */
-            offload?: "never" | "released";
+            /** @description the client deletes the released copy once offload_durability holds it */
+            offload_on_release?: boolean;
+            /** @description what an offload of this acquired copy waits for: server removes the released copy once the server holds its last version, cloud once the bucket holds it too. An acquire, a release with offload, and an explicit offload each save the durability they asked for. Absent when the database is not acquired */
+            offload_durability?: components["schemas"]["Durability"];
         };
         Status: {
             /** @description Pass this name as after to read the next page. Omitted on the last page. */
@@ -445,10 +471,20 @@ export interface components {
             /** Format: date-time */
             lease_expires?: string;
             watch: string;
-            /** @description Most recent file discovery failures. The events API provides the paginated history. */
-            recent_discovery_errors?: components["schemas"]["Event"][];
+            /**
+             * Format: int64
+             * @description The soft limit on open files the daemon runs with. Each active backup holds about four, and the daemon lowers its default number of active backups to fit.
+             */
+            open_file_limit?: number;
+            /** @description the paths a backup rule cannot read, most recent first; the events API has the history */
+            unreadable_paths?: components["schemas"]["Event"][];
             databases: components["schemas"]["DatabaseStatus"][];
         };
+        /**
+         * @description What went wrong, in one word. The socket answers with file_exists (the file a restore or an acquire would write, or a -journal, -wal, or -shm beside it, already exists), rule_exists (a backup rule with other settings already covers the path, and the error carries that rule), lock_unavailable (another machine holds the write lock a command asks for, as an acquire, a revert, or a failover does), not_found, still_open, invalid_argument, timeout, cursor_expired (an events cursor older than the oldest event kept), changed (an offload or acquire refused because the local file changed under it: written after its last sync, never synced, or written while an acquire replaced it), rule_database (a release of a database a backup rule on this machine keeps, whose write lock the rule never gives up; stop its backup to hand it off), not_durable (an offload refused until the server, or the bucket when it waits for cloud, holds the synced version, or a cloud wait whose name now holds another server database), and the others by their names; busy (a foreground backup refused because another job, a continuous backup, or another machine writes the database), cancelled (a command interrupted before it finished), drain_required (a credential other than the one the client took its write locks with, refused until a drain released them), and launch_failed (the command could not start the client on this machine, or the client exited before it listened) come from the litebackup command alone, which also answers unauthenticated when this machine has not joined a server. A refusal from the server becomes client_unsupported (426: the server needs a newer litebackup on this machine) or, with 503, not_configured (the server waits for setup), wrong_server (the server this machine reached is not the one its session joined, or does not own the database), unauthenticated (the server no longer accepts this machine's key), forbidden (the key may not do this), plan_limit (the server's plan has no room for another database), or integrity (the version's bucket objects failed an integrity check). lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is unavailable. A client treats a code it does not know as a failure.
+         * @enum {string}
+         */
+        ErrorCode: "busy" | "cancelled" | "changed" | "client_unsupported" | "conflict" | "cursor_expired" | "drain_required" | "file_exists" | "forbidden" | "integrity" | "internal" | "invalid_argument" | "launch_failed" | "limit_exceeded" | "lock_lost" | "lock_unavailable" | "method_not_allowed" | "not_configured" | "not_durable" | "not_found" | "plan_limit" | "rule_database" | "rule_exists" | "sdk_unsupported" | "still_open" | "timeout" | "unauthenticated" | "unavailable" | "wrong_server";
         BackupRule: {
             id: string;
             /** @description the path or glob */
@@ -459,13 +495,15 @@ export interface components {
             watch: string;
             /** Format: int64 */
             maximum_local_databases: number;
+            /** @description what maximum_local_databases waits for before it removes a copy */
+            offload_durability: components["schemas"]["Durability"];
+            offload_rollback_journal: boolean;
             failover: boolean;
         };
         Error: {
-            /** @description such as exists (a restore target exists, or a backup rule with other settings already covers the path), in_use (another machine writes the database), not_found, still_open, invalid_argument, timeout */
-            code: string;
+            code: components["schemas"]["ErrorCode"];
             message: string;
-            /** @description for exists from backup-rules/start, the rule already saved for the path; stop it by its ID before saving different settings */
+            /** @description for rule_exists from backup-rules/start, the rule already saved for the path; stop it by its ID before saving different settings */
             rule?: components["schemas"]["BackupRule"];
         };
         DatabaseStatusList: {
@@ -482,6 +520,11 @@ export interface components {
              * @description when the version was synced
              */
             time: string;
+            /**
+             * Format: date-time
+             * @description when the server recorded the primary bucket's object of this version as archived; absent when the primary bucket does not hold the version, as for one synced between archive passes, which restores only until history pruning removes its segment
+             */
+            archived?: string;
         };
         VersionList: {
             versions: components["schemas"]["RestorableVersion"][];
@@ -505,6 +548,11 @@ export interface components {
              * @description restore the newest version at or before this time
              */
             time?: string;
+            /**
+             * Format: int32
+             * @description the caller's file mode creation mask, such as 18 for 022; the file gets 0666 less it, as one the caller created would. Absent uses the client's own umask. The litebackup command sends its own.
+             */
+            umask?: number;
         };
         RestoreResult: {
             name: string;
@@ -517,6 +565,34 @@ export interface components {
             page_size: number;
             state_digest: string;
         };
+        RevertRequest: {
+            name: string;
+            /**
+             * Format: int64
+             * @description the version whose content the new head holds; set version or time
+             */
+            version?: number;
+            /**
+             * Format: date-time
+             * @description revert to the newest version at or before this time; set version or time
+             */
+            time?: string;
+        };
+        RevertResult: {
+            database: components["schemas"]["DatabaseStatus"];
+            /**
+             * Format: int64
+             * @description the version whose content the new head holds; it and every version after it stay restorable
+             */
+            source_version: number;
+            /**
+             * Format: int64
+             * @description the new head, one past the head before the revert
+             */
+            version: number;
+            /** @description the new head's state digest, which is the source version's */
+            state_digest: string;
+        };
         NameRequest: {
             name: string;
         };
@@ -526,51 +602,43 @@ export interface components {
             path?: string;
             /** @description checkpoint and, past the freelist threshold, VACUUM on release */
             maintenance?: boolean;
-            /**
-             * @description released lets Litebackup delete the released copy once the bucket holds it
-             * @enum {string}
-             */
-            offload?: "never" | "released";
-            /** @description what other machines see as the writer */
+            /** @description replace a local file that diverged from the server head with the head, discarding its writes the head lacks; without it such a file is refused with 409 conflict and left untouched */
+            discard_local?: boolean;
+            /** @description lets Litebackup delete the released copy once offload_durability holds it */
+            offload_on_release?: boolean;
+            /** @description what an offload of the released copy waits for; server, the default, once the server holds its last version, cloud once the bucket holds it too. A release with offload sets it to the release's durability. */
+            offload_durability?: components["schemas"]["Durability"];
+            /** @description the name this machine shows on the server and as the writer of this database only */
             machine_label?: string;
-            /**
-             * @description on a lost write lock, keep the copy as conflicted or block local writes until the lock is back
-             * @enum {string}
-             */
-            on_lost?: "conflict" | "block";
             /**
              * Format: int64
              * @description bound on downloading the head
              */
             timeout_millis?: number;
-        };
-        Conflict: {
-            id: string;
-            name: string;
-            path: string;
-            conflict_path: string;
-            /** Format: int64 */
-            synced_version: number;
-            /** Format: int64 */
-            server_version: number;
-            reason: string;
-            /** Format: date-time */
-            created: string;
+            /**
+             * Format: int64
+             * @description how long to wait for the write lock while another machine holds it, trying again until it is released; 0 refuses at once with lock_unavailable. It adds to the timeout.
+             */
+            lock_timeout_millis?: number;
+            /**
+             * Format: int32
+             * @description the caller's file mode creation mask, such as 18 for 022; a file the acquire creates, the head downloaded where none was or the empty file an offload removed, gets 0666 less it, as one the caller created would. A copy the head replaces keeps its bits. Absent uses the client's own umask. The litebackup command sends its own.
+             */
+            umask?: number;
         };
         AcquireResult: {
             database: components["schemas"]["DatabaseStatus"];
-            /** @enum {string} */
-            outcome: "created" | "adopted" | "resumed" | "downloaded" | "fast_forwarded" | "healed";
-            conflict?: components["schemas"]["Conflict"];
+            /**
+             * @description what the acquire did to the local file
+             * @enum {string}
+             */
+            decision: "created" | "matched" | "resumed" | "downloaded" | "fast_forwarded" | "replaced";
         };
         ReleaseRequest: {
             name: string;
-            /**
-             * @description server returns once the final sync is acknowledged; cloud waits for the bucket too
-             * @enum {string}
-             */
-            wait?: "server" | "cloud";
-            /** @description remove the local file once the bucket holds the released version */
+            /** @description server returns once the final sync is acknowledged; cloud waits for the bucket too */
+            durability?: components["schemas"]["Durability"];
+            /** @description remove the local file once durability holds the released version, the server with server and the bucket with cloud; an offload refused as not_durable is left to a later offload pass */
             offload?: boolean;
             /**
              * Format: int64
@@ -584,6 +652,11 @@ export interface components {
             vacuumed: boolean;
             offloaded: boolean;
         };
+        OffloadRequest: {
+            name: string;
+            /** @description what the offload waits for before it removes the copy: server, the default, once the server holds its synced version; cloud once the bucket holds it too. Until then it is refused with not_durable. */
+            durability?: components["schemas"]["Durability"];
+        };
         Writer: {
             name: string;
             /** @description whether some machine holds the write lock and its lease still runs */
@@ -591,9 +664,12 @@ export interface components {
             /** @description whether this machine's session holds the write lock */
             this_machine: boolean;
             /** @description the machine label of the writer, or empty when nobody holds the lock */
-            machine: string;
-            /** Format: date-time */
-            acquired?: string;
+            writer_machine_label: string;
+            /**
+             * Format: date-time
+             * @description when the writer took the lock
+             */
+            acquired_time?: string;
             /**
              * Format: date-time
              * @description on the server's clock
@@ -618,12 +694,16 @@ export interface components {
             watch?: "inotify" | "poll";
             /**
              * Format: int64
-             * @description when positive, offload the least recently changed idle databases past this count once the bucket holds them
+             * @description when positive, offload the least recently changed idle databases past this count once offload_durability holds them
              */
             maximum_local_databases?: number;
+            /** @description what maximum_local_databases waits for before it removes a copy; server, the default, once the server holds its last version, cloud once the bucket holds it too */
+            offload_durability?: components["schemas"]["Durability"];
+            /** @description lets maximum_local_databases offload rollback-journal databases too, on the operator's word that nothing keeps them open while idle; WAL databases are offloaded either way */
+            offload_rollback_journal?: boolean;
         };
         BackupList: {
-            backups: components["schemas"]["BackupRule"][];
+            rules: components["schemas"]["BackupRule"][];
         };
         StopBackupRequest: {
             /** @description Exact remote name of a database with its own backup rule on this machine. */
@@ -644,6 +724,8 @@ export interface components {
              * @description bound on the first download of a replica
              */
             timeout_millis?: number;
+            /** @description replace a file at the path that differs from the server head with the head, discarding its writes the head lacks; without it such a file is refused with 409 conflict and left untouched */
+            discard_local?: boolean;
         };
         Failover: {
             name: string;
@@ -653,13 +735,15 @@ export interface components {
             database: components["schemas"]["DatabaseStatus"];
             writer: components["schemas"]["Writer"];
         };
-        /** @description Either name, for one database, or prefix, for every database under it. */
+        /** @description Either name and path, for one database, or prefix and directory, for every database under it. */
         ReplicaRequest: {
             name?: string;
+            /** @description with name, the replica file, defaulting to the path this machine uses */
+            path?: string;
             /** @description name prefix such as app; replicates every database under it */
             prefix?: string;
-            /** @description for name, the replica file, defaulting to the path this machine uses; for prefix, the directory that receives <to>/<name relative to the prefix> */
-            to?: string;
+            /** @description with prefix, the directory that receives <directory>/<name relative to the prefix> */
+            directory?: string;
             /**
              * @description lock (default) holds the SQLite write lock so app writes get SQLITE_BUSY while readers carry on; detect rebases after a local write; none trusts apps to open with mode=ro
              * @enum {string}
@@ -674,33 +758,32 @@ export interface components {
         PrefixReplica: {
             id: string;
             prefix: string;
-            to: string;
+            /** @description the directory that receives <directory>/<name relative to the prefix> */
+            directory: string;
             write_protection: string;
-            /** Format: int64 */
-            databases: number;
+            /**
+             * Format: int64
+             * @description how many databases under the prefix this machine replicates
+             */
+            database_count: number;
         };
         /** @description The replica for a name, or the prefix replica for a prefix. */
         ReplicaResult: {
             database?: components["schemas"]["DatabaseStatus"];
-            prefix?: components["schemas"]["PrefixReplica"];
+            prefix_replica?: components["schemas"]["PrefixReplica"];
         };
         ReplicaList: {
             prefixes: components["schemas"]["PrefixReplica"][];
             replicas: components["schemas"]["DatabaseStatus"][];
         };
-        /** @description Either name for one replica, or prefix and to for a prefix. */
+        /** @description Either name for one replica, or prefix and directory for a prefix. */
         StopReplicaRequest: {
             name?: string;
             prefix?: string;
-            to?: string;
+            /** @description with prefix, the directory the prefix replica was started with */
+            directory?: string;
         };
         Empty: Record<string, never>;
-        ConflictList: {
-            conflicts: components["schemas"]["Conflict"][];
-        };
-        IDRequest: {
-            id: string;
-        };
         EventList: {
             events: components["schemas"]["Event"][];
             /**
@@ -711,20 +794,34 @@ export interface components {
         };
         ShutdownRequest: {
             /** @enum {string} */
-            wait?: "none" | "server" | "cloud";
+            durability?: "none" | "server" | "cloud";
             /** Format: int64 */
             timeout_millis?: number;
         };
+        DrainFailure: {
+            name: string;
+            code: components["schemas"]["ErrorCode"];
+            message: string;
+        };
         ShutdownResult: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description how many databases the drain synced as asked and released
+             */
             released: number;
-            failed: string[];
+            /** @description every database the drain could not sync, wait for, or release, each keeping any write lock it holds, and every conflicted copy whose writes are not on the server, with conflict; empty only when the drain released every database it covers, which is the one case the daemon stops */
+            failed: components["schemas"]["DrainFailure"][];
         };
     };
     responses: never;
     parameters: never;
     requestBodies: never;
-    headers: never;
+    headers: {
+        /** @description This client's Litebackup version; on every answer. */
+        ClientVersion: string;
+        /** @description The oldest SDK version this client serves; on every answer. */
+        MinimumSDKVersion: string;
+    };
     pathItems: never;
 }
 export type $defs = Record<string, never>;
@@ -736,7 +833,10 @@ export interface operations {
                 after?: string;
                 limit?: number;
             };
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -745,15 +845,41 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Status"];
                 };
             };
+            /** @description invalid_argument, such as a call without Litebackup-SDK-Version */
+            400: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description error */
             500: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -769,7 +895,10 @@ export interface operations {
                 after?: string;
                 limit?: number;
             };
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -778,15 +907,41 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["DatabaseStatusList"];
                 };
             };
+            /** @description invalid_argument, such as a call without Litebackup-SDK-Version */
+            400: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description error */
             500: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -800,7 +955,10 @@ export interface operations {
             query: {
                 name: string;
             };
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -809,15 +967,41 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["DatabaseStatus"];
                 };
             };
+            /** @description invalid_argument, such as a call without Litebackup-SDK-Version */
+            400: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description error */
             404: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -834,7 +1018,10 @@ export interface operations {
                 after?: number;
                 limit?: number;
             };
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -843,6 +1030,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -852,6 +1041,8 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -861,6 +1052,19 @@ export interface operations {
             /** @description error */
             404: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -870,6 +1074,8 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -881,7 +1087,10 @@ export interface operations {
     restoreDatabase: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -894,6 +1103,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -903,6 +1114,8 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -912,6 +1125,8 @@ export interface operations {
             /** @description error */
             404: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -921,6 +1136,19 @@ export interface operations {
             /** @description error */
             409: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -930,6 +1158,8 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -939,6 +1169,114 @@ export interface operations {
             /** @description error */
             504: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    revertDatabase: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevertRequest"];
+            };
+        };
+        responses: {
+            /** @description success */
+            200: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevertResult"];
+                };
+            };
+            /** @description error */
+            400: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description error */
+            404: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description error */
+            409: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description error */
+            423: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description error */
+            503: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description error */
+            504: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -950,7 +1288,10 @@ export interface operations {
     syncDatabase: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -963,6 +1304,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -972,6 +1315,8 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -981,6 +1326,8 @@ export interface operations {
             /** @description error */
             404: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -990,6 +1337,30 @@ export interface operations {
             /** @description error */
             409: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description error */
+            423: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -999,6 +1370,19 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description error */
+            504: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1010,7 +1394,10 @@ export interface operations {
     acquireDatabase: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1023,6 +1410,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1032,6 +1421,8 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1041,6 +1432,8 @@ export interface operations {
             /** @description error */
             404: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1050,6 +1443,8 @@ export interface operations {
             /** @description error */
             409: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1059,6 +1454,19 @@ export interface operations {
             /** @description error */
             423: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1068,6 +1476,8 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1077,6 +1487,8 @@ export interface operations {
             /** @description error */
             504: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1088,7 +1500,10 @@ export interface operations {
     releaseDatabase: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1101,6 +1516,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1110,6 +1527,8 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1119,6 +1538,8 @@ export interface operations {
             /** @description error */
             404: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1128,6 +1549,19 @@ export interface operations {
             /** @description error */
             409: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1137,6 +1571,8 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1146,6 +1582,8 @@ export interface operations {
             /** @description error */
             504: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1157,19 +1595,24 @@ export interface operations {
     offloadDatabase: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["NameRequest"];
+                "application/json": components["schemas"]["OffloadRequest"];
             };
         };
         responses: {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1179,6 +1622,8 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1188,6 +1633,8 @@ export interface operations {
             /** @description error */
             404: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1197,6 +1644,19 @@ export interface operations {
             /** @description error */
             409: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1206,6 +1666,8 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1219,7 +1681,10 @@ export interface operations {
             query: {
                 name: string;
             };
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1228,6 +1693,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1237,6 +1704,8 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1246,6 +1715,19 @@ export interface operations {
             /** @description error */
             404: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1255,6 +1737,8 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1266,7 +1750,10 @@ export interface operations {
     startBackup: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1279,6 +1766,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1288,6 +1777,19 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden, when the server says this machine's API key is readonly; nothing is saved */
+            403: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1297,6 +1799,19 @@ export interface operations {
             /** @description error */
             409: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1306,6 +1821,8 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1315,6 +1832,8 @@ export interface operations {
             /** @description error */
             504: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1326,7 +1845,10 @@ export interface operations {
     listBackups: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1335,15 +1857,41 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["BackupList"];
                 };
             };
+            /** @description invalid_argument, such as a call without Litebackup-SDK-Version */
+            400: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description error */
             500: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1355,7 +1903,10 @@ export interface operations {
     stopBackup: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1368,6 +1919,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1377,6 +1930,8 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1386,6 +1941,19 @@ export interface operations {
             /** @description error */
             404: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1395,6 +1963,8 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1406,7 +1976,10 @@ export interface operations {
     startFailover: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1419,6 +1992,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1428,6 +2003,19 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description forbidden, when the server says this machine's API key is readonly; nothing is saved */
+            403: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1437,6 +2025,19 @@ export interface operations {
             /** @description error */
             409: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1446,6 +2047,8 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1455,6 +2058,8 @@ export interface operations {
             /** @description error */
             504: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1466,7 +2071,10 @@ export interface operations {
     startReplica: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1479,6 +2087,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1488,6 +2098,8 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1497,6 +2109,8 @@ export interface operations {
             /** @description error */
             404: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1506,6 +2120,19 @@ export interface operations {
             /** @description error */
             409: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1515,6 +2142,8 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1524,6 +2153,8 @@ export interface operations {
             /** @description error */
             504: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1535,7 +2166,10 @@ export interface operations {
     listReplicas: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1544,15 +2178,41 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ReplicaList"];
                 };
             };
+            /** @description invalid_argument, such as a call without Litebackup-SDK-Version */
+            400: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description error */
             500: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1564,7 +2224,10 @@ export interface operations {
     stopReplica: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1577,6 +2240,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1586,6 +2251,8 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1595,6 +2262,19 @@ export interface operations {
             /** @description error */
             404: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1604,77 +2284,8 @@ export interface operations {
             /** @description error */
             503: {
                 headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    listConflicts: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConflictList"];
-                };
-            };
-            /** @description error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    deleteConflict: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["IDRequest"];
-            };
-        };
-        responses: {
-            /** @description success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Empty"];
-                };
-            };
-            /** @description error */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description error */
-            404: {
-                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1691,7 +2302,10 @@ export interface operations {
                 wait_millis?: number;
                 limit?: number;
             };
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1700,6 +2314,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1709,6 +2325,88 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description cursor_expired; the events after the cursor were deleted, so the cursor is older than the oldest event kept. Start again from after=0, or from -1 to follow new events */
+            410: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    restartSession: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description success */
+            200: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Empty"];
+                };
+            };
+            /** @description error */
+            400: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description error */
+            503: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1720,7 +2418,10 @@ export interface operations {
     shutdownSession: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                "Litebackup-SDK-Version": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1733,6 +2434,8 @@ export interface operations {
             /** @description success */
             200: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1742,6 +2445,19 @@ export interface operations {
             /** @description error */
             400: {
                 headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            426: {
+                headers: {
+                    "Litebackup-Client-Version": components["headers"]["ClientVersion"];
+                    "Litebackup-Minimum-SDK-Version": components["headers"]["MinimumSDKVersion"];
                     [name: string]: unknown;
                 };
                 content: {

@@ -1,0 +1,10 @@
+{
+  "description": "Stopping a backup needs a name; nothing is sent.",
+  "operation": "backups.stop",
+  "args": {
+    "name": ""
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

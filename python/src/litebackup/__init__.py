@@ -1,7 +1,7 @@
 """Back up, replicate, and restore SQLite databases with Litebackup.
 
 The client talks to the litebackup daemon of a session over its unix socket and
-starts it when it is not running, joining with LITEBACKUP_TOKEN the first time::
+starts it when it is not running, with the credential in LITEBACKUP_API_KEY::
 
     from litebackup import Litebackup
 
@@ -12,14 +12,16 @@ AsyncLitebackup has the same groups for asyncio. Driver and framework support is
 in litebackup.integrations: sqlite3, aiosqlite, sqlalchemy, django, and fastapi.
 """
 
-from ._binary import BINARY_PATH_ENVIRONMENT, TOKEN_ENVIRONMENT, install_command, litebackup_binary
+from ._binary import BINARY_PATH_ENVIRONMENT, install_command, litebackup_binary
+from ._credential import API_KEY_ENVIRONMENT
 from ._failover import AsyncFailover, Failover
 from ._generated.models import (
     AcquireResult,
+    ArchivedVersion,
     BackupRule,
-    Conflict,
     DatabaseStatus,
     DatabaseStatusList,
+    DrainFailure,
     Event,
     EventList,
     PrefixReplica,
@@ -27,6 +29,7 @@ from ._generated.models import (
     ReplicaList,
     RestorableVersion,
     RestoreResult,
+    RevertResult,
     ShutdownResult,
     Status,
     StopBackupResult,
@@ -34,45 +37,50 @@ from ._generated.models import (
     VersionList,
     Writer,
 )
-from ._managed import DEFAULT_CLEANUP_TIMEOUT, AsyncScopeAdapter, ScopeAdapter
 from ._paths import SYSTEM_CONFIGURATION_PATH, session_socket
+from ._pool import DEFAULT_CLEANUP_TIMEOUT, Adapter, AsyncAdapter, AsyncPool, Pool
 from ._version import MINIMUM_DAEMON_VERSION, SDK_VERSION
 from ._wire import Durability, Duration, PathSource, WriteProtection
 from .client import AsyncLitebackup, Litebackup
-from .errors import ErrorCode, LitebackupError
+from .errors import ErrorCode, LeaseCleanupError, LitebackupError
 
 __version__ = SDK_VERSION
 
 __all__ = [
+    "API_KEY_ENVIRONMENT",
     "BINARY_PATH_ENVIRONMENT",
     "DEFAULT_CLEANUP_TIMEOUT",
     "MINIMUM_DAEMON_VERSION",
     "SDK_VERSION",
     "SYSTEM_CONFIGURATION_PATH",
-    "TOKEN_ENVIRONMENT",
     "AcquireResult",
+    "Adapter",
+    "ArchivedVersion",
+    "AsyncAdapter",
     "AsyncFailover",
     "AsyncLitebackup",
-    "AsyncScopeAdapter",
+    "AsyncPool",
     "BackupRule",
-    "Conflict",
     "DatabaseStatus",
     "DatabaseStatusList",
+    "DrainFailure",
     "Durability",
     "Duration",
     "ErrorCode",
     "Event",
     "EventList",
     "Failover",
+    "LeaseCleanupError",
     "Litebackup",
     "LitebackupError",
     "PathSource",
+    "Pool",
     "PrefixReplica",
     "ReleaseResult",
     "ReplicaList",
     "RestorableVersion",
     "RestoreResult",
-    "ScopeAdapter",
+    "RevertResult",
     "ShutdownResult",
     "Status",
     "StopBackupResult",

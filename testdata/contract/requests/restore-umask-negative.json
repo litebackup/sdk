@@ -1,0 +1,12 @@
+{
+  "description": "A negative umask sends nothing.",
+  "operation": "databases.restore",
+  "args": {
+    "name": "main.sqlite",
+    "path": "/tmp/r.sqlite",
+    "umask": -1
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

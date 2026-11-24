@@ -1,6 +1,6 @@
 {
   "description": "An empty first page ends iteration.",
-  "operation": "databases.iterate",
+  "operation": "databases.all",
   "args": {},
   "item_key": "name",
   "exchanges": [

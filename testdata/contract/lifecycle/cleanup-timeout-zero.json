@@ -1,11 +1,5 @@
 {
   "description": "The cleanup timeout must be positive.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
-    "durability": "server",
-    "cleanup_timeout": "0s"
-  },
   "fail": [],
   "skip": {
     "go": "Go's zero CleanupTimeout means DefaultCleanupTimeout, as zero values mean defaults in Go arguments"
@@ -30,7 +24,7 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [],
@@ -39,6 +33,13 @@
       {
         "code": "invalid_argument"
       }
-    ]
+    ],
+    "close_raised": []
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "server",
+    "cleanup_timeout": "0s"
   }
 }

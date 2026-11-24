@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import tempfile
 from collections.abc import Mapping
 
@@ -40,7 +41,7 @@ def session_socket(
     the service's socket; where a user installed a service of their own, that user
     uses the directory it recorded. Everyone else uses
     $XDG_RUNTIME_DIR/litebackup/<session>/client.sock, or a per-user directory under
-    the temporary directory.
+    the temporary directory, which must be this user's alone.
     """
     name = session or environment.get("LITEBACKUP_SESSION") or DEFAULT_SESSION
     if not _SESSION_PATTERN.fullmatch(name):
@@ -53,7 +54,29 @@ def session_socket(
     user = _runtime_directory(os.path.join(home, ".config", "litebackup", "service.json"))
     if user is not None:
         return name, os.path.join(user[0], name, "client.sock")
-    runtime_root = environment.get("XDG_RUNTIME_DIR") or os.path.join(
-        environment.get("TMPDIR") or tempfile.gettempdir(), f"litebackup-{uid}"
-    )
+    runtime_root = environment.get("XDG_RUNTIME_DIR")
+    if not runtime_root:
+        runtime_root = os.path.join(environment.get("TMPDIR") or tempfile.gettempdir(), f"litebackup-{uid}")
+        _private_runtime_directory(runtime_root, uid)
     return name, os.path.join(runtime_root, "litebackup", name, "client.sock")
+
+
+def _private_runtime_directory(directory: str, uid: int) -> None:
+    """Makes sure the per-user runtime directory used without $XDG_RUNTIME_DIR is this user's own.
+
+    The temporary directory is shared, so another local user could create it first
+    and answer as the daemon. It is created with mode 0700 when missing; one that
+    is a symlink, is not a directory, belongs to another user, or is open to anyone
+    else is refused, as the litebackup command refuses it.
+    """
+    try:
+        os.mkdir(directory, 0o700)
+    except FileExistsError:
+        pass
+    except OSError as error:
+        raise invalid_argument(f"creating {directory} failed: {error}") from error
+    status = os.lstat(directory)
+    if not stat.S_ISDIR(status.st_mode) or status.st_uid != uid or status.st_mode & 0o077:
+        raise invalid_argument(
+            f"{directory} is not a directory of this user's alone; remove it or set XDG_RUNTIME_DIR to this user's own directory"
+        )

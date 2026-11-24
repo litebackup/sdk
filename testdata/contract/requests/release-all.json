@@ -1,9 +1,9 @@
 {
-  "description": "Release sends its wait, offload, and timeout.",
+  "description": "Release sends its durability, offload, and timeout.",
   "operation": "databases.release",
   "args": {
     "name": "agents/42.sqlite",
-    "wait": "cloud",
+    "durability": "cloud",
     "offload": true,
     "timeout": "2m"
   },
@@ -13,7 +13,7 @@
     "query": {},
     "body": {
       "name": "agents/42.sqlite",
-      "wait": "cloud",
+      "durability": "cloud",
       "offload": true,
       "timeout_millis": 120000
     }

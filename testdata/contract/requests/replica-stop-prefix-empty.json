@@ -1,0 +1,18 @@
+{
+  "description": "Stopping an all-databases prefix replica sends the empty prefix.",
+  "operation": "replicas.stop_prefix",
+  "args": {
+    "prefix": "",
+    "directory": "replicas"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/replicas/stop",
+    "query": {},
+    "body": {
+      "prefix": "",
+      "directory": "{cwd}/replicas"
+    }
+  },
+  "response": {}
+}

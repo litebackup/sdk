@@ -1,12 +1,13 @@
 // Command handoff is the Go step of the cross-language handoff test: it
-// acquires a database in a managed scope, checks and adds rows with the
-// sqlite3 command, and releases it. LITEBACKUP_SESSION names its session.
+// leases a database from a pool, checks and adds rows with the sqlite3
+// command, and closes the pool, which releases it. LITEBACKUP_SESSION names its session.
 //
 // Usage: handoff NAME PATH EXPECTED-ROWS ADDED-ROWS
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,10 +22,11 @@ import (
 type commandAdapter struct{}
 
 func (commandAdapter) Open(_ context.Context, path string) (string, error) { return path, nil }
-func (commandAdapter) Close(context.Context, string) error                { return nil }
+func (commandAdapter) Close(context.Context, string) error                 { return nil }
 
 func sqlite(path string, statement string) (string, error) {
-	output, err := exec.Command("sqlite3", "-cmd", ".timeout 2000", path, statement).CombinedOutput()
+	output, err := exec.Command("sqlite3", "-cmd", ".timeout 2000", path, statement).
+		CombinedOutput()
 	return strings.TrimSpace(string(output)), err
 }
 
@@ -44,9 +46,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer client.Close()
-	err = litebackup.Managed(ctx, client, name, &litebackup.ManagedArgs[string]{
-		To: path, Durability: litebackup.DurabilityServer, Adapter: commandAdapter{},
-	}, func(_ context.Context, path string) error {
+	pool, err := litebackup.NewPool(client, &litebackup.PoolArgs[string]{Adapter: commandAdapter{}})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	err = pool.Lease(ctx, name, &litebackup.LeaseArgs{Path: path}, func(_ context.Context, path string) error {
 		count, err := sqlite(path, "SELECT count(*) FROM steps")
 		if err != nil {
 			return fmt.Errorf("reading: %v %s", err, count)
@@ -55,12 +60,14 @@ func main() {
 			return fmt.Errorf("found %s rows, want %d", count, expected)
 		}
 		for index := range added {
-			if output, err := sqlite(path, fmt.Sprintf("INSERT INTO steps (body) VALUES ('go %d')", index)); err != nil {
+			output, err := sqlite(path, fmt.Sprintf("INSERT INTO steps (body) VALUES ('go %d')", index))
+			if err != nil {
 				return fmt.Errorf("writing: %v %s", err, output)
 			}
 		}
 		return nil
 	})
+	err = errors.Join(err, pool.Close(ctx))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

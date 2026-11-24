@@ -96,7 +96,7 @@ class SyncTransport:
         self._active: set[_Connection] = set()
         self.closed = False
 
-    def _checkout(self) -> tuple[_Connection, bool]:
+    def _pooled_connection(self) -> tuple[_Connection, bool]:
         with self._lock:
             if self.closed:
                 raise LitebackupError(ErrorCode.CLOSED, "the client is closed")
@@ -107,13 +107,12 @@ class SyncTransport:
                     continue
                 self._active.add(connection)
                 return connection, True
-        raw = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        connection = _Connection(raw)
-        with self._lock:
+            # Registered before connecting, so close() sees it; _exchange checks again once connected.
+            connection = _Connection(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM))
             self._active.add(connection)
         return connection, False
 
-    def _checkin(self, connection: _Connection, reusable: bool) -> None:
+    def _return_connection(self, connection: _Connection, reusable: bool) -> None:
         with self._lock:
             self._active.discard(connection)
             if reusable and not self.closed and len(self._idle) < POOL_SIZE:
@@ -130,15 +129,15 @@ class SyncTransport:
         """
         deadline = None if deadline_seconds is None else time.monotonic() + deadline_seconds
         while True:
-            connection, reused = self._checkout()
+            connection, reused = self._pooled_connection()
             reader = AnswerReader()
             try:
                 answer = self._exchange(connection, reused, method, target, body, deadline, reader)
             except LitebackupError:
-                self._checkin(connection, False)
+                self._return_connection(connection, False)
                 raise
             except (OSError, h11.ProtocolError) as error:
-                self._checkin(connection, False)
+                self._return_connection(connection, False)
                 if self.closed:
                     raise LitebackupError(ErrorCode.CLOSED, "the client is closed") from error
                 if isinstance(error, TimeoutError) and deadline is not None and time.monotonic() >= deadline:
@@ -149,7 +148,7 @@ class SyncTransport:
                     continue
                 raise LitebackupError(ErrorCode.CONNECTION_FAILED, str(error) or type(error).__name__) from error
             protocol = connection.protocol
-            self._checkin(connection, protocol.our_state is h11.DONE and protocol.their_state is h11.DONE)
+            self._return_connection(connection, protocol.our_state is h11.DONE and protocol.their_state is h11.DONE)
             return answer
 
     def _exchange(
@@ -166,6 +165,8 @@ class SyncTransport:
         if not reused:
             raw.settimeout(self._remaining(deadline))
             raw.connect(self.socket_path)
+            if self.closed:
+                raise LitebackupError(ErrorCode.CLOSED, "the client is closed")
         data = b"".join(connection.protocol.send(event) or b"" for event in request_events(method, target, body))
         raw.settimeout(self._remaining(deadline))
         raw.sendall(data)

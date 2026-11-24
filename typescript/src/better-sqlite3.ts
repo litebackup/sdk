@@ -1,6 +1,6 @@
 /**
  * better-sqlite3 support: the file a handle has open, and an adapter for
- * managed databases.
+ * pools.
  *
  *   import Database from "better-sqlite3";
  *   import { databasePath } from "@litebackup/sdk/better-sqlite3";
@@ -9,8 +9,9 @@
  *
  * This module never imports better-sqlite3 itself; pass your Database.
  */
-import type { ScopeAdapter } from "./managed.js";
-import { absolutePath } from "./location.js";
+import { requireExistingFile } from "./existing-file.js";
+import { assertDriverSafePath } from "./location.js";
+import type { Adapter } from "./pool.js";
 import { LitebackupError } from "./types.js";
 
 /** The parts of a better-sqlite3 Database this module uses. */
@@ -30,8 +31,8 @@ export interface DatabasePathOptions {
   schema?: string;
 }
 
-/** One row of PRAGMA database_list. */
-interface DatabaseListRow {
+/** One listed of PRAGMA database_list. */
+interface DatabaseListEntry {
   name: string;
   file: string;
 }
@@ -43,38 +44,48 @@ interface DatabaseListRow {
  */
 export function databasePath(db: BetterSqlite3Database, options: DatabasePathOptions = {}): string {
   const schema = options.schema ?? "main";
+  if (!db.open) {
+    throw new LitebackupError("invalid_argument", "the database is closed; pass an open handle", 0);
+  }
+  // SQLite reports the file it opened, even when the working directory has
+  // changed since a relative path was opened.
+  const databases = db.pragma("database_list") as DatabaseListEntry[];
+  const listed = databases.find((candidate) => candidate.name === schema);
   if (schema === "main") {
-    if (db.memory || db.name === "" || db.name === ":memory:") {
+    if (db.memory || !listed?.file) {
       throw new LitebackupError("invalid_argument", "an in-memory or temporary database has no file to back up; open it from a path", 0);
     }
-    return absolutePath(db.name);
+    return listed.file;
   }
-  const rows = db.pragma("database_list") as DatabaseListRow[];
-  const row = rows.find((candidate) => candidate.name === schema);
-  if (!row) {
+  if (!listed) {
     throw new LitebackupError("invalid_argument", `no attached database named ${JSON.stringify(schema)}`, 0);
   }
-  if (!row.file) {
+  if (!listed.file) {
     throw new LitebackupError("invalid_argument", `the attached database ${JSON.stringify(schema)} is in memory or temporary and has no file to back up`, 0);
   }
-  return row.file;
+  return listed.file;
 }
 
 /**
- * A managed-database adapter that opens the path with your better-sqlite3
- * Database class. close rolls back a transaction the work left unfinished,
- * never commits it, and closes the handle.
+ * A pool adapter that opens the path with your better-sqlite3 Database class
+ * and the options given, with fileMustExist set: open refuses a missing file
+ * with not_found and never creates one. close rolls back a transaction the
+ * work left unfinished, never commits it, and closes the handle.
  *
- *   await litebackup.databases.managed("agents/42.sqlite",
- *     { to: path, durability: "cloud", adapter: adapter(Database) },
+ *   const pool = litebackup.databases.pool({ adapter: adapter(Database) });
+ *   await pool.lease("agents/42.sqlite", { path },
  *     (db) => db.prepare("INSERT INTO steps (body) VALUES (?)").run(step));
  */
-export function adapter<Database extends BetterSqlite3Database, DatabaseOptions = unknown>(
+export function adapter<Database extends BetterSqlite3Database, DatabaseOptions extends object = object>(
   DatabaseClass: new (path: string, options?: DatabaseOptions) => Database,
   databaseOptions?: DatabaseOptions,
-): ScopeAdapter<Database> {
+): Adapter<Database> {
   return {
-    open: (path) => new DatabaseClass(path, databaseOptions),
+    open: (path) => {
+      assertDriverSafePath(path);
+      requireExistingFile(path);
+      return new DatabaseClass(path, { ...databaseOptions, fileMustExist: true } as DatabaseOptions);
+    },
     close: (db) => {
       if (!db.open) {
         return;

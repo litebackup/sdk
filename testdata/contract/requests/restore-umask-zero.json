@@ -1,0 +1,29 @@
+{
+  "description": "A umask of 0 is sent, not left out.",
+  "operation": "databases.restore",
+  "args": {
+    "name": "main.sqlite",
+    "path": "/tmp/r.sqlite",
+    "version": 7,
+    "umask": 0
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/databases/restore",
+    "query": {},
+    "body": {
+      "name": "main.sqlite",
+      "path": "/tmp/r.sqlite",
+      "version": 7,
+      "umask": 0
+    }
+  },
+  "response": {
+    "name": "main.sqlite",
+    "path": "{cwd}/restored.sqlite",
+    "version": 3,
+    "page_count": 2,
+    "page_size": 4096,
+    "state_digest": "abc"
+  }
+}

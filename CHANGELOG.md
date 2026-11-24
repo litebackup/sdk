@@ -1,110 +1,142 @@
 # Changelog
 
-## 1.0.0
+## 1.1.0
 
-The first public release, with a Python SDK. This SDK refuses a litebackup
-client older than 1.0.0 with `incompatible_version`. The npm packages and
-wheels bundle 1.0.0. Where the CLI is installed separately, upgrade it, then
-run `litebackup drain --session NAME` once so the next call starts the new
-daemon. The server is unchanged from 0.7.0.
+The Litebackup SDKs for TypeScript, Python, and Go. They need the litebackup
+client 1.1.0: an SDK refuses an older client with `daemon_unsupported`, and the
+client answers an SDK older than 1.1.0 with 426 `sdk_unsupported`. The npm
+package and the wheels bundle the client; Go finds it through `LITEBACKUP_PATH`
+or `PATH`.
 
-- **Python.** `pip install litebackup`: `Litebackup` and `AsyncLitebackup`, with
-  integrations for sqlite3, aiosqlite, SQLAlchemy, Django, and FastAPI. Wheels
-  bundle the client for Linux (glibc and musl) and macOS on x64 and arm64.
-- **Registration is idempotent.** Starting a backup rule again with the same
-  path, name, prefix, watch, and local database limit returns the saved rule.
-  Other settings for a saved path fail with 409 `exists`, and the error carries
-  the saved rule. Earlier clients answered 400 `invalid_argument` for a
-  changed destination and silently kept a changed watch or limit.
-- **Managed scopes.** `databases.managed` (TypeScript, Python) and
-  `litebackup.Managed` (Go) acquire, open, run, close, and release a database.
-  A failed close never releases; failed work keeps its error first.
-- **Errors** have `details`: the answer's other fields under their wire names.
-  New SDK codes are `binary_not_found`, `incompatible_version`, and
-  `scope_cleanup_failed`.
-- **Iterators**: TypeScript `databases.iterate()`, `databases.iterateVersions()`;
-  Python `iter_all()`, `iter_versions()`; Go `AllDatabases`, `AllVersions`,
-  `WatchEvents`. Event watches retry failed long-polls with backoff.
-- **Every TypeScript operation takes `signal`.** Calls with a server-side
-  timeout get a client-side deadline 30 seconds past it.
-
-| 0.7.0 | 1.0.0 |
-| --- | --- |
-| TypeScript `backups.start(db)` with a better-sqlite3 handle; `SQLiteHandle` | `backups.start(databasePath(db))` from `@litebackup/sdk/better-sqlite3`, `/node-sqlite`, or `/drizzle` |
-| TypeScript `backups.once(handle)` | `backups.once(path)` |
-| Restore times sent as `2026-11-15T09:30:00.000Z` | `2026-11-15T09:30:00Z`; fractions only when not zero |
-| TypeScript `acquire` sending `maintenance: false`, a zero `timeout`, or other defaults | Options equal to the defaults are not sent |
-| TypeScript `events.watch()` throwing on the first failed long-poll | Retries with backoff; `onError` hears each failure |
-| Go `Version`, `DatabasePage` | `RestorableVersion`, `DatabaseStatusList` (generated, wire names intact) |
-| Go optional times as `*time.Time` | `time.Time`; absent is the zero time |
-| Go `Role`, `State` string types | `Role` aliases `DatabaseStatusRole`; states are `DatabaseStatusState` constants |
-| Go errors from `Binary()` and launch as plain errors | `*Error` with `binary_not_found` or `launch_failed` |
-| `scripts/stage-platforms DIST` with build archives | `scripts/stage-platforms RELEASE-DIRECTORY METADATA-JSON`, verified |
-
-## 0.7.0
-
-The SDK API is unchanged from 0.6.1. Bundled Litebackup 0.7.0 adds dismissible
-action messages to the console and setup screens while keeping form validation
-beside its form.
-
-## 0.6.1
-
-The same SDK as 0.6.0, released with Litebackup 0.6.1.
-
-## 0.6.0
-
-This release needs Litebackup server 0.6.0, so upgrade the server before
-clients. Large uploads that fail partway now resume from what the server
-already staged instead of starting over.
-
-- `DatabaseStatus.state` can be `retrying`: an origin whose syncs fail and
-  run again. `lastError` says why.
-- `DatabaseStatus.firstUnsyncedChangeTime` is when the first change the server
-  lacks was seen. It is absent when the server has every change seen, and it
-  may be earlier than the real first change, never later.
-- `DatabaseStatus.nextRetryTime` is when the next attempt of a failed sync
-  runs.
-
-## 0.5.0
-
-Create a TypeScript client with `const litebackup = new Litebackup()`.
-Set `LITEBACKUP_TOKEN` to the value from **Machines → Add machine**, or pass
-`{ token }` to the constructor.
-
-| 0.4.x | 0.5.0 |
-| --- | --- |
-| `await Litebackup.connect(options)` | `new Litebackup(options)`, with optional `await litebackup.connect()` |
-| `startBackup(db)` | `litebackup.backups.start(db)` |
-| `backup(path, { wait: "cloud" })` | `litebackup.backups.once(path, { wait: "cloud" })` |
-| `stopBackup(name)`, `stopBackupRule(id)` | `litebackup.backups.stop(name)`, `litebackup.rules.stop(id)` |
-| `restore(name, { to })` | `litebackup.databases.restore(name, { to })` |
-| `replicate(name)`, `failover(path)` | `litebackup.replicas.start(name)`, `litebackup.failovers.start(path)` |
-| `replicatePrefix(prefix, options)` | `litebackup.replicas.startPrefix(prefix, options)` |
-| `acquire`, `release`, `offload`, `writer`, `versions` | Same method on `litebackup.databases` |
-| `client.backups.list()` | `litebackup.rules.list()` |
-| `client.database(name)`, `client.databases()`, `client.sync(name)` | `litebackup.databases.get(name)`, `litebackup.databases.list()`, `litebackup.databases.sync(name)` |
-| `client.databasesPage(after, limit)` | `litebackup.databases.page({ after, limit })` |
-| `client.status(after, limit)`, `client.shutdown(options)` | `litebackup.session.status({ after, limit })`, `litebackup.session.shutdown(options)` |
-| `client.eventPage({ after, waitMillis })`, `client.events(options)` | `litebackup.events.page({ after, wait: waitMillis })`, `litebackup.events.watch(options)` |
-| `await sharedClient(options)`, `ConnectOptions`, `SharedClientOptions` | Create and retain one `new Litebackup(options)`. Its configuration type is `LitebackupOptions`. |
-| `client.session` (session name) | `(await litebackup.session.status()).session` |
-
-Pass the session, token, environment, or socket path to the constructor. Keep
-an explicit socket path in your configuration if you need to read it back.
-The package exports `Failover` as a TypeScript type. Get its instance from
-`await litebackup.failovers.start(path)`.
-
-Starting a rule acknowledges durable local registration. Discovery and upload
-continue after it returns. A one-shot job finishes after acknowledgement at
-the chosen destination and releases its writer lease. Fresh jobs join with a
-temporary key. Install the 0.5.0 server before upgrading clients.
-
-## 0.4.0
-
-**Breaking change.** `litebackup backup` now runs once in the foreground and waits for server acknowledgement. Existing scripts that need continuous backup must switch to `litebackup start`. Use `litebackup stop NAME` for a single-file backup, `litebackup stop --rule ID` for an entire backup rule, and `backup PATH --wait cloud` for a scheduled job that must reach the bucket.
-
-TypeScript applications should await `startBackup(db)`. Go applications should call `StartBackup(ctx, path, nil)` for the default destination. Both return after durable local registration. Destination names preserve case and spelling.
-
-After upgrading, use `litebackup rules` and `litebackup status` to record existing source paths, rule IDs, and remote names. Remove each old rule with `litebackup stop --rule ID`, then register it again with `litebackup start`. For a single file, supply its previous remote name explicitly to keep publishing to that history. For a glob or directory, confirm that its prefix and relative filenames still produce the names you want.
-
-Go configuration types now use `Args` and are passed by pointer. For example, pass `nil` for defaults or `&litebackup.StartBackupArgs{Prefix: "tenants/"}` for an explicit prefix. TypeScript keeps its `Options` interfaces.
+- **One contract.** `npm install @litebackup/sdk`, `pip install litebackup`, and
+  `go get github.com/litebackup/sdk/litebackup` share the same operations,
+  request bodies, errors, and lifecycle rules. Error codes take their values
+  from `client-openapi.yaml`, which declares every header and every 426.
+- **Python** has `Litebackup` and `AsyncLitebackup`, with integrations for
+  sqlite3, aiosqlite, SQLAlchemy, Django, and FastAPI. Wheels bundle the client
+  for Linux (glibc and musl) and macOS on x64 and arm64.
+- **Driver helpers.** `databasePath(db)` from `@litebackup/sdk/better-sqlite3`,
+  `/node-sqlite`, and `/drizzle`, and `database_path()` from the Python driver
+  integrations, return the file a connection opened. In Go, `sqlitedsn`
+  resolves a driver's DSN to its file.
+- **One credential.** `LITEBACKUP_API_KEY` holds an API key or a join token, then
+  `@` and the server address. A join token is exchanged once for a key of the
+  machine; an API key is used as it is. The client option is `APIKey` in Go,
+  `apiKey` in TypeScript, and `api_key` in Python. An invite token or anything
+  else is `invalid_argument` before anything runs. The daemon uses the key it
+  saved unless the variable holds a different credential.
+- **Another credential needs a drain.** While the client holds write locks, a
+  different credential is refused with `drain_required`, and nothing is sent or
+  saved. Shut the client down with the current credential, then connect with the
+  new one; `litebackup up --drop-locks` drops the locks when the old credential
+  does not work, and each database takes a new lock at its next sync.
+- **Idempotent registration.** Starting a backup rule again with the same path
+  and settings returns the saved rule. Other settings for a saved path fail
+  with `rule_exists`, and the error carries the saved rule. A restore never
+  overwrites a file: an existing one, or journal files beside it, is
+  `file_exists`.
+- **Paths.** Restore, acquire, leases, and single replicas take `path`
+  (Go `Path`); prefix replicas take `directory` (Go `Directory`), as does
+  stopping one.
+- **Pools.** `databases.pool` (TypeScript, Python) and `litebackup.NewPool`
+  (Go) keep databases open between calls. `use` runs work with a backup
+  rule's database, bringing an offloaded copy back first; `lease` runs work
+  with a database that moves between machines, keeping its write lock until
+  it is idle for a minute, the pool releases it, or the pool closes, creating
+  a new one on first use; another machine's lease waits for it with
+  `lockTimeout`. A failed
+  close never releases; a failed release is a `LeaseCleanupError` with its
+  `step`. Adapters open existing files only; Go's `SQLAdapter` takes a `DSN`
+  function, and `DatabasePath` reads the file an open `*sql.DB` uses.
+- **Offload.** An offload removes a released, closed, unchanged copy once the
+  server holds its last version. `cloud` durability waits for the bucket: offload's
+  and release's `durability`, and `offloadDurability` / `offload_durability` /
+  `OffloadDurability` on acquire and on a backup start. Backup rules and acquired
+  databases report their `offload_durability`; acquire's `offloadOnRelease`
+  (`offload_on_release`, `OffloadOnRelease`) turns the offload on. `not_durable` means the chosen
+  durability does not hold the synced version yet.
+- **Acquire.** The answer's `decision` is `created`, `matched`, `resumed`,
+  `downloaded`, `fast_forwarded`, or `replaced`. A local file that differs from
+  the head and continues no head this machine synced is refused with 409
+  `conflict` and left untouched; `discardLocal` (`discard_local`, Go
+  `DiscardLocal`, `litebackup acquire --discard-local`) writes the
+  head over it.
+- **Lock errors.** `lock_unavailable` means another machine holds the write lock
+  a call asks for. A foreground backup refused because something else writes the
+  database is `busy`. A lost lock turns the copy `conflicted` with a
+  `lock_lost` event, its file as it was, and apps can still write to it.
+  An acquire resumes the copy while the head is still the version it last synced.
+- **Version codes.** `daemon_unsupported`, `sdk_unsupported`, and
+  `client_unsupported` each name the side that is too old. A refusal from the
+  server arrives as `client_unsupported` (426), or with 503 as `not_configured`,
+  `wrong_server`, `unauthenticated`, `forbidden`, `plan_limit`, or `integrity`;
+  any other refusal is `unavailable`.
+- **Failover.** A failover reports the starting role once, then every change,
+  through `OnRoleChange`, `on_role_change`, and the TypeScript `origin`,
+  `replica`, and `unknown` listeners. TypeScript calls them on the next turn of
+  the event loop, so register them right after `failovers.start()` resolves.
+- **Unknown role.** While the daemon does not answer (`connection_failed`, a call
+  timeout, `daemon_unsupported`) the role is `unknown` at once, and 15 s of failed
+  reads leave it unconfirmed. `IsOrigin()`, `isOrigin`, and `is_origin` are false
+  then, so a health route stops sending writes to a machine whose daemon stopped.
+  Once the daemon answers, the follower reads its role and reports it. Failover
+  long-polls wait 10 s.
+- **Diverged files.** A failover file that holds writes the server lacks, or
+  differs from the head when the machine starts as the origin, stops there: the
+  file is left as it is, the database is `conflicted`, and `OnRefused`,
+  `on_refused`, or the `refused` listener hears the daemon's message. A replica
+  start over a file that is not empty, the head, or a clean copy of its last
+  synced version is refused with 409 `conflict`. `discardLocal` writes the head
+  over the file (decision `replaced`).
+- **Paging.** Each listing has a method for all of it, one for a page, and one for
+  each item in turn: TypeScript `databases.all()`, `allVersions()`, and
+  `versionsPage()`; Python `databases.all()` and `all_versions()`; Go
+  `AllDatabases`, `AllVersions`, and `WatchEvents`. Event watches retry failed
+  long-polls with backoff.
+- **Events.** The client keeps events for 30 days and at most 100,000, except
+  the current `path_unreadable` events (a path a backup rule cannot read). An
+  events cursor older than the oldest event kept
+  is answered with 410 `cursor_expired`, which ends a watch (Go
+  `CodeCursorExpired`, TypeScript `ErrorCode.cursorExpired`, Python
+  `ErrorCode.CURSOR_EXPIRED`). A failover resumes at the log's end and reads its
+  role again.
+- **Statuses.** A backup or failover origin that holds no write lock, as after a
+  start or a drain, is `pending` until a sync takes the lock. A database this
+  machine released or drained has an empty `writer_machine_label`.
+- **Names.** A writer has `writer_machine_label` and `acquired_time`; a database
+  status has `writer_machine_label`; a prefix replica has `database_count`, and a
+  replica start answers with `prefix_replica`. `synced_cloud.archived` is when the
+  server recorded the version as archived. `testdata/contract/names/sdk-names.json`
+  lists the names the three SDKs share, and each SDK's tests check them.
+- **Shutdown.** `ShutdownResult` has `released` and `failed`; `failed` lists a
+  `DrainFailure` (`name`, `code`, `message`) for each database the drain could not
+  sync, wait for, or release. Each keeps any write lock it holds, and an empty
+  `failed` is the only complete shutdown.
+- **Versions.** A listed version the primary bucket holds has `archived` (Go
+  `Archived`, zero when absent; TypeScript an optional string; Python
+  `datetime | None`). A version synced between archive passes has none, and
+  restores from the server's disk until history pruning removes it.
+- **Revert.** `databases.revert(name, version | time)` (Go `Revert(ctx, name,
+  &RevertArgs{Version, Time})`) publishes a past version's content again as a new
+  head, one past the current head, and answers with `RevertResult`. Every later
+  version stays restorable. Only a closed origin of this machine reverts
+  (`still_open`); a replica or standby is `invalid_argument`, and a file holding
+  writes the server lacks is `conflict`. A version and a time together, neither,
+  or a version below 1 is `invalid_argument` before anything is sent.
+- **Binary lookup.** A binary path option (`BinaryPath`, `binaryPath`,
+  `binary_path`) or `LITEBACKUP_PATH` that names no file is `binary_not_found`,
+  with the path and the install command, and never falls back to another binary.
+  A file that exists but cannot run is `launch_failed`.
+- **Umask.** Acquire and restore send the caller's umask, so a file the daemon
+  creates gets 0666 less it. The `umask` option (Go `Umask *fs.FileMode`) gives
+  another; a value outside 0 to 0777 is `invalid_argument`. A copy the head
+  overwrites keeps its bits.
+- **Messages.** A server refusal reads as its message alone, with the code in the
+  code field. `launch_failed` carries the launch command's own message.
+- **Errors.** Every failure is a `LitebackupError` (Go `*litebackup.Error`,
+  matched with `litebackup.IsCode`) with a `code` and the answer's other fields in
+  `details`.
+- **Cancellation.** TypeScript operations take a `signal`, Python async calls honor
+  task cancellation, and Go calls take a context. Calls with a server-side timeout
+  get a client-side deadline 30 seconds past it, and closing a client ends its
+  calls, watches, and foreground backups.

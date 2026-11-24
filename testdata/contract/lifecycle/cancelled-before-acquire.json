@@ -1,11 +1,5 @@
 {
-  "description": "A scope cancelled before it starts sends nothing.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
-    "durability": "cloud",
-    "offload": true
-  },
+  "description": "A lease cancelled before it starts sends nothing.",
   "fail": [],
   "cancel": "before",
   "acquire_response": {
@@ -28,7 +22,7 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [],
@@ -37,6 +31,13 @@
       {
         "code": "cancelled"
       }
-    ]
+    ],
+    "close_raised": []
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "cloud",
+    "offload": true
   }
 }

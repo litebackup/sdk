@@ -1,0 +1,41 @@
+{
+  "description": "A revert's time is sent in UTC without zero fractions.",
+  "operation": "databases.revert",
+  "args": {
+    "name": "main.sqlite",
+    "time": "2026-11-15T10:30:00+01:00"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/v1/databases/revert",
+    "query": {},
+    "body": {
+      "name": "main.sqlite",
+      "time": "2026-11-15T09:30:00Z"
+    }
+  },
+  "response": {
+    "database": {
+      "name": "main.sqlite",
+      "path": "{cwd}/main.sqlite",
+      "role": "origin",
+      "state": "synced",
+      "acquired": true,
+      "failover": false,
+      "local_changed": false,
+      "synced_server": {
+        "version": 9
+      },
+      "synced_cloud": {
+        "version": 8
+      },
+      "journal_mode": "wal",
+      "page_count": 2,
+      "sync_count": 9,
+      "hint_misses": 0
+    },
+    "source_version": 7,
+    "version": 9,
+    "state_digest": "abc"
+  }
+}

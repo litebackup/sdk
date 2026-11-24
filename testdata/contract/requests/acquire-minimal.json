@@ -9,7 +9,8 @@
     "path": "/v1/databases/acquire",
     "query": {},
     "body": {
-      "name": "agents/42.sqlite"
+      "name": "agents/42.sqlite",
+      "umask": "{umask}"
     }
   },
   "response": {
@@ -32,6 +33,6 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   }
 }

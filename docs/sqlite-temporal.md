@@ -41,7 +41,6 @@ export async function backupDatabases(paths: string[]): Promise<void> {
     try {
       await litebackup.backups.once(path, {
         prefix: "scheduled/",
-        wait: "cloud",
         timeout: "30m",
         signal: context.cancellationSignal,
       });
@@ -54,10 +53,10 @@ export async function backupDatabases(paths: string[]): Promise<void> {
 
 For fresh workers, choose **Multiple machines** in **Machines → Add machine**.
 Each path in this Activity makes a separate foreground call and spends one token
-use when it enrolls. Allow enough uses for scheduled runs and Activity retries.
+use when it joins. Allow enough uses for scheduled runs and Activity retries.
 
 Heartbeats let Temporal detect an unavailable Worker and deliver cancellation.
-The Activity succeeds after all files reach the bucket and their writer locks are released. A retry can back up already completed files again, possibly with newer
+The Activity succeeds after all files reach your server and their writer locks are released; add `durability: "cloud"` to wait for the bucket too. A retry can back up already completed files again, possibly with newer
 writes.
 
 ## Workflow: call the Activity
@@ -111,7 +110,7 @@ try {
 }
 ```
 
-Compile to JavaScript before starting `worker.js`. Set `LITEBACKUP_TOKEN` for each fresh job, or run under the already joined client's OS user. This host-specific
+Compile to JavaScript before starting `worker.js`. Set `LITEBACKUP_API_KEY` for each fresh job, or run under the already joined client's OS user. This host-specific
 queue should have one active Activity Worker for these local files. Do not
 put unrelated database hosts on the same queue. The Workflow's path must
 resolve to the compiled `workflows.js` beside the compiled worker.

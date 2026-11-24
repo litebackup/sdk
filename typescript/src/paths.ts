@@ -1,5 +1,5 @@
 import { LitebackupError } from "./types.js";
-import { readFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 
@@ -59,7 +59,7 @@ function userConfiguration(home: string): UserConfiguration | undefined {
  * service of their own, that user uses the directory it recorded, whatever
  * this process's environment. Everyone else uses
  * $XDG_RUNTIME_DIR/litebackup/<session>/client.sock, or a per-user directory
- * under the temporary directory.
+ * under the temporary directory, which must be this user's alone.
  */
 export function sessionSocket(
   session: string | undefined,
@@ -79,6 +79,36 @@ export function sessionSocket(
   if (user) {
     return { session: name, socketPath: join(user.runtime_directory, name, "client.sock") };
   }
-  const runtimeRoot = environment.XDG_RUNTIME_DIR || join(environment.TMPDIR || tmpdir(), `litebackup-${uid}`);
+  let runtimeRoot = environment.XDG_RUNTIME_DIR;
+  if (!runtimeRoot) {
+    runtimeRoot = join(environment.TMPDIR || tmpdir(), `litebackup-${uid}`);
+    privateRuntimeDirectory(runtimeRoot, uid);
+  }
   return { session: name, socketPath: join(runtimeRoot, "litebackup", name, "client.sock") };
+}
+
+/**
+ * Makes sure the per-user runtime directory used without XDG_RUNTIME_DIR is
+ * this user's own, as litebackup does: the temporary directory is shared, so
+ * another local user could create it first and answer as the daemon. It
+ * creates the directory with mode 0700 when it is missing, and refuses one
+ * that is a symlink, is not a directory, belongs to another user, or is open
+ * to anyone else.
+ */
+function privateRuntimeDirectory(directory: string, uid: number): void {
+  try {
+    mkdirSync(directory, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw new LitebackupError("invalid_argument", `creating ${directory} failed: ${String(error)}`, 0, { cause: error });
+    }
+  }
+  const status = lstatSync(directory);
+  if (!status.isDirectory() || status.uid !== uid || (status.mode & 0o077) !== 0) {
+    throw new LitebackupError(
+      "invalid_argument",
+      `${directory} is not a directory of this user's alone; remove it or set XDG_RUNTIME_DIR to this user's own directory`,
+      0,
+    );
+  }
 }

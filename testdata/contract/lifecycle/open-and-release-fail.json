@@ -1,11 +1,5 @@
 {
-  "description": "A failed open and release raise both, open first.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
-    "durability": "cloud",
-    "offload": true
-  },
+  "description": "A failed open releases at once; when that release fails too, both are raised, open first, and closing the pool tries the release again.",
   "fail": [
     "open",
     "release"
@@ -30,21 +24,23 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [
       "acquire",
       "open",
+      "release",
       "release"
     ],
     "acquire_body": {
       "name": "agents/42.sqlite",
-      "path": "{cwd}/agents/42.sqlite"
+      "path": "{cwd}/agents/42.sqlite",
+      "umask": "{umask}"
     },
     "release_body": {
       "name": "agents/42.sqlite",
-      "wait": "cloud",
+      "durability": "cloud",
       "timeout_millis": 600000
     },
     "raised": [
@@ -52,7 +48,20 @@
         "source": "open"
       },
       {
-        "code": "scope_cleanup_failed",
+        "code": "lease_cleanup_failed",
+        "step": "release",
+        "cause": "release",
+        "details": {
+          "step": "release",
+          "name": "agents/42.sqlite",
+          "path": "{cwd}/agents/42.sqlite",
+          "durability": "cloud"
+        }
+      }
+    ],
+    "close_raised": [
+      {
+        "code": "lease_cleanup_failed",
         "step": "release",
         "cause": "release",
         "details": {
@@ -63,5 +72,11 @@
         }
       }
     ]
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "cloud",
+    "offload": true
   }
 }

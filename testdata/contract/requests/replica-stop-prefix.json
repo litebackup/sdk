@@ -3,7 +3,7 @@
   "operation": "replicas.stop_prefix",
   "args": {
     "prefix": "tenants",
-    "to": "replicas"
+    "directory": "replicas"
   },
   "request": {
     "method": "POST",
@@ -11,7 +11,7 @@
     "query": {},
     "body": {
       "prefix": "tenants",
-      "to": "{cwd}/replicas"
+      "directory": "{cwd}/replicas"
     }
   },
   "response": {}

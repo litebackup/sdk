@@ -3,10 +3,10 @@
 On the server, create a token for 20 agents rolling out over the next day.
 
 ```sh
-litebackup server join-token create --name agents --namespace agents --uses 20 --expires-in 24h
+litebackup server join-token create --name agents --namespace agents --uses 20 --lifetime 24h
 ```
 
-Distribute the token with the server address as `LITEBACKUP_TOKEN`. Each machine
+Distribute the token with the server address as `LITEBACKUP_API_KEY`. Each machine
 needs its own persistent client state directory. Start a rule on each machine
 with a distinct remote name in the token's namespace.
 

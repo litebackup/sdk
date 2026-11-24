@@ -11,5 +11,5 @@ output-options:
   name-normalizer: ToCamelCaseWithInitialisms
   prefer-skip-optional-pointer: true
   exclude-schemas: [Error, Failover, Empty]
-  exclude-operation-ids: [showStatus,listDatabases,showDatabaseStatus,listVersions,restoreDatabase,syncDatabase,acquireDatabase,releaseDatabase,offloadDatabase,showWriter,startBackup,listBackups,stopBackup,startFailover,startReplica,listReplicas,stopReplica,listConflicts,deleteConflict,listEvents,shutdownSession]
+  exclude-operation-ids: [showStatus,listDatabases,showDatabaseStatus,listVersions,restoreDatabase,syncDatabase,acquireDatabase,releaseDatabase,offloadDatabase,showWriter,startBackup,listBackups,stopBackup,startFailover,startReplica,listReplicas,stopReplica,listEvents,restartSession,shutdownSession]
   skip-prune: true

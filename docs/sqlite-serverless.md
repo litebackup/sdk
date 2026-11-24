@@ -1,17 +1,17 @@
 # Back up SQLite from a disposable worker
 
 Give the worker access to the SQLite file and its WAL, writable temporary
-storage, network access to the server, and the value of `LITEBACKUP_TOKEN`
+storage, network access to the server, and the value of `LITEBACKUP_API_KEY`
 from **Machines → Add machine**. Select **Multiple machines** for recurring
-jobs and allow enough uses for each call and any retries that enroll.
-Await the upload before the invocation returns.
+jobs and allow enough uses for each call and any retries that join.
+Await the upload to your server before the invocation returns.
 
 ```ts
 import { Litebackup } from "@litebackup/sdk";
 
 const litebackup = new Litebackup();
-export async function run(): Promise<void> {
-  await litebackup.backups.once("/data/main.sqlite", { wait: "cloud", timeout: "10m" });
+export async function handler(): Promise<void> {
+  await litebackup.backups.once("/data/main.sqlite", { timeout: "10m" });
 }
 ```
 

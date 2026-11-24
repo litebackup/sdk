@@ -1,0 +1,11 @@
+{
+  "description": "A durability other than server or cloud sends nothing.",
+  "operation": "databases.offload",
+  "args": {
+    "name": "main.sqlite",
+    "durability": "none"
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

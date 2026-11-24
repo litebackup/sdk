@@ -99,8 +99,8 @@ machine that holds your SQLite file:
 
 ```sh
 curl -fsSL https://litebackup.com/cli.sh | bash
-export LITEBACKUP_TOKEN='JOIN_TOKEN@your-instance.litebackup.cloud'
-litebackup up "$LITEBACKUP_TOKEN"
+export LITEBACKUP_API_KEY='JOIN_TOKEN@your-instance.litebackup.cloud'
+litebackup up "$LITEBACKUP_API_KEY"
 litebackup start /var/lib/app/main.sqlite
 litebackup status
 ```
@@ -116,14 +116,19 @@ versions: registration alone does not mean an upload has completed. Run a
 ## Operate the server
 
 The console shows databases, machine ownership, bucket status, retention,
-disk, and tuning. To administer remotely with the CLI:
+disk, and server settings. Saving server settings restarts the server: it exits with
+status 75, and its supervisor, the Apps launcher, starts it again. A server
+run by hand, as with `--development`, needs a supervisor that restarts it on
+that status, or it stays stopped. To administer remotely with the CLI:
 
 ```sh
 litebackup admin login
 litebackup admin --help
 ```
 
-The server exposes local health and metrics on `127.0.0.1:8099`:
+The server exposes local health and metrics on `127.0.0.1:8099`, or on the
+address `--health-address` (`LITEBACKUP_HEALTH_ADDRESS`) sets; give each
+server on one host its own:
 
 ```sh
 # On the server VM:

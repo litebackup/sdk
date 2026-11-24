@@ -20,10 +20,12 @@
     "failover": false,
     "local_changed": false,
     "synced_server": {
-      "version": 3
+      "version": 3,
+      "time": "2026-11-15T09:31:00Z"
     },
     "synced_cloud": {
-      "version": 2
+      "version": 2,
+      "archived": "2026-11-15T09:30:00Z"
     },
     "journal_mode": "wal",
     "page_count": 2,

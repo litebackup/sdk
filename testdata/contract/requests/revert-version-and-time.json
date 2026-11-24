@@ -1,0 +1,12 @@
+{
+  "description": "A revert with a version and a time together sends nothing.",
+  "operation": "databases.revert",
+  "args": {
+    "name": "main.sqlite",
+    "version": 3,
+    "time": "2026-11-15T09:30:00Z"
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "description": "One name per operation and type in all three SDKs. An operation is group.method: TypeScript writes the method in camelCase, Python as it is here, and Go names it as go says: a method of Client, or a package function when go_function is set. Every type is exported under the same name by all three. Every operation a contract fixture runs is listed here.",
+  "operations": [
+    {
+      "operation": "backups.start",
+      "go": "StartBackup"
+    },
+    {
+      "operation": "backups.once",
+      "go": "Backup"
+    },
+    {
+      "operation": "backups.stop",
+      "go": "StopBackup"
+    },
+    {
+      "operation": "rules.list",
+      "go": "BackupRules"
+    },
+    {
+      "operation": "rules.stop",
+      "go": "StopBackupRule"
+    },
+    {
+      "operation": "databases.get",
+      "go": "Database"
+    },
+    {
+      "operation": "databases.page",
+      "go": "DatabasesPage"
+    },
+    {
+      "operation": "databases.all",
+      "go": "AllDatabases"
+    },
+    {
+      "operation": "databases.list",
+      "go": "Databases"
+    },
+    {
+      "operation": "databases.versions",
+      "go": "Versions"
+    },
+    {
+      "operation": "databases.versions_page",
+      "go": "VersionsPage"
+    },
+    {
+      "operation": "databases.all_versions",
+      "go": "AllVersions"
+    },
+    {
+      "operation": "databases.restore",
+      "go": "Restore"
+    },
+    {
+      "operation": "databases.revert",
+      "go": "Revert"
+    },
+    {
+      "operation": "databases.sync",
+      "go": "Sync"
+    },
+    {
+      "operation": "databases.offload",
+      "go": "Offload"
+    },
+    {
+      "operation": "databases.writer",
+      "go": "Writer"
+    },
+    {
+      "operation": "databases.acquire",
+      "go": "Acquire"
+    },
+    {
+      "operation": "databases.release",
+      "go": "Release"
+    },
+    {
+      "operation": "databases.pool",
+      "go": "NewPool",
+      "go_function": true
+    },
+    {
+      "operation": "replicas.start",
+      "go": "Replicate"
+    },
+    {
+      "operation": "replicas.start_prefix",
+      "go": "ReplicatePrefix"
+    },
+    {
+      "operation": "replicas.list",
+      "go": "Replicas"
+    },
+    {
+      "operation": "replicas.stop",
+      "go": "StopReplica"
+    },
+    {
+      "operation": "replicas.stop_prefix",
+      "go": "StopReplicaPrefix"
+    },
+    {
+      "operation": "events.page",
+      "go": "Events"
+    },
+    {
+      "operation": "events.watch",
+      "go": "WatchEvents"
+    },
+    {
+      "operation": "session.status",
+      "go": "Status"
+    },
+    {
+      "operation": "session.shutdown",
+      "go": "Shutdown"
+    },
+    {
+      "operation": "failovers.start",
+      "go": "StartFailover"
+    }
+  ],
+  "types": [
+    "AcquireResult",
+    "Adapter",
+    "ArchivedVersion",
+    "BackupRule",
+    "DatabaseStatus",
+    "DatabaseStatusList",
+    "DrainFailure",
+    "Durability",
+    "Event",
+    "EventList",
+    "LeaseCleanupError",
+    "Pool",
+    "PrefixReplica",
+    "ReleaseResult",
+    "ReplicaList",
+    "RestorableVersion",
+    "RestoreResult",
+    "RevertResult",
+    "ShutdownResult",
+    "Status",
+    "StopBackupResult",
+    "SyncedState",
+    "VersionList",
+    "WriteProtection",
+    "Writer"
+  ]
+}

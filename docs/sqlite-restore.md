@@ -19,12 +19,12 @@ const litebackup = new Litebackup();
 
 const available = await litebackup.databases.versions("main.sqlite");
 console.log(available);
-await litebackup.databases.restore("main.sqlite", { to: "/tmp/main-restored.sqlite" });
+await litebackup.databases.restore("main.sqlite", { path: "/tmp/main-restored.sqlite" });
 ```
 
 ```sh
 litebackup versions main.sqlite
-litebackup restore main.sqlite --to /tmp/main-restored.sqlite
+litebackup restore main.sqlite /tmp/main-restored.sqlite
 sqlite3 /tmp/main-restored.sqlite 'PRAGMA integrity_check'
 ```
 
@@ -39,13 +39,13 @@ import { Litebackup } from "@litebackup/sdk";
 
 const litebackup = new Litebackup();
 await litebackup.databases.restore("main.sqlite", {
-  to: "/tmp/main-before-migration.sqlite",
+  path: "/tmp/main-before-migration.sqlite",
   time: "2026-11-15T09:30:00Z",
 });
 ```
 
 ```sh
-litebackup restore main.sqlite --to /tmp/main-before-migration.sqlite \
+litebackup restore main.sqlite /tmp/main-before-migration.sqlite \
   --time 2026-11-15T09:30:00Z
 ```
 
@@ -62,10 +62,39 @@ using the scheduled prefix, use `scheduled/main.sqlite`.
 
 Query application tables in the restored file, validate expected records, and
 measure how long the drill took. Keep the existing app file while deciding
-whether to cut over. Stop application writes and close all SQLite handles
-before replacing a live database; account for its WAL and SHM files and the
-client's ownership state. A new restored file is not automatically registered
-as the origin of the original remote name.
+whether to roll back. A restored file is a copy: it is not the origin of the
+database's name.
+
+## Roll back under the same name
+
+To roll back, revert. A revert publishes a past version's content again as a
+new head, one past the current head, as `git revert` adds a commit, so every
+later version stays restorable:
+
+```ts
+import { Litebackup } from "@litebackup/sdk";
+
+const litebackup = new Litebackup();
+const reverted = await litebackup.databases.revert("main.sqlite", { version: 120 });
+console.log(`version ${reverted.sourceVersion} is version ${reverted.version} now`);
+```
+
+```sh
+litebackup revert main.sqlite --version 120
+```
+
+Run it on the machine that writes the database, a backup's origin or an
+acquired copy, with the app's SQLite connections closed: an open file is
+refused with `still_open`, and a replica or a failover standby with
+`invalid_argument`. A file holding writes the server lacks is refused with
+`conflict` and left as it is; let them sync first. The client takes the
+write lock when it does not hold it, puts the version in place of the
+closed file, syncs it at once, and gives back a lock it took. When that
+sync fails for any reason but a lost lock or a refused file, which are
+final, the version stays in place and the client keeps the lock and syncs
+again on its own; release an acquired database once it synced.
+`--time` (`time`) picks the newest version at or before a time, as restore
+does.
 
 If you only need a few records, [recover deleted SQLite rows](sqlite-deleted-rows.md)
 with an insert from the restored copy into the current database.
@@ -84,7 +113,7 @@ For an S3 bucket, a recovery command has this shape:
 
 ```sh
 # On the replacement server, read secrets from your recovery storage.
-# LITEBACKUP_BUCKET_SECRET_ACCESS_KEY must contain the bucket's secret access key.
+# LITEBACKUP_SECRET_ACCESS_KEY must contain the bucket's secret access key.
 litebackup server recover \
   --data-directory /var/lib/litebackup-recovered \
   --provider aws --region us-east-1 --bucket YOUR_BUCKET \

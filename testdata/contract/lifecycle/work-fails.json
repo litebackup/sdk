@@ -1,11 +1,5 @@
 {
-  "description": "Failed work still closes and releases, without offload.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
-    "durability": "cloud",
-    "offload": true
-  },
+  "description": "Failed work keeps the lease and raises its error; closing the pool closes and releases it without offload.",
   "fail": [
     "work"
   ],
@@ -29,7 +23,7 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [
@@ -41,17 +35,25 @@
     ],
     "acquire_body": {
       "name": "agents/42.sqlite",
-      "path": "{cwd}/agents/42.sqlite"
+      "path": "{cwd}/agents/42.sqlite",
+      "umask": "{umask}"
     },
     "release_body": {
       "name": "agents/42.sqlite",
-      "wait": "cloud",
+      "durability": "cloud",
       "timeout_millis": 600000
     },
     "raised": [
       {
         "source": "work"
       }
-    ]
+    ],
+    "close_raised": []
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "cloud",
+    "offload": true
   }
 }

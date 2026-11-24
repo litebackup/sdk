@@ -1,7 +1,7 @@
 // Package litebackup backs up, replicates, and restores SQLite databases with
 // Litebackup from a Go program. It talks to the litebackup daemon of a session
 // over its unix socket, as the litebackup command does, and starts the
-// daemon when it is not running, joining with LITEBACKUP_TOKEN the first time.
+// daemon when it is not running, with the credential in LITEBACKUP_API_KEY.
 //
 // The everyday calls are package functions over a shared client:
 //
@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -30,15 +31,15 @@ import (
 
 // SDKVersion is the version sent with every call. Daemons refuse SDKs older
 // than their minimum with sdk_unsupported.
-const SDKVersion = "1.0.0"
+const SDKVersion = "1.1.0"
 
 // MinimumDaemonVersion is the oldest daemon this SDK talks to. Connect
-// refuses an older one with incompatible_version.
-const MinimumDaemonVersion = "1.0.0"
+// refuses an older one with daemon_unsupported.
+const MinimumDaemonVersion = "1.1.0"
 
 const (
-	sdkVersionHeader    = "X-Litebackup-SDK-Version"
-	clientVersionHeader = "X-Litebackup-Client-Version"
+	sdkVersionHeader    = "Litebackup-SDK-Version"
+	clientVersionHeader = "Litebackup-Client-Version"
 	// responseLimit bounds one decoded response.
 	responseLimit = 64 << 20
 	// deadlineGrace is added to a call's server-side timeout for its
@@ -48,10 +49,14 @@ const (
 
 // ConnectArgs selects the session a Client talks to.
 type ConnectArgs struct {
-	// Token is the join token, TOKEN@HOST, the daemon joins with on its first
-	// start. It overrides LITEBACKUP_TOKEN. A daemon that already joined
-	// keeps its join.
-	Token string
+	// APIKey is the credential the daemon uses when it starts: an API key,
+	// or a join token it exchanges once for a key of this machine, then @
+	// and the server's address. It overrides LITEBACKUP_API_KEY. The daemon
+	// keeps the key it saved unless this holds a different credential, which
+	// the launch refuses with CodeDrainRequired while the client holds write
+	// locks; a daemon already running keeps its key until it restarts.
+	// Foreground backups use it too.
+	APIKey string
 	// Session names the session; LITEBACKUP_SESSION, then "default", when empty.
 	Session string
 	// SocketPath connects to this socket and never starts a daemon.
@@ -67,11 +72,13 @@ type Client struct {
 	session      string
 	socketPath   string
 	binaryPath   string
-	http         *http.Client
+	// apiKey is ConnectArgs.APIKey, passed to foreground backups.
+	apiKey string
+	http   *http.Client
 
 	mutex         sync.Mutex
 	clientVersion string
-	failovers     map[*FailoverRun]struct{}
+	failovers     map[*Failover]struct{}
 	closed        bool
 	// lifetime ends with Close, which aborts calls in flight.
 	lifetime context.Context
@@ -80,10 +87,13 @@ type Client struct {
 
 // Connect connects to a session's daemon, starting it like the litebackup
 // command does when nothing listens on its socket. It refuses a daemon older
-// than MinimumDaemonVersion with incompatible_version.
+// than MinimumDaemonVersion with daemon_unsupported.
 func Connect(ctx context.Context, args *ConnectArgs) (*Client, error) {
 	if args == nil {
 		args = &ConnectArgs{}
+	}
+	if _, err := checkCredential(apiKeyCredential(args)); err != nil {
+		return nil, err
 	}
 	session := args.Session
 	socket := args.SocketPath
@@ -93,7 +103,7 @@ func Connect(ctx context.Context, args *ConnectArgs) (*Client, error) {
 			return nil, invalidArgument(err.Error())
 		}
 		session, socket = resolved, path
-		if err := launchDaemon(ctx, session, socket, args.Token, args.BinaryPath); err != nil {
+		if err := launchDaemon(ctx, session, socket, args.APIKey, args.BinaryPath); err != nil {
 			return nil, err
 		}
 	}
@@ -103,6 +113,7 @@ func Connect(ctx context.Context, args *ConnectArgs) (*Client, error) {
 		session:      session,
 		socketPath:   socket,
 		binaryPath:   args.BinaryPath,
+		apiKey:       args.APIKey,
 		lifetime:     lifetime,
 		end:          end,
 		http: &http.Client{Transport: &http.Transport{
@@ -143,7 +154,15 @@ func (c *Client) checkDaemon(ctx context.Context) error {
 	if c.session != "" {
 		restart = "Stop it with `litebackup drain --session " + c.session + "` so the next call starts the new binary"
 	}
-	return &Error{Code: CodeIncompatibleVersion, Message: fmt.Sprintf("the litebackup daemon %s, and this SDK needs %s or later. %s, or restart the service if `litebackup install service` runs it", reported, MinimumDaemonVersion, restart)}
+	return &Error{
+		Code: CodeDaemonUnsupported,
+		Message: fmt.Sprintf(
+			"the litebackup daemon %s, and this SDK needs %s or later. %s, or restart the service if `litebackup install service` runs it",
+			reported,
+			MinimumDaemonVersion,
+			restart,
+		),
+	}
 }
 
 // compareVersions orders dotted numeric versions, ignoring any -suffix;
@@ -188,10 +207,12 @@ func (c *Client) Close() error {
 	c.failovers = nil
 	c.closed = true
 	c.mutex.Unlock()
-	for failover := range failovers {
-		failover.end()
-	}
+	// Calls in flight end first, so a failover callback waiting on one
+	// returns and stopFollowing does not wait on it forever.
 	c.end()
+	for failover := range failovers {
+		failover.stopFollowing()
+	}
 	c.http.CloseIdleConnections()
 	return nil
 }
@@ -210,21 +231,21 @@ func closedError() *Error {
 
 // addFailover records a failover so Close stops following it; it reports
 // false once the client is closed.
-func (c *Client) addFailover(failover *FailoverRun) bool {
+func (c *Client) addFailover(failover *Failover) bool {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if c.closed {
 		return false
 	}
 	if c.failovers == nil {
-		c.failovers = map[*FailoverRun]struct{}{}
+		c.failovers = map[*Failover]struct{}{}
 	}
 	c.failovers[failover] = struct{}{}
 	return true
 }
 
 // removeFailover forgets a stopped failover.
-func (c *Client) removeFailover(failover *FailoverRun) {
+func (c *Client) removeFailover(failover *Failover) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	delete(c.failovers, failover)
@@ -233,7 +254,14 @@ func (c *Client) removeFailover(failover *FailoverRun) {
 // call sends one request and decodes its JSON answer into result. A positive
 // serverTimeout gives the call a client-side deadline of that plus
 // deadlineGrace; otherwise only ctx and Close end the wait.
-func (c *Client) call(ctx context.Context, method string, path string, body any, result any, serverTimeout time.Duration) error {
+func (c *Client) call(
+	ctx context.Context,
+	method string,
+	path string,
+	body any,
+	answer any,
+	serverTimeout time.Duration,
+) error {
 	if c.isClosed() {
 		return closedError()
 	}
@@ -254,7 +282,12 @@ func (c *Client) call(ctx context.Context, method string, path string, body any,
 		}
 		reader = bytes.NewReader(encoded)
 	}
-	request, err := http.NewRequestWithContext(callContext, method, "http://litebackup"+path, reader)
+	request, err := http.NewRequestWithContext(
+		callContext,
+		method,
+		"http://litebackup"+path,
+		reader,
+	)
 	if err != nil {
 		return invalidArgument(err.Error())
 	}
@@ -278,11 +311,16 @@ func (c *Client) call(ctx context.Context, method string, path string, body any,
 	if response.StatusCode != http.StatusOK {
 		return responseError(response.StatusCode, content)
 	}
-	if result == nil {
+	if answer == nil {
 		return nil
 	}
-	if err := json.Unmarshal(content, result); err != nil {
-		return &Error{Code: CodeInvalidResponse, Message: fmt.Sprintf("decoding %s: %v", path, err), Status: response.StatusCode, Err: err}
+	if err := json.Unmarshal(content, answer); err != nil {
+		return &Error{
+			Code:    CodeInvalidResponse,
+			Message: fmt.Sprintf("decoding %s: %v", path, err),
+			Status:  response.StatusCode,
+			Err:     err,
+		}
 	}
 	return nil
 }
@@ -292,11 +330,19 @@ func (c *Client) call(ctx context.Context, method string, path string, body any,
 func (c *Client) transportError(ctx context.Context, callContext context.Context, err error) error {
 	switch {
 	case ctx.Err() != nil:
-		return &Error{Code: CodeCancelled, Message: "the call was cancelled; the daemon may still finish the operation", Err: ctx.Err()}
+		return &Error{
+			Code:    CodeCancelled,
+			Message: "the call was cancelled; the daemon may still finish the operation",
+			Err:     ctx.Err(),
+		}
 	case c.isClosed():
 		return closedError()
 	case callContext.Err() != nil:
-		return &Error{Code: CodeTimeout, Message: "the daemon did not answer within the call's timeout; it may still finish the operation", Err: context.DeadlineExceeded}
+		return &Error{
+			Code:    CodeTimeout,
+			Message: "the daemon did not answer within the call's timeout; it may still finish the operation",
+			Err:     context.DeadlineExceeded,
+		}
 	default:
 		return &Error{Code: CodeConnectionFailed, Message: err.Error(), Err: err}
 	}
@@ -328,16 +374,48 @@ func millis(duration time.Duration, name string) (int64, error) {
 
 // Status returns the session, its server, and the first page of databases on this machine.
 func (c *Client) Status(ctx context.Context) (*Status, error) {
-	return c.StatusPage(ctx, "", 100)
+	return c.StatusPage(ctx, nil)
 }
 
-// StatusPage returns up to limit databases whose names sort after the cursor.
-func (c *Client) StatusPage(ctx context.Context, after string, limit int) (*Status, error) {
+// StatusPageArgs selects a page of Status. Nil reads the first page of 100.
+type StatusPageArgs struct {
+	// After returns databases whose names sort after this one; pass Next to continue.
+	After string
+	// Limit returns at most this many databases, up to 1000; 100 when 0.
+	Limit int
+}
+
+// StatusPage returns the session, its server, and one page of databases.
+func (c *Client) StatusPage(ctx context.Context, args *StatusPageArgs) (*Status, error) {
+	if args == nil {
+		args = &StatusPageArgs{}
+	}
+	query, err := pageQuery(args.After, args.Limit)
+	if err != nil {
+		return nil, err
+	}
 	var status Status
-	if err := c.call(ctx, http.MethodGet, "/v1/status/show?"+url.Values{"after": {after}, "limit": {strconv.Itoa(limit)}}.Encode(), nil, &status, 0); err != nil {
+	if err := c.call(ctx, http.MethodGet, "/v1/status/show?"+query, nil, &status, 0); err != nil {
 		return nil, err
 	}
 	return &status, nil
+}
+
+// defaultPageLimit is the page size when a page's Limit is 0.
+const defaultPageLimit = 100
+
+// maximumPageLimit is the largest page of databases the daemon returns.
+const maximumPageLimit = 1000
+
+// pageQuery encodes a name cursor and a limit, defaulting the limit to 100.
+func pageQuery(after string, limit int) (string, error) {
+	if limit < 0 || limit > maximumPageLimit {
+		return "", invalidArgument("the limit must be from 1 to 1000, or 0 for 100")
+	}
+	if limit == 0 {
+		limit = defaultPageLimit
+	}
+	return url.Values{"after": {after}, "limit": {strconv.Itoa(limit)}}.Encode(), nil
 }
 
 // Databases returns every database. AllDatabases iterates with bounded memory.
@@ -352,10 +430,28 @@ func (c *Client) Databases(ctx context.Context) ([]DatabaseStatus, error) {
 	return databases, nil
 }
 
-// DatabasesPage returns one page. Pass Next as after to continue.
-func (c *Client) DatabasesPage(ctx context.Context, after string, limit int) (*DatabaseStatusList, error) {
+// DatabasesPageArgs selects a page of databases. Nil reads the first page of 100.
+type DatabasesPageArgs struct {
+	// After returns databases whose names sort after this one; pass Next to continue.
+	After string
+	// Limit returns at most this many databases, up to 1000; 100 when 0.
+	Limit int
+}
+
+// DatabasesPage returns one page of databases. Pass Next as After to continue.
+func (c *Client) DatabasesPage(
+	ctx context.Context,
+	args *DatabasesPageArgs,
+) (*DatabaseStatusList, error) {
+	if args == nil {
+		args = &DatabasesPageArgs{}
+	}
+	query, err := pageQuery(args.After, args.Limit)
+	if err != nil {
+		return nil, err
+	}
 	var page DatabaseStatusList
-	if err := c.call(ctx, http.MethodGet, "/v1/databases/list?"+url.Values{"after": {after}, "limit": {strconv.Itoa(limit)}}.Encode(), nil, &page, 0); err != nil {
+	if err := c.call(ctx, http.MethodGet, "/v1/databases/list?"+query, nil, &page, 0); err != nil {
 		return nil, err
 	}
 	return &page, nil
@@ -389,7 +485,11 @@ type VersionsArgs struct {
 
 // Versions lists the versions of a database the server can restore, oldest
 // first. AllVersions iterates with bounded memory.
-func (c *Client) Versions(ctx context.Context, name string, args *VersionsArgs) ([]RestorableVersion, error) {
+func (c *Client) Versions(
+	ctx context.Context,
+	name string,
+	args *VersionsArgs,
+) ([]RestorableVersion, error) {
 	versions := []RestorableVersion{}
 	for version, err := range c.AllVersions(ctx, name, args) {
 		if err != nil {
@@ -402,7 +502,11 @@ func (c *Client) Versions(ctx context.Context, name string, args *VersionsArgs) 
 
 // VersionsPage returns one page of versions after args.After, at most
 // args.Limit when positive. Pass Next as After to continue; 0 means no more.
-func (c *Client) VersionsPage(ctx context.Context, name string, args *VersionsArgs) (*VersionList, error) {
+func (c *Client) VersionsPage(
+	ctx context.Context,
+	name string,
+	args *VersionsArgs,
+) (*VersionList, error) {
 	if args == nil {
 		args = &VersionsArgs{}
 	}
@@ -422,25 +526,30 @@ func (c *Client) VersionsPage(ctx context.Context, name string, args *VersionsAr
 
 // RestoreArgs picks the file and the version a restore writes.
 type RestoreArgs struct {
-	// To is the new file; relative paths resolve against the working
+	// Path is the new file; relative paths resolve against the working
 	// directory. Its directory must exist, and an existing file is never
-	// overwritten (exists).
-	To string
+	// overwritten (file_exists).
+	Path string
 	// Version restores this version; the head when neither Version nor Time is set.
 	Version int64
 	// Time restores the newest version at or before this time.
 	Time time.Time
+	// Umask is the file mode creation mask the new file is created under:
+	// it gets 0666 less it, as a file the caller created would. This
+	// process's umask when nil.
+	Umask *fs.FileMode
 }
 
 // Restore writes a version of a database to a new file and checks it.
-func (c *Client) Restore(ctx context.Context, name string, args *RestoreArgs) (*RestoreResult, error) {
-	if args == nil || args.To == "" {
-		return nil, invalidArgument("restore needs a path to write to")
+func (c *Client) Restore(
+	ctx context.Context,
+	name string,
+	args *RestoreArgs,
+) (*RestoreResult, error) {
+	if err := validateRestore(args); err != nil {
+		return nil, err
 	}
-	if args.Version != 0 && !args.Time.IsZero() {
-		return nil, invalidArgument("restore takes a version or a time, not both")
-	}
-	path, err := absolutePath(args.To)
+	path, err := absolutePath(args.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -451,34 +560,95 @@ func (c *Client) Restore(ctx context.Context, name string, args *RestoreArgs) (*
 	if !args.Time.IsZero() {
 		body["time"] = args.Time.UTC().Format(time.RFC3339Nano)
 	}
-	var result RestoreResult
-	if err := c.call(ctx, http.MethodPost, "/v1/databases/restore", body, &result, 0); err != nil {
+	umask, err := requestUmask(args.Umask)
+	if err != nil {
 		return nil, err
 	}
-	return &result, nil
+	body["umask"] = *umask
+	var restored RestoreResult
+	if err := c.call(ctx, http.MethodPost, "/v1/databases/restore", body, &restored, 0); err != nil {
+		return nil, err
+	}
+	return &restored, nil
+}
+
+// RevertArgs picks the version a revert publishes again: Version or Time,
+// one of them.
+type RevertArgs struct {
+	// Version is the version whose content becomes the new head.
+	Version int64
+	// Time picks the newest version at or before it.
+	Time time.Time
+}
+
+// Revert rolls a database back under its own name: the content of a past
+// version becomes a new head, one past the current head, and every later
+// version stays restorable. The database must be one this machine acquired
+// or backs up, and its file closed (still_open otherwise); a replica or a
+// failover standby is refused (invalid_argument), and a file holding writes
+// the server lacks is refused with conflict and left untouched. The daemon
+// takes the write lock when it does not hold it and gives it back once the
+// new head is synced. When that sync fails for any reason but a lost lock or
+// a refused file, which are final, the daemon keeps the lock and syncs again
+// on its own, so release an acquired database afterwards.
+func (c *Client) Revert(
+	ctx context.Context,
+	name string,
+	args *RevertArgs,
+) (*RevertResult, error) {
+	if err := validateRevert(args); err != nil {
+		return nil, err
+	}
+	body := map[string]any{"name": name}
+	if args.Version != 0 {
+		body["version"] = args.Version
+	}
+	if !args.Time.IsZero() {
+		body["time"] = args.Time.UTC().Format(time.RFC3339Nano)
+	}
+	var reverted RevertResult
+	if err := c.call(ctx, http.MethodPost, "/v1/databases/revert", body, &reverted, 0); err != nil {
+		return nil, err
+	}
+	return &reverted, nil
 }
 
 // AcquireArgs configures an acquired database.
 type AcquireArgs struct {
-	// To is the local file; the path this machine already uses when empty,
+	// Path is the local file; the path this machine already uses when empty,
 	// which brings an offloaded database back.
-	To string
+	Path string
 	// Maintenance checkpoints on release and VACUUMs past the freelist threshold.
 	Maintenance bool
-	// OffloadReleased lets Litebackup remove the released copy once the bucket holds it.
-	OffloadReleased bool
+	// OffloadOnRelease lets Litebackup remove the local copy once
+	// OffloadDurability holds the released version; the copy stays when false.
+	OffloadOnRelease bool
+	// OffloadDurability is what an offload of the released copy waits for:
+	// DurabilityServer, the default when empty, once the server holds its
+	// last version, or DurabilityCloud once the bucket holds it too.
+	OffloadDurability Durability
 	// MachineLabel is what other machines see as the writer.
 	MachineLabel string
-	// BlockOnLost blocks local writes while the write lock is lost, instead
-	// of keeping the copy as conflicted.
-	BlockOnLost bool
 	// Timeout bounds downloading the head.
 	Timeout time.Duration
+	// LockTimeout is how long to wait while another machine holds the write
+	// lock, trying again until it is released; 0 fails at once with
+	// lock_unavailable. The daemon tries again with backoff, and the call may
+	// take Timeout plus LockTimeout.
+	LockTimeout time.Duration
+	// Umask is the file mode creation mask a file the acquire creates gets:
+	// 0666 less it, as a file the caller created would. A copy the head
+	// replaces keeps its bits. This process's umask when nil.
+	Umask *fs.FileMode
+	// DiscardLocal replaces a local file that diverged from the server head
+	// with the head, discarding its writes the head lacks. Without it such a
+	// file is refused with conflict and left untouched.
+	DiscardLocal bool
 }
 
 // acquireRequest builds the wire request for name and args.
 func acquireRequest(name string, args *AcquireArgs) (*AcquireRequest, error) {
-	path, err := absolutePath(args.To)
+	path, err := absolutePath(args.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -486,12 +656,30 @@ func acquireRequest(name string, args *AcquireArgs) (*AcquireRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	body := &AcquireRequest{Name: name, Path: path, Maintenance: args.Maintenance, MachineLabel: args.MachineLabel, TimeoutMillis: timeout}
-	if args.OffloadReleased {
-		body.Offload = AcquireRequestOffloadReleased
+	lockTimeout, err := millis(args.LockTimeout, "the lock timeout")
+	if err != nil {
+		return nil, err
 	}
-	if args.BlockOnLost {
-		body.OnLost = AcquireRequestOnLostBlock
+	body := &AcquireRequest{
+		Name:              name,
+		Path:              path,
+		Maintenance:       args.Maintenance,
+		DiscardLocal:      args.DiscardLocal,
+		MachineLabel:      args.MachineLabel,
+		TimeoutMillis:     timeout,
+		LockTimeoutMillis: lockTimeout,
+	}
+	if err := validateOffloadDurability(args.OffloadDurability); err != nil {
+		return nil, err
+	}
+	body.Umask, err = requestUmask(args.Umask)
+	if err != nil {
+		return nil, err
+	}
+	// The defaults stay off the wire, as the other SDKs leave them.
+	body.OffloadOnRelease = args.OffloadOnRelease
+	if args.OffloadDurability == DurabilityCloud {
+		body.OffloadDurability = DurabilityCloud
 	}
 	return body, nil
 }
@@ -499,7 +687,11 @@ func acquireRequest(name string, args *AcquireArgs) (*AcquireRequest, error) {
 // Acquire takes the write lock on a database and makes the local file the
 // server's head, for worker pools that move databases between machines.
 // Managed acquires, opens, closes, and releases around a function.
-func (c *Client) Acquire(ctx context.Context, name string, args *AcquireArgs) (*AcquireResult, error) {
+func (c *Client) Acquire(
+	ctx context.Context,
+	name string,
+	args *AcquireArgs,
+) (*AcquireResult, error) {
 	if args == nil {
 		args = &AcquireArgs{}
 	}
@@ -507,27 +699,42 @@ func (c *Client) Acquire(ctx context.Context, name string, args *AcquireArgs) (*
 	if err != nil {
 		return nil, err
 	}
-	var result AcquireResult
-	if err := c.call(ctx, http.MethodPost, "/v1/databases/acquire", body, &result, args.Timeout); err != nil {
+	var acquired AcquireResult
+	if err := c.call(ctx, http.MethodPost, "/v1/databases/acquire", body, &acquired, acquireCallTimeout(args)); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	return &acquired, nil
+}
+
+// acquireCallTimeout is how long an acquire's call may take: no bound when
+// Timeout is 0, as the daemon then applies its own, and otherwise Timeout
+// plus LockTimeout, the most the daemon spends waiting and downloading.
+func acquireCallTimeout(args *AcquireArgs) time.Duration {
+	if args.Timeout == 0 {
+		return 0
+	}
+	return args.Timeout + args.LockTimeout
 }
 
 // ReleaseArgs configures a release.
 type ReleaseArgs struct {
-	// Wait is server or cloud; the daemon's default when empty.
-	Wait Durability
-	// Offload removes the local file once the bucket holds the released version.
+	// Durability is server or cloud; the daemon's default when empty.
+	Durability Durability
+	// Offload removes the local file once Durability holds the released version:
+	// the server with server, the bucket with cloud.
 	Offload bool
-	// Timeout bounds waiting for the database to close and for Wait.
+	// Timeout bounds waiting for the database to close and for Durability.
 	Timeout time.Duration
 }
 
 // Release syncs an acquired database a final time, runs its maintenance, and
 // releases its write lock. Every connection to it must be closed first, or
 // it fails with still_open once Timeout runs out.
-func (c *Client) Release(ctx context.Context, name string, args *ReleaseArgs) (*ReleaseResult, error) {
+func (c *Client) Release(
+	ctx context.Context,
+	name string,
+	args *ReleaseArgs,
+) (*ReleaseResult, error) {
 	if args == nil {
 		args = &ReleaseArgs{}
 	}
@@ -536,21 +743,41 @@ func (c *Client) Release(ctx context.Context, name string, args *ReleaseArgs) (*
 		return nil, err
 	}
 	body := ReleaseRequest{Name: name, Offload: args.Offload, TimeoutMillis: timeout}
-	if args.Wait != "" && args.Wait != DurabilityNone {
-		body.Wait = ReleaseRequestWait(args.Wait)
+	if args.Durability != "" && args.Durability != DurabilityNone {
+		body.Durability = args.Durability
 	}
-	var result ReleaseResult
-	if err := c.call(ctx, http.MethodPost, "/v1/databases/release", body, &result, args.Timeout); err != nil {
+	var released ReleaseResult
+	if err := c.call(ctx, http.MethodPost, "/v1/databases/release", body, &released, args.Timeout); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	return &released, nil
 }
 
-// Offload removes the local file of a released database once the bucket
-// holds its last version. Acquire brings it back.
-func (c *Client) Offload(ctx context.Context, name string) (*DatabaseStatus, error) {
+// OffloadArgs configures an offload.
+type OffloadArgs struct {
+	// Durability is what the offload waits for before it removes the file:
+	// DurabilityServer, the daemon's default when empty, once the server
+	// holds the last version, or DurabilityCloud once the bucket holds it too.
+	Durability Durability
+}
+
+// Offload removes the local file of a released database once the server
+// holds its last version, or the bucket with DurabilityCloud; until then it
+// fails with not_durable. Acquire brings it back.
+func (c *Client) Offload(
+	ctx context.Context,
+	name string,
+	args *OffloadArgs,
+) (*DatabaseStatus, error) {
+	if args == nil {
+		args = &OffloadArgs{}
+	}
+	if err := validateOffloadDurability(args.Durability); err != nil {
+		return nil, err
+	}
+	body := OffloadRequest{Name: name, Durability: args.Durability}
 	var status DatabaseStatus
-	if err := c.call(ctx, http.MethodPost, "/v1/databases/offload", NameRequest{Name: name}, &status, 0); err != nil {
+	if err := c.call(ctx, http.MethodPost, "/v1/databases/offload", body, &status, 0); err != nil {
 		return nil, err
 	}
 	return &status, nil
@@ -565,31 +792,56 @@ func (c *Client) Writer(ctx context.Context, name string) (*Writer, error) {
 	return &writer, nil
 }
 
-// Backups lists every backup and failover rule on this machine.
-func (c *Client) Backups(ctx context.Context) ([]BackupRule, error) {
+// BackupRules lists every backup and failover rule on this machine.
+func (c *Client) BackupRules(ctx context.Context) ([]BackupRule, error) {
 	var list BackupList
 	if err := c.call(ctx, http.MethodGet, "/v1/backup-rules/list", nil, &list, 0); err != nil {
 		return nil, err
 	}
-	return list.Backups, nil
+	return list.Rules, nil
+}
+
+// validateStopBackup checks what StopBackup needs before anything connects.
+func validateStopBackup(name string) error {
+	if name == "" {
+		return invalidArgument("stopping a backup needs its database name")
+	}
+	return nil
+}
+
+// validateStopBackupRule checks what StopBackupRule needs before anything connects.
+func validateStopBackupRule(id string) error {
+	if id == "" {
+		return invalidArgument("stopping a backup rule needs its ID")
+	}
+	return nil
 }
 
 // StopBackup stops the single-file backup for an exact remote name on this machine.
 func (c *Client) StopBackup(ctx context.Context, name string) (*StopBackupResult, error) {
+	if err := validateStopBackup(name); err != nil {
+		return nil, err
+	}
 	return c.stopBackup(ctx, StopBackupRequest{Name: name})
 }
 
-// StopBackupRule stops a whole rule and future discovery using its saved ID.
+// StopBackupRule stops a whole rule and its future listings using its saved ID.
 func (c *Client) StopBackupRule(ctx context.Context, id string) (*StopBackupResult, error) {
+	if err := validateStopBackupRule(id); err != nil {
+		return nil, err
+	}
 	return c.stopBackup(ctx, StopBackupRequest{RuleID: id})
 }
 
-func (c *Client) stopBackup(ctx context.Context, selector StopBackupRequest) (*StopBackupResult, error) {
-	var result StopBackupResult
-	if err := c.call(ctx, http.MethodPost, "/v1/backup-rules/stop", selector, &result, 0); err != nil {
+func (c *Client) stopBackup(
+	ctx context.Context,
+	selector StopBackupRequest,
+) (*StopBackupResult, error) {
+	var stopped StopBackupResult
+	if err := c.call(ctx, http.MethodPost, "/v1/backup-rules/stop", selector, &stopped, 0); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	return &stopped, nil
 }
 
 // Replicas lists prefix replicas and every replica on this machine.
@@ -603,8 +855,8 @@ func (c *Client) Replicas(ctx context.Context) (*ReplicaList, error) {
 
 // ReplicateArgs configures a replica.
 type ReplicateArgs struct {
-	// To is the replica file; the path this machine uses when empty.
-	To string
+	// Path is the replica file; the path this machine uses when empty.
+	Path string
 	// WriteProtection is lock (the daemon's default), detect, or none.
 	WriteProtection WriteProtection
 	// Timeout bounds downloading the first version.
@@ -613,11 +865,15 @@ type ReplicateArgs struct {
 
 // Replicate keeps a live readonly replica of a database that streams from
 // the server, and returns once its first version is local.
-func (c *Client) Replicate(ctx context.Context, name string, args *ReplicateArgs) (*DatabaseStatus, error) {
+func (c *Client) Replicate(
+	ctx context.Context,
+	name string,
+	args *ReplicateArgs,
+) (*DatabaseStatus, error) {
 	if args == nil {
 		args = &ReplicateArgs{}
 	}
-	path, err := absolutePath(args.To)
+	path, err := absolutePath(args.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -625,15 +881,24 @@ func (c *Client) Replicate(ctx context.Context, name string, args *ReplicateArgs
 	if err != nil {
 		return nil, err
 	}
-	body := ReplicaRequest{Name: name, To: path, WriteProtection: args.WriteProtection, TimeoutMillis: timeout}
-	var result ReplicaResult
-	if err := c.call(ctx, http.MethodPost, "/v1/replicas/start", body, &result, args.Timeout); err != nil {
+	body := ReplicaRequest{
+		Name:            name,
+		Path:            path,
+		WriteProtection: args.WriteProtection,
+		TimeoutMillis:   timeout,
+	}
+	var replica ReplicaResult
+	if err := c.call(ctx, http.MethodPost, "/v1/replicas/start", body, &replica, args.Timeout); err != nil {
 		return nil, err
 	}
-	if result.Database.Name == "" {
-		return nil, &Error{Code: CodeInvalidResponse, Message: "the daemon did not return the replica", Status: http.StatusOK}
+	if replica.Database.Name == "" {
+		return nil, &Error{
+			Code:    CodeInvalidResponse,
+			Message: "the daemon did not return the replica",
+			Status:  http.StatusOK,
+		}
 	}
-	return &result.Database, nil
+	return &replica.Database, nil
 }
 
 // StopReplica stops a replica. The file stays, unlocked, at its last version.
@@ -641,61 +906,103 @@ func (c *Client) StopReplica(ctx context.Context, name string) error {
 	return c.call(ctx, http.MethodPost, "/v1/replicas/stop", StopReplicaRequest{Name: name}, nil, 0)
 }
 
+// validateRestore checks what Restore needs before anything connects.
+func validateRestore(args *RestoreArgs) error {
+	if args == nil || args.Path == "" {
+		return invalidArgument("restore needs a path to write to")
+	}
+	if args.Version != 0 && !args.Time.IsZero() {
+		return invalidArgument("restore takes a version or a time, not both")
+	}
+	return nil
+}
+
 // ReplicatePrefixArgs configures live replicas of a namespace.
 type ReplicatePrefixArgs struct {
-	// To is the directory receiving each database at its name relative to the prefix.
-	To string
+	// Directory receives each database at its name relative to the prefix.
+	Directory string
 	// WriteProtection is lock (the daemon's default), detect, or none.
 	WriteProtection WriteProtection
+}
+
+// replicaPrefixRequest starts or stops a prefix replica. Unlike the generated
+// request types it always sends prefix, so an empty prefix reads as all databases.
+type replicaPrefixRequest struct {
+	Prefix          string          `json:"prefix"`
+	Directory       string          `json:"directory"`
+	WriteProtection WriteProtection `json:"write_protection,omitempty"`
 }
 
 // ReplicatePrefix registers live readonly replicas of current and future
 // databases under prefix. An empty prefix follows all databases. Downloads
 // happen in the background; returning does not mean every replica is local.
-func (c *Client) ReplicatePrefix(ctx context.Context, prefix string, args *ReplicatePrefixArgs) (*PrefixReplica, error) {
-	if args == nil || args.To == "" {
-		return nil, invalidArgument("replicating a prefix needs a directory")
+func (c *Client) ReplicatePrefix(
+	ctx context.Context,
+	prefix string,
+	args *ReplicatePrefixArgs,
+) (*PrefixReplica, error) {
+	if err := validateReplicatePrefix(args); err != nil {
+		return nil, err
 	}
-	path, err := absolutePath(args.To)
+	directory, err := absolutePath(args.Directory)
 	if err != nil {
 		return nil, err
 	}
-	body := ReplicaRequest{Prefix: prefix, To: path, WriteProtection: args.WriteProtection}
-	var result ReplicaResult
-	if err := c.call(ctx, http.MethodPost, "/v1/replicas/start", body, &result, 0); err != nil {
+	body := replicaPrefixRequest{
+		Prefix:          prefix,
+		Directory:       directory,
+		WriteProtection: args.WriteProtection,
+	}
+	var replica ReplicaResult
+	if err := c.call(ctx, http.MethodPost, "/v1/replicas/start", body, &replica, 0); err != nil {
 		return nil, err
 	}
-	if result.Prefix.ID == "" {
-		return nil, &Error{Code: CodeInvalidResponse, Message: "the daemon did not return the prefix replica", Status: http.StatusOK}
+	if replica.PrefixReplica.ID == "" {
+		return nil, &Error{
+			Code:    CodeInvalidResponse,
+			Message: "the daemon did not return the prefix replica",
+			Status:  http.StatusOK,
+		}
 	}
-	return &result.Prefix, nil
+	return &replica.PrefixReplica, nil
+}
+
+// validateReplicatePrefix checks what ReplicatePrefix needs before anything connects.
+func validateReplicatePrefix(args *ReplicatePrefixArgs) error {
+	if args == nil || args.Directory == "" {
+		return invalidArgument("replicating a prefix needs a directory")
+	}
+	return nil
+}
+
+// StopReplicaPrefixArgs names the prefix replica to stop.
+type StopReplicaPrefixArgs struct {
+	// Directory is the one the prefix replica was started with. It is required.
+	Directory string
 }
 
 // StopReplicaPrefix stops a prefix replica and its replicas. Files stay,
 // unlocked, at their last versions. Use the same prefix and directory as at start.
-func (c *Client) StopReplicaPrefix(ctx context.Context, prefix string, to string) error {
-	if to == "" {
+func (c *Client) StopReplicaPrefix(
+	ctx context.Context,
+	prefix string,
+	args *StopReplicaPrefixArgs,
+) error {
+	if args == nil || args.Directory == "" {
 		return invalidArgument("stopping a prefix replica needs a directory")
 	}
-	path, err := absolutePath(to)
+	directory, err := absolutePath(args.Directory)
 	if err != nil {
 		return err
 	}
-	return c.call(ctx, http.MethodPost, "/v1/replicas/stop", StopReplicaRequest{Prefix: prefix, To: path}, nil, 0)
-}
-
-// Conflicts lists conflict copies: local copies saved because they diverged from the server.
-func (c *Client) Conflicts(ctx context.Context) ([]Conflict, error) {
-	var list ConflictList
-	if err := c.call(ctx, http.MethodGet, "/v1/conflicts/list", nil, &list, 0); err != nil {
-		return nil, err
-	}
-	return list.Conflicts, nil
-}
-
-// DeleteConflict deletes a conflict copy and its -wal and -shm files.
-func (c *Client) DeleteConflict(ctx context.Context, id string) error {
-	return c.call(ctx, http.MethodPost, "/v1/conflicts/delete", IDRequest{ID: id}, nil, 0)
+	return c.call(
+		ctx,
+		http.MethodPost,
+		"/v1/replicas/stop",
+		replicaPrefixRequest{Prefix: prefix, Directory: directory},
+		nil,
+		0,
+	)
 }
 
 // EventsArgs selects a page of events.
@@ -715,7 +1022,7 @@ func (c *Client) Events(ctx context.Context, args *EventsArgs) (*EventList, erro
 	if args == nil {
 		args = &EventsArgs{}
 	}
-	wait, err := millis(args.Wait, "the event wait")
+	waitMillis, err := millis(args.Wait, "the event wait")
 	if err != nil {
 		return nil, err
 	}
@@ -723,8 +1030,8 @@ func (c *Client) Events(ctx context.Context, args *EventsArgs) (*EventList, erro
 	if args.After != 0 {
 		query.Set("after", strconv.FormatInt(args.After, 10))
 	}
-	if wait > 0 {
-		query.Set("wait_millis", strconv.FormatInt(wait, 10))
+	if waitMillis > 0 {
+		query.Set("wait_millis", strconv.FormatInt(waitMillis, 10))
 	}
 	if args.Limit > 0 {
 		query.Set("limit", strconv.Itoa(args.Limit))
@@ -742,14 +1049,18 @@ func (c *Client) Events(ctx context.Context, args *EventsArgs) (*EventList, erro
 
 // ShutdownArgs configures a shutdown.
 type ShutdownArgs struct {
-	// Wait is how far every final sync must reach.
-	Wait Durability
+	// Durability is how far every final sync must reach.
+	Durability Durability
 	// Timeout bounds the shutdown.
 	Timeout time.Duration
 }
 
 // Shutdown syncs every database a final time, releases every write lock,
-// ends the session, and stops the daemon. Close never does this.
+// ends the session, and stops the daemon. A backup another machine writes
+// holds no lock and stays waiting. Each database it could not sync or
+// release is in Failed, with its code, and keeps any write lock it holds; the session and
+// the daemon then stay. An empty Failed is the only complete shutdown.
+// Close never does this.
 func (c *Client) Shutdown(ctx context.Context, args *ShutdownArgs) (*ShutdownResult, error) {
 	if args == nil {
 		args = &ShutdownArgs{}
@@ -758,10 +1069,30 @@ func (c *Client) Shutdown(ctx context.Context, args *ShutdownArgs) (*ShutdownRes
 	if err != nil {
 		return nil, err
 	}
-	body := ShutdownRequest{Wait: ShutdownRequestWait(args.Wait), TimeoutMillis: timeout}
-	var result ShutdownResult
-	if err := c.call(ctx, http.MethodPost, "/v1/session/shutdown", body, &result, args.Timeout); err != nil {
+	body := ShutdownRequest{Durability: ShutdownRequestDurability(args.Durability), TimeoutMillis: timeout}
+	var shutdown ShutdownResult
+	if err := c.call(ctx, http.MethodPost, "/v1/session/shutdown", body, &shutdown, args.Timeout); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	return &shutdown, nil
+}
+
+// validateOffloadDurability refuses a durability an offload cannot wait for:
+// only DurabilityServer, DurabilityCloud, or empty for the daemon's default.
+func validateOffloadDurability(durability Durability) error {
+	if durability != "" && !durability.Valid() {
+		return invalidArgument("offload durability must be server or cloud")
+	}
+	return nil
+}
+
+// validateRevert checks what Revert needs before anything connects.
+func validateRevert(args *RevertArgs) error {
+	if args == nil || (args.Version == 0) == args.Time.IsZero() {
+		return invalidArgument("revert takes a version or a time, one of them")
+	}
+	if args.Version < 0 {
+		return invalidArgument("revert needs a positive version")
+	}
+	return nil
 }

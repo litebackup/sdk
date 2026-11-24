@@ -3,7 +3,7 @@
   "operation": "databases.restore",
   "args": {
     "name": "main.sqlite",
-    "to": "/tmp/r.sqlite",
+    "path": "/tmp/r.sqlite",
     "time": "2026-11-15T10:30:00+01:00"
   },
   "request": {
@@ -13,7 +13,8 @@
     "body": {
       "name": "main.sqlite",
       "path": "/tmp/r.sqlite",
-      "time": "2026-11-15T09:30:00Z"
+      "time": "2026-11-15T09:30:00Z",
+      "umask": "{umask}"
     }
   },
   "response": {

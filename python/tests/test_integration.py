@@ -1,4 +1,4 @@
-"""Against a real development server and daemons. Runs only with LITEBACKUP_INTEGRATION=1 and LITEBACKUP_PATH."""
+"""Against a real server and daemons. Set LITEBACKUP_INTEGRATION=1 and LITEBACKUP_PATH."""
 
 from __future__ import annotations
 
@@ -16,13 +16,13 @@ from pathlib import Path
 
 import pytest
 
-from litebackup import AsyncLitebackup, Litebackup, LitebackupError
+from litebackup import AsyncLitebackup, ErrorCode, LeaseCleanupError, Litebackup, LitebackupError
 from litebackup.integrations import aiosqlite as aiosqlite_support
 from litebackup.integrations import sqlite3 as sqlite3_support
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("LITEBACKUP_INTEGRATION") != "1" or not os.environ.get("LITEBACKUP_PATH"),
-    reason="set LITEBACKUP_INTEGRATION=1 and LITEBACKUP_PATH to run against a development server",
+    reason="set LITEBACKUP_INTEGRATION=1 and LITEBACKUP_PATH",
 )
 SDK_ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,7 +33,7 @@ class DevelopmentServer:
     def __init__(self) -> None:
         self.binary = os.environ["LITEBACKUP_PATH"]
         self.directory = tempfile.mkdtemp(prefix="lbpy")
-        self.run = os.path.basename(self.directory).lower()
+        self.tag = os.path.basename(self.directory).lower()
         self.data = os.path.join(self.directory, "server")
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
@@ -42,7 +42,7 @@ class DevelopmentServer:
             **os.environ,
             "XDG_RUNTIME_DIR": os.path.join(self.directory, "run"),
             "XDG_STATE_HOME": os.path.join(self.directory, "state"),
-            "LITEBACKUP_TOKEN": "",
+            "LITEBACKUP_API_KEY": "",
             "LITEBACKUP_SESSION": "",
         }
         self.log = open(os.path.join(self.directory, "server.log"), "w")  # noqa: SIM115
@@ -57,7 +57,7 @@ class DevelopmentServer:
                 self.join_token("probe")
                 break
             except subprocess.CalledProcessError:
-                assert time.monotonic() < deadline, "the development server never answered"
+                assert time.monotonic() < deadline, "the server never answered"
                 time.sleep(0.1)
         self.admin(
             "bucket",
@@ -67,7 +67,7 @@ class DevelopmentServer:
             "--endpoint",
             "file://" + os.path.join(self.directory, "bucket"),
             "--bucket",
-            "local",
+            "bucket",
             "--name",
             "local",
         )
@@ -93,7 +93,7 @@ class DevelopmentServer:
 
     def session(self, name: str) -> tuple[str, str]:
         """A session of this run and its join token."""
-        session = f"{name}-{self.run}"
+        session = f"{name}-{self.tag}"
         self.sessions.append(session)
         return session, self.join_token(session)
 
@@ -108,7 +108,7 @@ class DevelopmentServer:
         self.process.kill()
         self.process.wait()
         self.log.close()
-        subprocess.run(["pkill", "-9", "-f", self.run], check=False)
+        subprocess.run(["pkill", "-9", "-f", self.tag], check=False)
         shutil.rmtree(self.directory, ignore_errors=True)
 
 
@@ -137,22 +137,22 @@ def test_backup_restore_and_idempotent_registration(server: DevelopmentServer) -
     connection.execute("CREATE TABLE steps (body TEXT)")
     connection.executemany("INSERT INTO steps VALUES (?)", [("one",), ("two",)])
     connection.commit()
-    with Litebackup(session=session, token=token, environment=server.environment) as litebackup:
+    with Litebackup(session=session, api_key=token, environment=server.environment) as litebackup:
         rule = litebackup.backups.start(sqlite3_support.database_path(connection))
         assert litebackup.backups.start(path).id == rule.id
         with pytest.raises(LitebackupError) as refused:
             litebackup.backups.start(path, maximum_local_databases=4)
-        assert refused.value.code == "exists" and refused.value.details["rule"]["id"] == rule.id
+        assert refused.value.code == ErrorCode.RULE_EXISTS and refused.value.details["rule"]["id"] == rule.id
         status = litebackup.databases.sync(rule.name)
         assert status.synced_server.version > 0
         versions = litebackup.databases.versions(rule.name)
         assert versions and versions[-1].version == status.synced_server.version
         restored = server.path("restored", "main.sqlite")
-        litebackup.databases.restore(rule.name, to=restored, version=versions[-1].version)
+        litebackup.databases.restore(rule.name, path=restored, version=versions[-1].version)
         assert rows(restored) == 2
         with pytest.raises(LitebackupError) as existing:
-            litebackup.databases.restore(rule.name, to=restored)
-        assert existing.value.code == "exists" and rows(restored) == 2
+            litebackup.databases.restore(rule.name, path=restored)
+        assert existing.value.code == ErrorCode.FILE_EXISTS and rows(restored) == 2
     connection.close()
 
 
@@ -166,8 +166,9 @@ def test_cross_language_handoff(server: DevelopmentServer) -> None:
     python_path = server.path("python", "42.sqlite")
     Path(python_path).touch()
     with (
-        Litebackup(session=python_session, token=python_token, environment=server.environment) as litebackup,
-        litebackup.databases.managed(name, to=python_path, durability="cloud", offload=True, adapter=sqlite3_support.adapter()) as db,
+        Litebackup(session=python_session, api_key=python_token, environment=server.environment) as litebackup,
+        litebackup.databases.pool(adapter=sqlite3_support.adapter()) as pool,
+        pool.lease(name, path=python_path, durability="cloud", offload=True) as db,
     ):
         db.execute("CREATE TABLE steps (body TEXT)")
         db.executemany("INSERT INTO steps VALUES (?)", [(f"python {index}",) for index in range(3)])
@@ -180,7 +181,7 @@ def test_cross_language_handoff(server: DevelopmentServer) -> None:
     distribution = SDK_ROOT / "typescript" / "dist"
     assert (distribution / "src" / "index.js").exists(), "build the TypeScript SDK first: cd typescript && npm run build"
     typescript_path = server.path("typescript", "42.sqlite")
-    environment = {**server.environment, "LITEBACKUP_SESSION": typescript_session, "LITEBACKUP_TOKEN": typescript_token}
+    environment = {**server.environment, "LITEBACKUP_SESSION": typescript_session, "LITEBACKUP_API_KEY": typescript_token}
     step = subprocess.run(
         ["node", str(Path(__file__).parent / "handoff" / "typescript-step.mjs"), str(distribution), name, typescript_path, "3", "2"],
         env=environment, capture_output=True, text=True, timeout=120, check=False,
@@ -188,7 +189,7 @@ def test_cross_language_handoff(server: DevelopmentServer) -> None:
     assert step.returncode == 0, step.stderr + step.stdout
 
     go_path = server.path("go", "42.sqlite")
-    environment = {**server.environment, "LITEBACKUP_SESSION": go_session, "LITEBACKUP_TOKEN": go_token}
+    environment = {**server.environment, "LITEBACKUP_SESSION": go_session, "LITEBACKUP_API_KEY": go_token}
     step = subprocess.run(
         ["go", "run", "./litebackup/internal/handoff", name, go_path, "5", "1"],
         cwd=SDK_ROOT, env=environment, capture_output=True, text=True, timeout=300, check=False,
@@ -196,22 +197,22 @@ def test_cross_language_handoff(server: DevelopmentServer) -> None:
     assert step.returncode == 0, step.stderr + step.stdout
     with Litebackup(session=python_session, environment=server.environment) as litebackup:
         back = server.path("python-again", "42.sqlite")
-        litebackup.databases.restore(name, to=back)
+        litebackup.databases.restore(name, path=back)
         assert rows(back) == 6
 
 
-async def test_async_scope_cancellation_still_releases(server: DevelopmentServer) -> None:
+async def test_async_cancelled_lease_is_released_by_close(server: DevelopmentServer) -> None:
+    """A cancelled lease keeps the lock until the pool closes, which rolls back, closes, and releases it."""
     session, token = server.session("async")
     path = server.path("async", "7.sqlite")
     Path(path).touch()
     started = asyncio.Event()
 
-    async with AsyncLitebackup(session=session, token=token, environment=server.environment) as litebackup:
+    async with AsyncLitebackup(session=session, api_key=token, environment=server.environment) as litebackup:
+        pool = litebackup.databases.pool(adapter=aiosqlite_support.adapter())
 
         async def agent() -> None:
-            async with litebackup.databases.managed(
-                "agents/7.sqlite", to=path, durability="server", adapter=aiosqlite_support.adapter()
-            ) as db:
+            async with pool.lease("agents/7.sqlite", path=path, durability="server") as db:
                 await db.execute("CREATE TABLE steps (body TEXT)")
                 await db.commit()
                 await db.execute("INSERT INTO steps VALUES ('uncommitted')")
@@ -223,6 +224,8 @@ async def test_async_scope_cancellation_still_releases(server: DevelopmentServer
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+        assert (await litebackup.databases.writer("agents/7.sqlite")).this_machine
+        await pool.close()
         writer = await litebackup.databases.writer("agents/7.sqlite")
         assert not writer.this_machine
         status = await litebackup.databases.get("agents/7.sqlite")
@@ -237,23 +240,22 @@ def test_close_failure_keeps_the_database_acquired(server: DevelopmentServer) ->
 
     class LeakyAdapter:
         def open(self, path: str) -> sqlite3.Connection:
-            return sqlite3.connect(path)
+            return sqlite3.connect(path, check_same_thread=False)
 
-        def close(self, connection: sqlite3.Connection) -> None:
-            raise RuntimeError("a pooled connection is still checked out")
+        def close(self, db: sqlite3.Connection) -> None:
+            raise RuntimeError("a pooled connection is still in use")
 
-    with Litebackup(session=session, token=token, environment=server.environment) as litebackup:
-        with (
-            pytest.raises(LitebackupError) as raised,
-            litebackup.databases.managed("agents/9.sqlite", to=path, durability="server", adapter=LeakyAdapter()) as db,
-        ):
+    with Litebackup(session=session, api_key=token, environment=server.environment) as litebackup:
+        pool = litebackup.databases.pool(adapter=LeakyAdapter())
+        with pool.lease("agents/9.sqlite", path=path, durability="server") as db:
             db.execute("CREATE TABLE steps (body TEXT)")
             db.commit()
             leaked = db
-        assert raised.value.code == "scope_cleanup_failed" and raised.value.details == {
-            "step": "close", "name": "agents/9.sqlite", "path": path, "acquired": True,
-        }  # fmt: skip
+        with pytest.raises(LeaseCleanupError) as raised:
+            pool.close()
+        assert raised.value.code == ErrorCode.LEASE_CLEANUP_FAILED and raised.value.step == "close"
+        assert raised.value.details == {"step": "close", "name": "agents/9.sqlite", "path": path, "acquired": True}
         assert litebackup.databases.writer("agents/9.sqlite").this_machine
         leaked.close()
-        litebackup.databases.release("agents/9.sqlite", wait="server")
+        litebackup.databases.release("agents/9.sqlite", durability="server")
         assert not litebackup.databases.writer("agents/9.sqlite").this_machine

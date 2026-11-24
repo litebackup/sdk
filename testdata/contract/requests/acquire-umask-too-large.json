@@ -1,0 +1,11 @@
+{
+  "description": "A umask past 0777 sends nothing.",
+  "operation": "databases.acquire",
+  "args": {
+    "name": "agents/42.sqlite",
+    "umask": 512
+  },
+  "error": {
+    "code": "invalid_argument"
+  }
+}

@@ -1,14 +1,17 @@
 {
-  "description": "Every acquire setting that differs from the default is sent.",
+  "description": "Every acquire setting that differs from the default is sent, a lock timeout and a umask other than the process's included.",
   "operation": "databases.acquire",
   "args": {
     "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
     "maintenance": true,
-    "offload": "released",
+    "offload_on_release": true,
+    "offload_durability": "cloud",
     "machine_label": "worker-1",
-    "on_lost": "block",
-    "timeout": "90s"
+    "timeout": "90s",
+    "umask": 63,
+    "discard_local": true,
+    "lock_timeout": "5m"
   },
   "request": {
     "method": "POST",
@@ -18,10 +21,13 @@
       "name": "agents/42.sqlite",
       "path": "{cwd}/agents/42.sqlite",
       "maintenance": true,
-      "offload": "released",
+      "offload_on_release": true,
+      "offload_durability": "cloud",
       "machine_label": "worker-1",
-      "on_lost": "block",
-      "timeout_millis": 90000
+      "timeout_millis": 90000,
+      "umask": 63,
+      "discard_local": true,
+      "lock_timeout_millis": 300000
     }
   },
   "response": {
@@ -42,8 +48,9 @@
       "journal_mode": "wal",
       "page_count": 2,
       "sync_count": 3,
-      "hint_misses": 0
+      "hint_misses": 0,
+      "offload_durability": "cloud"
     },
-    "outcome": "created"
+    "decision": "created"
   }
 }

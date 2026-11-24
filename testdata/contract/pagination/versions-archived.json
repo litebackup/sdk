@@ -1,0 +1,51 @@
+{
+  "description": "A version the primary bucket holds carries when its object was recorded as archived; one synced between archive passes, only on the server's disk, carries none.",
+  "operation": "databases.versions",
+  "args": {
+    "name": "main.sqlite"
+  },
+  "item_key": "archived",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/v1/databases/versions",
+        "query": {
+          "name": "main.sqlite"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "versions": [
+            {
+              "version": 1,
+              "state_digest": "d1",
+              "time": "2026-11-15T09:01:00Z",
+              "archived": "2026-11-15T09:05:00Z"
+            },
+            {
+              "version": 2,
+              "state_digest": "d2",
+              "time": "2026-11-15T09:02:00Z"
+            },
+            {
+              "version": 3,
+              "state_digest": "d3",
+              "time": "2026-11-15T09:03:00Z",
+              "archived": "2026-11-15T09:10:00Z"
+            }
+          ],
+          "next": 0
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      "2026-11-15T09:05:00Z",
+      null,
+      "2026-11-15T09:10:00Z"
+    ]
+  }
+}

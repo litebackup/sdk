@@ -1,0 +1,12 @@
+{
+  "description": "An explicit binary override, the client option or LITEBACKUP_PATH, that names no file is binary_not_found with a message naming the path; the SDK does not fall back to a bundled or installed binary. The path is missing_file inside a fresh temporary directory. A file behind a directory this user may not enter (denied_file, its directory made mode 000; skipped as root) is not missing, so resolution returns it. A foreground backup whose override is an executable script with interpreter_script as its content, an interpreter that does not exist, fails as interpreter_code: the file is there but cannot run, and the message names its first line (interpreter_message_contains) rather than reading as a missing file. A foreground backup whose override is not_directory_file, where its directory plain is a regular file, is binary_not_found (code).",
+  "missing_file": "missing/litebackup",
+  "overrides": ["option", "environment"],
+  "code": "binary_not_found",
+  "message_contains": "does not exist",
+  "denied_file": "locked/litebackup",
+  "interpreter_script": "#!/nonexistent/litebackup-interpreter\n",
+  "interpreter_code": "launch_failed",
+  "interpreter_message_contains": "it cannot run because the interpreter its first line names is not on this machine: #!/nonexistent/litebackup-interpreter",
+  "not_directory_file": "plain/litebackup"
+}

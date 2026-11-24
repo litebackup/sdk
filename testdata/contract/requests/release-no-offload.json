@@ -3,7 +3,7 @@
   "operation": "databases.release",
   "args": {
     "name": "agents/42.sqlite",
-    "wait": "server",
+    "durability": "server",
     "offload": false
   },
   "request": {
@@ -12,7 +12,7 @@
     "query": {},
     "body": {
       "name": "agents/42.sqlite",
-      "wait": "server"
+      "durability": "server"
     }
   },
   "response": {

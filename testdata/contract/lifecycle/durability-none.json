@@ -1,10 +1,5 @@
 {
-  "description": "none is not a scope durability.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
-    "durability": "none"
-  },
+  "description": "none is not a lease durability.",
   "fail": [],
   "acquire_response": {
     "database": {
@@ -26,7 +21,7 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [],
@@ -35,6 +30,12 @@
       {
         "code": "invalid_argument"
       }
-    ]
+    ],
+    "close_raised": []
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "none"
   }
 }

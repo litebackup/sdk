@@ -3,7 +3,7 @@
   "operation": "replicas.start_prefix",
   "args": {
     "prefix": "tenants",
-    "to": "replicas"
+    "directory": "replicas"
   },
   "request": {
     "method": "POST",
@@ -11,16 +11,16 @@
     "query": {},
     "body": {
       "prefix": "tenants",
-      "to": "{cwd}/replicas"
+      "directory": "{cwd}/replicas"
     }
   },
   "response": {
-    "prefix": {
+    "prefix_replica": {
       "id": "p1",
       "prefix": "tenants",
-      "to": "{cwd}/replicas",
+      "directory": "{cwd}/replicas",
       "write_protection": "lock",
-      "databases": 0
+      "database_count": 0
     }
   }
 }

@@ -123,6 +123,12 @@ def build(output: Path, environment: dict[str, str]) -> Path:
     return built.pop()
 
 
+def require_package_version(version: str, package_version: str) -> None:
+    """Refuses a release other than the package's own: every release is lockstep."""
+    if version != package_version:
+        fail(f"--version {version} is not the package's version {package_version}; every release is lockstep")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", help="the release to package; the package's version by default")
@@ -132,8 +138,6 @@ def main() -> None:
     arguments = parser.parse_args()
     package_version = tomllib.loads((PROJECT / "pyproject.toml").read_text())["project"]["version"]
     version = arguments.version or package_version
-    if version != package_version:
-        print(f"warning: packaging litebackup {version} into the {package_version} Python package", file=sys.stderr)
     try:
         release = find_release(arguments.metadata.read_text(), version=version)
     except (SignatureError, LookupError) as error:
@@ -147,8 +151,7 @@ def main() -> None:
             fail(str(error))
         source = arguments.release_directory / file.filename
         if not source.exists():
-            print(f"skipping {platform['os']}-{platform['arch']}: {source} is missing", file=sys.stderr)
-            continue
+            fail(f"{source} is missing; every platform is built together")
         content = source.read_bytes()
         digest = hashlib.sha256(content).hexdigest()
         if digest != file.sha256 or len(content) != file.size:
@@ -161,9 +164,8 @@ def main() -> None:
         else:
             tags = [macho_platform(content, platform["machine"])]
         plans.append((source, tags))
-    if not plans:
-        fail(f"no files of release {version} found in {arguments.release_directory}")
 
+    require_package_version(version, package_version)
     arguments.output.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix="litebackup-wheels-"))
     try:

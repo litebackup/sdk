@@ -1,4 +1,4 @@
-"""scripts/build-wheels: binary inspection and release verification."""
+"""scripts/build-wheels: binary inspection and release verification, and the package metadata."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from types import ModuleType
 
@@ -28,7 +29,7 @@ def load_script() -> ModuleType:
     return module
 
 
-def test_a_dynamic_binary_gets_manylinux_for_its_newest_glibc() -> None:
+def test_a_dynamic_binary_gets_one_manylinux_tag_within_the_host_glibc() -> None:
     if not sys.platform.startswith("linux") or os.uname().machine != "x86_64":
         pytest.skip("needs a glibc x86_64 Python to inspect")
     build_wheels = load_script()
@@ -70,12 +71,13 @@ def test_macos_tags_follow_the_minimum_os() -> None:
         build_wheels.macho_platform(macho((11, 0)), "x86_64")
 
 
-def run_script(*arguments: str) -> subprocess.CompletedProcess[str]:
+def build(*arguments: str) -> subprocess.CompletedProcess[str]:
+    """Calls scripts/build-wheels with arguments."""
     return subprocess.run([str(SCRIPT), *arguments], capture_output=True, text=True, timeout=300, check=False)
 
 
 def test_tampered_metadata_builds_nothing(tmp_path: Path) -> None:
-    completed = run_script(
+    completed = build(
         "--version", "0.3.30", "--output", str(tmp_path / "out"), str(tmp_path), str(METADATA / "package-metadata-tampered.json")
     )
     assert completed.returncode == 1 and "does not hold a verified release" in completed.stderr
@@ -84,6 +86,30 @@ def test_tampered_metadata_builds_nothing(tmp_path: Path) -> None:
 
 def test_a_binary_that_does_not_match_builds_nothing(tmp_path: Path) -> None:
     (tmp_path / "litebackup-linux-amd64").write_bytes(b"not the signed binary")
-    completed = run_script("--version", "0.3.30", "--output", str(tmp_path / "out"), str(tmp_path), str(METADATA / "package-metadata.json"))
+    completed = build("--version", "0.3.30", "--output", str(tmp_path / "out"), str(tmp_path), str(METADATA / "package-metadata.json"))
     assert completed.returncode == 1 and "does not match release 0.3.30" in completed.stderr
     assert not (tmp_path / "out").exists()
+
+
+def test_package_metadata_names_the_license_and_project_links() -> None:
+    project = tomllib.loads((SCRIPT.parents[1] / "pyproject.toml").read_text())["project"]
+    assert project["license"] == "MIT"
+    assert project["urls"] == {
+        "Homepage": "https://litebackup.com/sdk",
+        "Source": "https://github.com/litebackup/sdk",
+        "Issues": "https://github.com/litebackup/sdk/issues",
+    }
+
+
+def test_a_missing_platform_builds_nothing(tmp_path: Path) -> None:
+    completed = build("--version", "0.3.30", "--output", str(tmp_path / "out"), str(tmp_path), str(METADATA / "package-metadata.json"))
+    assert completed.returncode == 1 and "is missing; every platform is built together" in completed.stderr
+    assert not (tmp_path / "out").exists()
+
+
+def test_another_version_than_the_package_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
+    script = load_script()
+    script.require_package_version("1.1.0", "1.1.0")
+    with pytest.raises(SystemExit):
+        script.require_package_version("0.3.30", "1.1.0")
+    assert "every release is lockstep" in capsys.readouterr().err

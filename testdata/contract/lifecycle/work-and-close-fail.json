@@ -1,11 +1,5 @@
 {
-  "description": "Failed work and close raise both and do not release.",
-  "scope": {
-    "name": "agents/42.sqlite",
-    "to": "agents/42.sqlite",
-    "durability": "cloud",
-    "offload": true
-  },
+  "description": "Failed work raises from the lease, and the failed close from closing the pool, which does not release.",
   "fail": [
     "work",
     "close"
@@ -30,7 +24,7 @@
       "sync_count": 3,
       "hint_misses": 0
     },
-    "outcome": "created"
+    "decision": "created"
   },
   "expect": {
     "steps": [
@@ -41,15 +35,18 @@
     ],
     "acquire_body": {
       "name": "agents/42.sqlite",
-      "path": "{cwd}/agents/42.sqlite"
+      "path": "{cwd}/agents/42.sqlite",
+      "umask": "{umask}"
     },
     "release_body": null,
     "raised": [
       {
         "source": "work"
-      },
+      }
+    ],
+    "close_raised": [
       {
-        "code": "scope_cleanup_failed",
+        "code": "lease_cleanup_failed",
         "step": "close",
         "cause": "close",
         "details": {
@@ -60,5 +57,11 @@
         }
       }
     ]
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "cloud",
+    "offload": true
   }
 }

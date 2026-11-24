@@ -4,29 +4,32 @@ from __future__ import annotations
 
 import asyncio
 import builtins
-import contextlib
 import subprocess
 import threading
 import time
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
-from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from datetime import datetime
 from types import TracebackType
 from typing import Any, Literal, TypeVar
 
-from . import _foreground, _managed, _wire
+from . import _foreground, _pool, _wire
 from ._async_transport import AsyncTransport
-from ._binary import TOKEN_ENVIRONMENT, litebackup_binary
+from ._binary import litebackup_binary
+from ._credential import API_KEY_ENVIRONMENT, credential_type
 from ._failover import AsyncFailover, Failover
 from ._generated import models
 from ._launch import launch_daemon, launch_daemon_async, process_environment
 from ._paths import session_socket
 from ._transport import Answer, SyncTransport
 from ._wire import Call, Durability, Duration, PathSource, WriteProtection
-from .errors import ErrorCode, LitebackupError, invalid_argument
+from .errors import ErrorCode, LeaseCleanupError, LitebackupError, invalid_argument
 
 Result = TypeVar("Result")
-Connection = TypeVar("Connection")
+DB = TypeVar("DB")
+
+
+def _closed_error() -> LitebackupError:
+    return LitebackupError(ErrorCode.CLOSED, "the client is closed")
 
 
 class _Settings:
@@ -35,7 +38,7 @@ class _Settings:
     def __init__(
         self,
         *,
-        token: str | None,
+        api_key: str | None,
         session: str | None,
         socket_path: str | None,
         binary_path: str | None,
@@ -43,10 +46,8 @@ class _Settings:
         environment: Mapping[str, str] | None,
     ) -> None:
         self.environment = process_environment(environment)
-        self.token = token if token is not None else self.environment.get(TOKEN_ENVIRONMENT)
-        stripped = (self.token or "").strip()
-        if stripped.startswith("litebackup_") and not stripped.startswith("litebackup_join_"):
-            raise invalid_argument("Get a join token from Machines → Add machine")
+        self.api_key = api_key if api_key is not None else self.environment.get(API_KEY_ENVIRONMENT)
+        credential_type(self.api_key)
         if socket_path is not None and not socket_path:
             raise invalid_argument("socket_path needs a path")
         self.explicit_socket = socket_path is not None
@@ -66,8 +67,8 @@ class _Settings:
 
     def foreground_environment(self) -> dict[str, str]:
         environment = dict(self.environment)
-        if self.token:
-            environment[TOKEN_ENVIRONMENT] = self.token
+        if self.api_key is not None:
+            environment[API_KEY_ENVIRONMENT] = self.api_key
         return environment
 
 
@@ -87,7 +88,7 @@ class Litebackup:
     def __init__(
         self,
         *,
-        token: str | None = None,
+        api_key: str | None = None,
         session: str | None = None,
         socket_path: str | None = None,
         binary_path: str | None = None,
@@ -96,7 +97,11 @@ class Litebackup:
     ) -> None:
         """Arguments:
 
-        token: the join token, TOKEN@HOST, the daemon joins with on its first start; LITEBACKUP_TOKEN by default.
+        api_key: the credential the daemon uses when it starts: an API key, or a join token it exchanges once for a
+            key of this machine, then @ and the server's address; LITEBACKUP_API_KEY by default. The daemon keeps the
+            key it saved unless this holds a different credential, which the launch refuses with
+            ErrorCode.DRAIN_REQUIRED while the client holds write locks; a daemon already running keeps its key
+            until it restarts. Foreground backups use it too.
         session: the session name; LITEBACKUP_SESSION, then "default".
         socket_path: connect to this socket and never start a daemon.
         binary_path: the litebackup binary that starts the daemon; see litebackup_binary() for the search.
@@ -104,20 +109,21 @@ class Litebackup:
         environment: the environment for resolving paths and starting the daemon; os.environ by default.
         """
         self._settings = _Settings(
-            token=token, session=session, socket_path=socket_path, binary_path=binary_path, launch=launch, environment=environment
+            api_key=api_key, session=session, socket_path=socket_path, binary_path=binary_path, launch=launch, environment=environment
         )
         self._transport = SyncTransport(self._settings.socket_path)
         self._connect_lock = threading.Lock()
         self._connected = False
         self._closed = False
         self._failovers: set[Failover] = set()
+        self._jobs_lock = threading.Lock()
+        self._jobs: set[subprocess.Popen[str]] = set()
         self.client_version = ""
         """The daemon's version, from its last answer."""
         self.backups = Backups(self)
         self.rules = Rules(self)
         self.databases = Databases(self)
         self.replicas = Replicas(self)
-        self.conflicts = Conflicts(self)
         self.events = Events(self)
         self.session = Session(self)
         self.failovers = Failovers(self)
@@ -126,16 +132,19 @@ class Litebackup:
     def socket_path(self) -> str:
         return self._settings.socket_path
 
-    def connect(self) -> None:
-        """Connects, starting the daemon when needed; fails with incompatible_version for a daemon older than 1.0.0."""
+    def _ensure_open(self) -> None:
         if self._closed:
-            raise LitebackupError(ErrorCode.CLOSED, "the client is closed")
+            raise _closed_error()
+
+    def connect(self) -> None:
+        """Connects, starting the daemon when needed; fails with daemon_unsupported for a daemon older than 1.1.0."""
+        self._ensure_open()
         with self._connect_lock:
             if self._connected:
                 return
             settings = self._settings
             if not settings.explicit_socket and settings.launch and settings.session:
-                launch_daemon(settings.session, settings.socket_path, settings.environment, settings.token, settings.binary_path)
+                launch_daemon(settings.session, settings.socket_path, settings.environment, settings.api_key, settings.binary_path)
             self._send(_wire.connect_probe())
             _wire.check_daemon_version(self.client_version, settings.session)
             self._connected = True
@@ -149,20 +158,33 @@ class Litebackup:
         self.connect()
         return self._send(call)
 
-    def _forget_failover(self, failover: Failover) -> None:
+    def _remove_failover(self, failover: Failover) -> None:
         self._failovers.discard(failover)
 
     def close(self) -> None:
-        """Stops following failovers and closes connections. The daemon keeps running, and so do its failovers and acquired databases."""
-        self._closed = True
-        for failover in list(self._failovers):
-            failover.end()
+        """Stops following failovers, ends running foreground backups, and closes connections.
+
+        The daemon keeps running, and so do its failovers and acquired databases.
+        """
+        with self._jobs_lock:
+            self._closed = True
+            jobs = list(self._jobs)
+        failovers = list(self._failovers)
+        # Closing the transport first ends calls in flight, including the following
+        # threads' long-polls and any call a failover callback waits on, so
+        # _stop_following() never waits on a callback that waits on this client.
         self._transport.close()
+        for failover in failovers:
+            failover._stop_following()
+        for job in jobs:
+            _foreground.stop_job(job)
+        for failover in failovers:
+            failover._join()
 
     def __enter__(self) -> Litebackup:
         return self
 
-    def __exit__(self, kind: type[BaseException] | None, error: BaseException | None, traceback: TracebackType | None) -> None:
+    def __exit__(self, error_type: type[BaseException] | None, error: BaseException | None, traceback: TracebackType | None) -> None:
         self.close()
 
 
@@ -175,15 +197,31 @@ class Backups(_Group):
     """Continuous backups and one-shot backup jobs."""
 
     def start(
-        self, source: PathSource, *, name: str | None = None, prefix: str | None = None, maximum_local_databases: int | None = None
+        self,
+        source: PathSource,
+        *,
+        name: str | None = None,
+        prefix: str | None = None,
+        maximum_local_databases: int | None = None,
+        offload_durability: Durability = "server",
+        offload_rollback_journal: bool = False,
     ) -> models.BackupRule:
         """Saves a continuous backup rule for a file, directory, or glob; returns once the daemon saved it.
 
         Starting the same path again with the same settings returns the saved rule, so
-        call it on every start. Other settings for a saved path raise ``exists`` with the
+        call it on every start. Other settings for a saved path raise ``rule_exists`` with the
         saved rule in ``details["rule"]``.
         """
-        return self._client._call(_wire.start_backup(source, name=name, prefix=prefix, maximum_local_databases=maximum_local_databases))
+        return self._client._call(
+            _wire.start_backup(
+                source,
+                name=name,
+                prefix=prefix,
+                maximum_local_databases=maximum_local_databases,
+                offload_durability=offload_durability,
+                offload_rollback_journal=offload_rollback_journal,
+            )
+        )
 
     def once(
         self,
@@ -191,18 +229,45 @@ class Backups(_Group):
         *,
         name: str | None = None,
         prefix: str | None = None,
-        wait: Durability = "server",
+        durability: Durability = "server",
         timeout: Duration | None = None,
     ) -> None:
-        """Runs one foreground backup job and returns once it exits, after the chosen destination acknowledged it."""
-        settings = self._client._settings
-        command = settings.foreground_command(source, name=name, prefix=prefix, wait=wait, timeout=timeout)
+        """Runs one foreground backup job and returns once it exits, after the chosen destination acknowledged it.
+
+        With a ``timeout``, a job still running 30 seconds after it ran out is killed
+        and raises timeout. close() ends a running job, which then raises closed.
+        """
+        client = self._client
+        client._ensure_open()
+        settings = client._settings
+        command = settings.foreground_command(source, name=name, prefix=prefix, durability=durability, timeout=timeout)
         try:
-            completed = subprocess.run(command, env=settings.foreground_environment(), capture_output=True, text=True, check=False)
+            process = subprocess.Popen(
+                command, env=settings.foreground_environment(), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
+            )
         except OSError as error:
-            raise LitebackupError(ErrorCode.LAUNCH_FAILED, str(error)) from error
-        if completed.returncode != 0:
-            raise _foreground.backup_failure(completed.stderr, completed.returncode)
+            raise _foreground.start_failure(command[0], error) from error
+        with client._jobs_lock:
+            client._jobs.add(process)
+            closed = client._closed
+        try:
+            if closed:
+                _foreground.stop_job(process)
+            try:
+                stderr, timed_out = _foreground.await_job(process, _foreground.job_deadline(timeout))
+            except BaseException:
+                process.kill()
+                process.wait()
+                raise
+        finally:
+            with client._jobs_lock:
+                client._jobs.discard(process)
+        if timed_out:
+            raise _foreground.timed_out_backup()
+        if process.returncode != 0:
+            if client._closed:
+                raise _closed_error()
+            raise _foreground.backup_failure(stderr, process.returncode)
 
     def stop(self, name: str) -> models.StopBackupResult:
         """Stops the single-file backup with this exact remote name on this machine."""
@@ -230,7 +295,7 @@ class Databases(_Group):
         """One page; pass its ``next`` as ``after`` to continue."""
         return self._client._call(_wire.databases_page(after=after, limit=limit))
 
-    def iter_all(self, *, limit: int = 100) -> Iterator[models.DatabaseStatus]:
+    def all(self, *, limit: int = 100) -> Iterator[models.DatabaseStatus]:
         """Every database on this machine, a page at a time."""
         after = ""
         while True:
@@ -241,12 +306,12 @@ class Databases(_Group):
             after = page.next
 
     def list(self) -> builtins.list[models.DatabaseStatus]:
-        return list(self.iter_all())
+        return list(self.all())
 
     def versions_page(self, name: str, *, after: int = 0, limit: int | None = None) -> models.VersionList:
         return self._client._call(_wire.versions_page(name, after=after, limit=limit))
 
-    def iter_versions(self, name: str, *, after: int = 0, limit: int | None = None) -> Iterator[models.RestorableVersion]:
+    def all_versions(self, name: str, *, after: int = 0, limit: int | None = None) -> Iterator[models.RestorableVersion]:
         """The versions the server can restore, oldest first; at most ``limit`` when set."""
         if limit == 0:
             return
@@ -263,17 +328,41 @@ class Databases(_Group):
             after = page.next
 
     def versions(self, name: str, *, after: int = 0, limit: int | None = None) -> builtins.list[models.RestorableVersion]:
-        return list(self.iter_versions(name, after=after, limit=limit))
+        return list(self.all_versions(name, after=after, limit=limit))
 
-    def restore(self, name: str, *, to: PathSource, version: int | None = None, time: datetime | str | None = None) -> models.RestoreResult:
-        """Writes a version to a new file and checks it. An existing file is never overwritten (exists)."""
-        return self._client._call(_wire.restore(name, to=to, version=version, time=time))
+    def restore(
+        self,
+        name: str,
+        *,
+        path: PathSource,
+        version: int | None = None,
+        time: datetime | str | None = None,
+        umask: int | None = None,
+    ) -> models.RestoreResult:
+        """Writes a version to a new file and checks it. An existing file is never overwritten (file_exists).
+
+        The file gets 0666 less ``umask``, this process's umask when None.
+        """
+        return self._client._call(_wire.restore(name, path=path, version=version, time=time, umask=umask))
+
+    def revert(self, name: str, *, version: int | None = None, time: datetime | str | None = None) -> models.RevertResult:
+        """Rolls a database back under its own name: a past version's content becomes a new head, one past the current head.
+
+        Pass ``version`` or ``time``, one of them; every later version stays restorable. The database must be one
+        this machine acquired or backs up, and its file closed (still_open otherwise); a replica or a failover
+        standby is refused (invalid_argument), and a file holding writes the server lacks is refused with conflict
+        and left untouched. The daemon takes the write lock when it does not hold it and gives it back once the new
+        head is synced. When that sync fails for any reason but a lost lock or a refused file, which are final, it
+        keeps the lock and syncs again on its own, so release an acquired database afterwards.
+        """
+        return self._client._call(_wire.revert(name, version=version, time=time))
 
     def sync(self, name: str) -> models.DatabaseStatus:
         return self._client._call(_wire.sync(name))
 
-    def offload(self, name: str) -> models.DatabaseStatus:
-        return self._client._call(_wire.offload(name))
+    def offload(self, name: str, *, durability: Durability | None = None) -> models.DatabaseStatus:
+        """Removes the local file of a released database once the server holds its last version, or the bucket with ``"cloud"``."""
+        return self._client._call(_wire.offload(name, durability=durability))
 
     def writer(self, name: str) -> models.Writer:
         return self._client._call(_wire.writer(name))
@@ -282,82 +371,91 @@ class Databases(_Group):
         self,
         name: str,
         *,
-        to: PathSource | None = None,
+        path: PathSource | None = None,
         maintenance: bool = False,
-        offload: Literal["never", "released"] = "never",
+        offload_on_release: bool = False,
+        offload_durability: Durability = "server",
         machine_label: str | None = None,
-        on_lost: Literal["conflict", "block"] = "conflict",
         timeout: Duration | None = None,
+        lock_timeout: Duration | None = None,
+        umask: int | None = None,
+        discard_local: bool = False,
     ) -> models.AcquireResult:
-        """Takes the write lock and makes the local file the server's head. ``managed()`` also opens, closes, and releases."""
+        """Takes the write lock and makes the local file the server's head. A ``pool()`` lease also opens, keeps, and releases it.
+
+        A local file that diverged from the head is refused with ``conflict`` and left untouched; ``discard_local``
+        replaces it with the head instead, discarding its writes the head lacks. While another machine holds
+        the write lock, the daemon asks again for up to ``lock_timeout``; without it the acquire fails at once
+        with ``lock_unavailable``.
+        """
         return self._client._call(
             _wire.acquire(
-                name, to=to, maintenance=maintenance, offload=offload, machine_label=machine_label, on_lost=on_lost, timeout=timeout
+                name,
+                path=path,
+                maintenance=maintenance,
+                offload_on_release=offload_on_release,
+                offload_durability=offload_durability,
+                machine_label=machine_label,
+                timeout=timeout,
+                lock_timeout=lock_timeout,
+                umask=umask,
+                discard_local=discard_local,
             )
         )
 
     def release(
-        self, name: str, *, wait: Durability | None = None, offload: bool = False, timeout: Duration | None = None
+        self, name: str, *, durability: Durability | None = None, offload: bool = False, timeout: Duration | None = None
     ) -> models.ReleaseResult:
         """Syncs a final time and releases the write lock. Close every connection first, or it fails with still_open."""
-        return self._client._call(_wire.release(name, wait=wait, offload=offload, timeout=timeout))
+        return self._client._call(_wire.release(name, durability=durability, offload=offload, timeout=timeout))
 
-    def managed(
+    def pool(
         self,
-        name: str,
+        adapter: _pool.Adapter[DB],
         *,
-        durability: Durability,
-        adapter: _managed.ScopeAdapter[Connection],
-        to: PathSource | None = None,
-        create: bool = True,
-        offload: bool = False,
+        idle_close: Duration | None = None,
+        idle_release: Duration | None = None,
         cleanup_timeout: Duration | None = None,
         machine_label: str | None = None,
-        maintenance: bool = False,
-        on_lost: Literal["conflict", "block"] = "conflict",
-        acquire_timeout: Duration | None = None,
-    ) -> AbstractContextManager[Connection]:
-        """Acquires, opens, yields the connection, then closes and releases with ``durability``::
+        on_release_error: Callable[[LeaseCleanupError], None] | None = None,
+    ) -> _pool.Pool[DB]:
+        """A pool that keeps databases open for calls, opened and closed with ``adapter``::
 
-            with litebackup.databases.managed("agents/42.sqlite", to=path, durability="cloud", adapter=sqlite3_adapter()) as db:
-                db.execute("INSERT INTO steps (body) VALUES (?)", (step,))
-                db.commit()
+            with litebackup.databases.pool(adapter=sqlite3_adapter()) as pool:
+                with pool.lease("agents/42.sqlite", path=path) as db:
+                    db.execute("INSERT INTO steps (body) VALUES (?)", (step,))
+                    db.commit()
 
-        When ``to`` is given and nothing is there, an empty file is created first
-        (``create=False`` to skip), so a database neither the server nor this machine
-        has becomes a new one. The adapter rolls back what the block did not commit. A failed block still
-        closes and releases, without offload. A failed close does not release: the
-        database stays acquired with its file untouched. Several failures raise an
-        ExceptionGroup, the block's error first.
+        ``pool.use(name)`` is for a database a backup rule on this machine covers;
+        ``pool.lease(name, ...)`` for one that moves between machines, whose write lock
+        the pool keeps between leases until another machine asks for it.
+
+        idle_close: closes a rule's database after this long unused, to cap open files; by default
+            it stays open, except under a rule with maximum_local_databases, where it closes after
+            two minutes so the rule can offload it.
+        idle_release: releases a leased database after this long unused; by default the lease stays
+            until another machine asks for it, ``release``, or ``close``.
+        cleanup_timeout: bounds closing and releasing a leased database together; 10 minutes by default.
+        machine_label: what other machines see as the writer of leased databases.
+        on_release_error: called with each LeaseCleanupError of a release the pool started on its
+            own; the database stays leased with its file intact, and the pool tries again next time.
+            Logged by default.
         """
-        return _managed.managed(
-            self._client,
-            name,
-            durability=durability,
-            adapter=adapter,
-            to=to,
-            create=create,
-            offload=offload,
-            cleanup_timeout=cleanup_timeout,
-            machine_label=machine_label,
-            maintenance=maintenance,
-            on_lost=on_lost,
-            acquire_timeout=acquire_timeout,
-        )
+        return _pool.new_pool(self._client, adapter, idle_close, idle_release, cleanup_timeout, machine_label, on_release_error)
 
 
 class Replicas(_Group):
     """Live readonly replicas on this machine."""
 
     def start(
-        self, name: str, *, to: PathSource | None = None, write_protection: WriteProtection | None = None, timeout: Duration | None = None
+        self, name: str, *, path: PathSource | None = None, write_protection: WriteProtection | None = None, timeout: Duration | None = None
     ) -> models.DatabaseStatus:
         """Keeps a live readonly replica and returns once its first version is local."""
-        return self._client._call(_wire.start_replica(name, to=to, write_protection=write_protection, timeout=timeout))
+        return self._client._call(_wire.start_replica(name, path=path, write_protection=write_protection, timeout=timeout))
 
-    def start_prefix(self, prefix: str, *, to: PathSource, write_protection: WriteProtection | None = None) -> models.PrefixReplica:
+    def start_prefix(self, prefix: str, *, directory: PathSource, write_protection: WriteProtection | None = None) -> models.PrefixReplica:
         """Replicates current and future databases under a prefix into a directory; downloads run in the background."""
-        return self._client._call(_wire.start_prefix_replica(prefix, to=to, write_protection=write_protection))
+        return self._client._call(_wire.start_prefix_replica(prefix, directory=directory, write_protection=write_protection))
 
     def list(self) -> models.ReplicaList:
         return self._client._call(_wire.list_replicas())
@@ -365,18 +463,8 @@ class Replicas(_Group):
     def stop(self, name: str) -> None:
         self._client._call(_wire.stop_replica(name))
 
-    def stop_prefix(self, prefix: str, *, to: PathSource) -> None:
-        self._client._call(_wire.stop_prefix_replica(prefix, to=to))
-
-
-class Conflicts(_Group):
-    """Conflict copies, saved because they diverged from the server."""
-
-    def list(self) -> builtins.list[models.Conflict]:
-        return self._client._call(_wire.list_conflicts())
-
-    def delete(self, conflict_id: str) -> None:
-        self._client._call(_wire.delete_conflict(conflict_id))
+    def stop_prefix(self, prefix: str, *, directory: PathSource) -> None:
+        self._client._call(_wire.stop_prefix_replica(prefix, directory=directory))
 
 
 class Events(_Group):
@@ -391,8 +479,9 @@ class Events(_Group):
     ) -> Iterator[models.Event]:
         """Yields events, oldest first, by long-polling until the caller stops.
 
-        A failed long-poll is retried with backoff from the same cursor; sdk_unsupported
-        and closed end the watch by raising.
+        A failed long-poll is retried with backoff from the same cursor; sdk_unsupported,
+        closed, cancelled, invalid_argument, and cursor_expired (the cursor is older than
+        the oldest event kept; choose a new one) end the watch by raising.
         """
         wait_seconds = _wire.seconds(wait, "the event wait") or _wire.EVENT_WAIT_SECONDS
         delay = _wire.FIRST_RETRY_SECONDS
@@ -420,9 +509,17 @@ class Session(_Group):
     def status(self, *, after: str = "", limit: int = 100) -> models.Status:
         return self._client._call(_wire.status(after=after, limit=limit))
 
-    def shutdown(self, *, wait: Literal["none", "server", "cloud"] | None = None, timeout: Duration | None = None) -> models.ShutdownResult:
-        """Final-syncs every database, releases every write lock, and stops the daemon. close() never does this."""
-        return self._client._call(_wire.shutdown(wait=wait, timeout=timeout))
+    def shutdown(
+        self, *, durability: Literal["none", "server", "cloud"] | None = None, timeout: Duration | None = None
+    ) -> models.ShutdownResult:
+        """Final-syncs every database, releases every write lock, and stops the daemon.
+
+        A backup another machine writes holds no lock and stays waiting. Each database
+        it could not sync or release is in failed, with its code, and keeps any write lock it holds;
+        the session and the daemon then stay. An empty failed is the only complete
+        shutdown. close() never does this.
+        """
+        return self._client._call(_wire.shutdown(durability=durability, timeout=timeout))
 
 
 class Failovers(_Group):
@@ -434,18 +531,30 @@ class Failovers(_Group):
         *,
         name: str | None = None,
         timeout: Duration | None = None,
+        discard_local: bool = False,
         on_role_change: Callable[[str], None] | None = None,
-        on_conflict_saved: Callable[[str], None] | None = None,
+        on_refused: Callable[[str], None] | None = None,
         on_error: Callable[[LitebackupError], None] | None = None,
     ) -> Failover:
-        """Runs the database at ``path``, the same on every machine; returns once this machine is the origin or holds a replica."""
+        """Runs the database at ``path``, the same on every machine; returns once this machine is the origin or holds a replica.
+
+        ``on_role_change`` is called once with the role the start answered, then with every change:
+        ``"origin"``, ``"replica"``, or ``"unknown"`` when the daemon stops answering; once it answers
+        again, the role is read and reported. ``is_origin`` is False while the role is unknown.
+        ``on_refused`` is called with the daemon's message when it refused this machine's file and the
+        failover stays conflicted there, leaving the file as it is: a file that differs from the server head when
+        this machine starts as the origin, or one holding writes the new origin never saw when this
+        machine lost the origin role. The database's state is conflicted, and the role is ``"unknown"``, except for a
+        refusal older than the last role read after the daemon answered again, which leaves the role that read gave.
+        A file at the path that differs from the server head, and is not a clean copy of the version this machine
+        last synced, is refused with ``conflict`` and left untouched; ``discard_local`` replaces it with the head.
+        """
         client = self._client
-        call = _wire.start_failover(path, name=name, timeout=timeout)
+        call = _wire.start_failover(path, name=name, timeout=timeout, discard_local=discard_local)
         end = client._call(_wire.events_page(after=-1))
-        info = client._call(call)
-        if client._closed:
-            raise LitebackupError(ErrorCode.CLOSED, "the client is closed")
-        failover = Failover(client, info, end.next, on_role_change=on_role_change, on_conflict_saved=on_conflict_saved, on_error=on_error)
+        status = client._call(call)
+        client._ensure_open()
+        failover = Failover(client, status, end.next, on_role_change=on_role_change, on_refused=on_refused, on_error=on_error)
         client._failovers.add(failover)
         return failover
 
@@ -466,7 +575,7 @@ class AsyncLitebackup:
     def __init__(
         self,
         *,
-        token: str | None = None,
+        api_key: str | None = None,
         session: str | None = None,
         socket_path: str | None = None,
         binary_path: str | None = None,
@@ -475,20 +584,20 @@ class AsyncLitebackup:
     ) -> None:
         """Arguments are those of Litebackup."""
         self._settings = _Settings(
-            token=token, session=session, socket_path=socket_path, binary_path=binary_path, launch=launch, environment=environment
+            api_key=api_key, session=session, socket_path=socket_path, binary_path=binary_path, launch=launch, environment=environment
         )
         self._transport = AsyncTransport(self._settings.socket_path)
         self._connect_lock: asyncio.Lock | None = None
         self._connected = False
         self._closed = False
         self._failovers: set[AsyncFailover] = set()
+        self._jobs: set[asyncio.subprocess.Process] = set()
         self.client_version = ""
         """The daemon's version, from its last answer."""
         self.backups = AsyncBackups(self)
         self.rules = AsyncRules(self)
         self.databases = AsyncDatabases(self)
         self.replicas = AsyncReplicas(self)
-        self.conflicts = AsyncConflicts(self)
         self.events = AsyncEvents(self)
         self.session = AsyncSession(self)
         self.failovers = AsyncFailovers(self)
@@ -497,10 +606,13 @@ class AsyncLitebackup:
     def socket_path(self) -> str:
         return self._settings.socket_path
 
-    async def connect(self) -> None:
-        """Connects, starting the daemon when needed; fails with incompatible_version for a daemon older than 1.0.0."""
+    def _ensure_open(self) -> None:
         if self._closed:
-            raise LitebackupError(ErrorCode.CLOSED, "the client is closed")
+            raise _closed_error()
+
+    async def connect(self) -> None:
+        """Connects, starting the daemon when needed; fails with daemon_unsupported for a daemon older than 1.1.0."""
+        self._ensure_open()
         if self._connect_lock is None:
             self._connect_lock = asyncio.Lock()
         async with self._connect_lock:
@@ -509,7 +621,7 @@ class AsyncLitebackup:
             settings = self._settings
             if not settings.explicit_socket and settings.launch and settings.session:
                 await launch_daemon_async(
-                    settings.session, settings.socket_path, settings.environment, settings.token, settings.binary_path
+                    settings.session, settings.socket_path, settings.environment, settings.api_key, settings.binary_path
                 )
             await self._send(_wire.connect_probe())
             _wire.check_daemon_version(self.client_version, settings.session)
@@ -524,20 +636,35 @@ class AsyncLitebackup:
         await self.connect()
         return await self._send(call)
 
-    def _forget_failover(self, failover: AsyncFailover) -> None:
+    def _remove_failover(self, failover: AsyncFailover) -> None:
         self._failovers.discard(failover)
 
     async def close(self) -> None:
-        """Stops following failovers and closes connections. The daemon keeps running."""
+        """Stops following failovers, ends running foreground backups, and closes connections. The daemon keeps running."""
         self._closed = True
+        # Every step runs even when the caller is cancelled meanwhile, so no
+        # failover keeps following; the cancellation is raised at the end.
+        cancellation: asyncio.CancelledError | None = None
         for failover in list(self._failovers):
-            await failover.end()
-        await self._transport.close()
+            try:
+                await failover._stop_following()
+            except asyncio.CancelledError as error:
+                cancellation = cancellation or error
+        try:
+            await asyncio.gather(*(_foreground.stop_job_async(job) for job in list(self._jobs)))
+        except asyncio.CancelledError as error:
+            cancellation = cancellation or error
+        try:
+            await self._transport.close()
+        except asyncio.CancelledError as error:
+            cancellation = cancellation or error
+        if cancellation is not None:
+            raise cancellation
 
     async def __aenter__(self) -> AsyncLitebackup:
         return self
 
-    async def __aexit__(self, kind: type[BaseException] | None, error: BaseException | None, traceback: TracebackType | None) -> None:
+    async def __aexit__(self, error_type: type[BaseException] | None, error: BaseException | None, traceback: TracebackType | None) -> None:
         await self.close()
 
 
@@ -550,11 +677,25 @@ class AsyncBackups(_AsyncGroup):
     """Continuous backups and one-shot backup jobs."""
 
     async def start(
-        self, source: PathSource, *, name: str | None = None, prefix: str | None = None, maximum_local_databases: int | None = None
+        self,
+        source: PathSource,
+        *,
+        name: str | None = None,
+        prefix: str | None = None,
+        maximum_local_databases: int | None = None,
+        offload_durability: Durability = "server",
+        offload_rollback_journal: bool = False,
     ) -> models.BackupRule:
-        """See Backups.start: idempotent for the same settings, ``exists`` with the saved rule for others."""
+        """See Backups.start: idempotent for the same settings, ``rule_exists`` with the saved rule for others."""
         return await self._client._call(
-            _wire.start_backup(source, name=name, prefix=prefix, maximum_local_databases=maximum_local_databases)
+            _wire.start_backup(
+                source,
+                name=name,
+                prefix=prefix,
+                maximum_local_databases=maximum_local_databases,
+                offload_durability=offload_durability,
+                offload_rollback_journal=offload_rollback_journal,
+            )
         )
 
     async def once(
@@ -563,26 +704,38 @@ class AsyncBackups(_AsyncGroup):
         *,
         name: str | None = None,
         prefix: str | None = None,
-        wait: Durability = "server",
+        durability: Durability = "server",
         timeout: Duration | None = None,
     ) -> None:
-        """Runs one foreground backup job; cancelling the task stops the job with SIGTERM."""
-        settings = self._client._settings
-        command = settings.foreground_command(source, name=name, prefix=prefix, wait=wait, timeout=timeout)
+        """Runs one foreground backup job; cancelling the task stops the job with SIGTERM, then SIGKILL after 15 seconds.
+
+        With a ``timeout``, a job still running 30 seconds after it ran out is stopped
+        the same way and raises timeout. close() ends a running job, which then raises closed.
+        """
+        client = self._client
+        client._ensure_open()
+        settings = client._settings
+        command = settings.foreground_command(source, name=name, prefix=prefix, durability=durability, timeout=timeout)
         try:
             process = await asyncio.create_subprocess_exec(
                 *command, env=settings.foreground_environment(), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
             )
         except OSError as error:
-            raise LitebackupError(ErrorCode.LAUNCH_FAILED, str(error)) from error
+            raise _foreground.start_failure(command[0], error) from error
+        client._jobs.add(process)
         try:
-            _, stderr = await process.communicate()
-        except asyncio.CancelledError:
-            with contextlib.suppress(ProcessLookupError):
-                process.terminate()
-            await asyncio.shield(process.wait())
-            raise
+            if client._closed:
+                # close() ran while the job started and may have missed it: stop it at once.
+                await asyncio.shield(_foreground.await_job_async(process, 0))
+                raise _closed_error()
+            stderr, timed_out = await _foreground.await_job_async(process, _foreground.job_deadline(timeout))
+        finally:
+            client._jobs.discard(process)
+        if timed_out:
+            raise _foreground.timed_out_backup()
         if process.returncode != 0:
+            if client._closed:
+                raise _closed_error()
             raise _foreground.backup_failure(stderr.decode("utf-8", "replace"), process.returncode or 1)
 
     async def stop(self, name: str) -> models.StopBackupResult:
@@ -608,8 +761,8 @@ class AsyncDatabases(_AsyncGroup):
     async def page(self, *, after: str = "", limit: int = 100) -> models.DatabaseStatusList:
         return await self._client._call(_wire.databases_page(after=after, limit=limit))
 
-    async def iter_all(self, *, limit: int = 100) -> AsyncIterator[models.DatabaseStatus]:
-        """Every database on this machine, a page at a time: ``async for database in litebackup.databases.iter_all()``."""
+    async def all(self, *, limit: int = 100) -> AsyncIterator[models.DatabaseStatus]:
+        """Every database on this machine, a page at a time: ``async for database in litebackup.databases.all()``."""
         after = ""
         while True:
             page = await self.page(after=after, limit=limit)
@@ -620,12 +773,12 @@ class AsyncDatabases(_AsyncGroup):
             after = page.next
 
     async def list(self) -> builtins.list[models.DatabaseStatus]:
-        return [database async for database in self.iter_all()]
+        return [database async for database in self.all()]
 
     async def versions_page(self, name: str, *, after: int = 0, limit: int | None = None) -> models.VersionList:
         return await self._client._call(_wire.versions_page(name, after=after, limit=limit))
 
-    async def iter_versions(self, name: str, *, after: int = 0, limit: int | None = None) -> AsyncIterator[models.RestorableVersion]:
+    async def all_versions(self, name: str, *, after: int = 0, limit: int | None = None) -> AsyncIterator[models.RestorableVersion]:
         if limit == 0:
             return
         yielded = 0
@@ -641,18 +794,29 @@ class AsyncDatabases(_AsyncGroup):
             after = page.next
 
     async def versions(self, name: str, *, after: int = 0, limit: int | None = None) -> builtins.list[models.RestorableVersion]:
-        return [version async for version in self.iter_versions(name, after=after, limit=limit)]
+        return [version async for version in self.all_versions(name, after=after, limit=limit)]
 
     async def restore(
-        self, name: str, *, to: PathSource, version: int | None = None, time: datetime | str | None = None
+        self,
+        name: str,
+        *,
+        path: PathSource,
+        version: int | None = None,
+        time: datetime | str | None = None,
+        umask: int | None = None,
     ) -> models.RestoreResult:
-        return await self._client._call(_wire.restore(name, to=to, version=version, time=time))
+        return await self._client._call(_wire.restore(name, path=path, version=version, time=time, umask=umask))
+
+    async def revert(self, name: str, *, version: int | None = None, time: datetime | str | None = None) -> models.RevertResult:
+        """Rolls a database back under its own name; see Databases.revert."""
+        return await self._client._call(_wire.revert(name, version=version, time=time))
 
     async def sync(self, name: str) -> models.DatabaseStatus:
         return await self._client._call(_wire.sync(name))
 
-    async def offload(self, name: str) -> models.DatabaseStatus:
-        return await self._client._call(_wire.offload(name))
+    async def offload(self, name: str, *, durability: Durability | None = None) -> models.DatabaseStatus:
+        """Removes the local file of a released database once the server holds its last version, or the bucket with ``"cloud"``."""
+        return await self._client._call(_wire.offload(name, durability=durability))
 
     async def writer(self, name: str) -> models.Writer:
         return await self._client._call(_wire.writer(name))
@@ -661,67 +825,62 @@ class AsyncDatabases(_AsyncGroup):
         self,
         name: str,
         *,
-        to: PathSource | None = None,
+        path: PathSource | None = None,
         maintenance: bool = False,
-        offload: Literal["never", "released"] = "never",
+        offload_on_release: bool = False,
+        offload_durability: Durability = "server",
         machine_label: str | None = None,
-        on_lost: Literal["conflict", "block"] = "conflict",
         timeout: Duration | None = None,
+        lock_timeout: Duration | None = None,
+        umask: int | None = None,
+        discard_local: bool = False,
     ) -> models.AcquireResult:
         return await self._client._call(
             _wire.acquire(
-                name, to=to, maintenance=maintenance, offload=offload, machine_label=machine_label, on_lost=on_lost, timeout=timeout
+                name,
+                path=path,
+                maintenance=maintenance,
+                offload_on_release=offload_on_release,
+                offload_durability=offload_durability,
+                machine_label=machine_label,
+                timeout=timeout,
+                lock_timeout=lock_timeout,
+                umask=umask,
+                discard_local=discard_local,
             )
         )
 
     async def release(
-        self, name: str, *, wait: Durability | None = None, offload: bool = False, timeout: Duration | None = None
+        self, name: str, *, durability: Durability | None = None, offload: bool = False, timeout: Duration | None = None
     ) -> models.ReleaseResult:
-        return await self._client._call(_wire.release(name, wait=wait, offload=offload, timeout=timeout))
+        return await self._client._call(_wire.release(name, durability=durability, offload=offload, timeout=timeout))
 
-    def managed(
+    def pool(
         self,
-        name: str,
+        adapter: _pool.AsyncAdapter[DB],
         *,
-        durability: Durability,
-        adapter: _managed.AsyncScopeAdapter[Connection],
-        to: PathSource | None = None,
-        create: bool = True,
-        offload: bool = False,
+        idle_close: Duration | None = None,
+        idle_release: Duration | None = None,
         cleanup_timeout: Duration | None = None,
         machine_label: str | None = None,
-        maintenance: bool = False,
-        on_lost: Literal["conflict", "block"] = "conflict",
-        acquire_timeout: Duration | None = None,
-    ) -> AbstractAsyncContextManager[Connection]:
-        """See Databases.managed. Cleanup runs to completion under its own timeout even when the task is
-        cancelled; the cancellation is re-raised afterwards, with any cleanup failure attached."""
-        return _managed.managed_async(
-            self._client,
-            name,
-            durability=durability,
-            adapter=adapter,
-            to=to,
-            create=create,
-            offload=offload,
-            cleanup_timeout=cleanup_timeout,
-            machine_label=machine_label,
-            maintenance=maintenance,
-            on_lost=on_lost,
-            acquire_timeout=acquire_timeout,
-        )
+        on_release_error: Callable[[LeaseCleanupError], None] | None = None,
+    ) -> _pool.AsyncPool[DB]:
+        """See Databases.pool; the AsyncPool's leases and uses are async context managers."""
+        return _pool.new_async_pool(self._client, adapter, idle_close, idle_release, cleanup_timeout, machine_label, on_release_error)
 
 
 class AsyncReplicas(_AsyncGroup):
     """Live readonly replicas on this machine."""
 
     async def start(
-        self, name: str, *, to: PathSource | None = None, write_protection: WriteProtection | None = None, timeout: Duration | None = None
+        self, name: str, *, path: PathSource | None = None, write_protection: WriteProtection | None = None, timeout: Duration | None = None
     ) -> models.DatabaseStatus:
-        return await self._client._call(_wire.start_replica(name, to=to, write_protection=write_protection, timeout=timeout))
+        return await self._client._call(_wire.start_replica(name, path=path, write_protection=write_protection, timeout=timeout))
 
-    async def start_prefix(self, prefix: str, *, to: PathSource, write_protection: WriteProtection | None = None) -> models.PrefixReplica:
-        return await self._client._call(_wire.start_prefix_replica(prefix, to=to, write_protection=write_protection))
+    async def start_prefix(
+        self, prefix: str, *, directory: PathSource, write_protection: WriteProtection | None = None
+    ) -> models.PrefixReplica:
+        return await self._client._call(_wire.start_prefix_replica(prefix, directory=directory, write_protection=write_protection))
 
     async def list(self) -> models.ReplicaList:
         return await self._client._call(_wire.list_replicas())
@@ -729,18 +888,8 @@ class AsyncReplicas(_AsyncGroup):
     async def stop(self, name: str) -> None:
         await self._client._call(_wire.stop_replica(name))
 
-    async def stop_prefix(self, prefix: str, *, to: PathSource) -> None:
-        await self._client._call(_wire.stop_prefix_replica(prefix, to=to))
-
-
-class AsyncConflicts(_AsyncGroup):
-    """Conflict copies, saved because they diverged from the server."""
-
-    async def list(self) -> builtins.list[models.Conflict]:
-        return await self._client._call(_wire.list_conflicts())
-
-    async def delete(self, conflict_id: str) -> None:
-        await self._client._call(_wire.delete_conflict(conflict_id))
+    async def stop_prefix(self, prefix: str, *, directory: PathSource) -> None:
+        await self._client._call(_wire.stop_prefix_replica(prefix, directory=directory))
 
 
 class AsyncEvents(_AsyncGroup):
@@ -780,9 +929,9 @@ class AsyncSession(_AsyncGroup):
         return await self._client._call(_wire.status(after=after, limit=limit))
 
     async def shutdown(
-        self, *, wait: Literal["none", "server", "cloud"] | None = None, timeout: Duration | None = None
+        self, *, durability: Literal["none", "server", "cloud"] | None = None, timeout: Duration | None = None
     ) -> models.ShutdownResult:
-        return await self._client._call(_wire.shutdown(wait=wait, timeout=timeout))
+        return await self._client._call(_wire.shutdown(durability=durability, timeout=timeout))
 
 
 class AsyncFailovers(_AsyncGroup):
@@ -794,18 +943,16 @@ class AsyncFailovers(_AsyncGroup):
         *,
         name: str | None = None,
         timeout: Duration | None = None,
+        discard_local: bool = False,
         on_role_change: Callable[[str], None] | None = None,
-        on_conflict_saved: Callable[[str], None] | None = None,
+        on_refused: Callable[[str], None] | None = None,
         on_error: Callable[[LitebackupError], None] | None = None,
     ) -> AsyncFailover:
         client = self._client
-        call = _wire.start_failover(path, name=name, timeout=timeout)
+        call = _wire.start_failover(path, name=name, timeout=timeout, discard_local=discard_local)
         end = await client._call(_wire.events_page(after=-1))
-        info = await client._call(call)
-        if client._closed:
-            raise LitebackupError(ErrorCode.CLOSED, "the client is closed")
-        failover = AsyncFailover(
-            client, info, end.next, on_role_change=on_role_change, on_conflict_saved=on_conflict_saved, on_error=on_error
-        )
+        status = await client._call(call)
+        client._ensure_open()
+        failover = AsyncFailover(client, status, end.next, on_role_change=on_role_change, on_refused=on_refused, on_error=on_error)
         client._failovers.add(failover)
         return failover

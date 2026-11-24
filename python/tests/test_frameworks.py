@@ -40,7 +40,7 @@ def daemon() -> Iterator[ContractDaemon]:
     started.close()
 
 
-def run_django(cwd: str, settings: str) -> subprocess.CompletedProcess[str]:
+def setup_django(cwd: str, settings: str) -> subprocess.CompletedProcess[str]:
     with open(os.path.join(cwd, "project_settings.py"), "w") as file:
         file.write(textwrap.dedent(settings))
     environment = {**os.environ, "DJANGO_SETTINGS_MODULE": "project_settings", "PYTHONPATH": cwd}
@@ -69,7 +69,7 @@ def test_django_registers_on_startup_and_again(cwd: str, daemon: ContractDaemon)
     settings = "from pathlib import Path\nBASE = Path(__file__).resolve().parent\n" + textwrap.dedent(settings)
     os.mkdir(os.path.join(cwd, "data"))
     for _start in range(2):
-        completed = run_django(cwd, settings)
+        completed = setup_django(cwd, settings)
         assert completed.returncode == 0, completed.stderr
         assert "ready" in completed.stdout
     starts = [received.json() for received in daemon.received if received.path == "/v1/backup-rules/start"]
@@ -79,16 +79,16 @@ def test_django_registers_on_startup_and_again(cwd: str, daemon: ContractDaemon)
 
 
 def test_django_refuses_memory_and_skips_when_disabled(cwd: str, daemon: ContractDaemon) -> None:
-    completed = run_django(cwd, django_settings(daemon, "':memory:'", '{"databases": {"default": {}}}'))
+    completed = setup_django(cwd, django_settings(daemon, "':memory:'", '{"databases": {"default": {}}}'))
     assert completed.returncode != 0
     assert "ImproperlyConfigured" in completed.stderr and "in-memory" in completed.stderr
-    completed = run_django(cwd, django_settings(daemon, "'file:memdb?mode=memory&cache=shared'", '{"databases": {"default": {}}}'))
+    completed = setup_django(cwd, django_settings(daemon, "'file:memdb?mode=memory&cache=shared'", '{"databases": {"default": {}}}'))
     assert completed.returncode != 0 and "ImproperlyConfigured" in completed.stderr
-    completed = run_django(cwd, django_settings(daemon, "'app.sqlite'", '{"enabled": False, "databases": {"default": {}}}'))
+    completed = setup_django(cwd, django_settings(daemon, "'app.sqlite'", '{"enabled": False, "databases": {"default": {}}}'))
     assert completed.returncode == 0, completed.stderr
-    completed = run_django(cwd, django_settings(daemon, "'app.sqlite'", '{"databases": {"other": {}}}'))
+    completed = setup_django(cwd, django_settings(daemon, "'app.sqlite'", '{"databases": {"other": {}}}'))
     assert completed.returncode != 0 and "not in DATABASES" in completed.stderr
-    completed = run_django(cwd, django_settings(daemon, "'missing/app.sqlite'", '{"databases": {"default": {}}}'))
+    completed = setup_django(cwd, django_settings(daemon, "'missing/app.sqlite'", '{"databases": {"default": {}}}'))
     assert completed.returncode != 0 and "does not exist" in completed.stderr
     assert daemon.received == []
 

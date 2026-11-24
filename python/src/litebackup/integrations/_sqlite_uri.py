@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
-from ..errors import invalid_argument
+from ..errors import ErrorCode, LitebackupError, invalid_argument
 
 NO_FILE = "an in-memory or temporary database has no file to back up; open it from a path"
 
@@ -45,12 +45,23 @@ def plain_file(filename: str) -> str:
     return os.path.abspath(filename)
 
 
-def file_from_database_list(rows: Iterable[tuple[object, ...]], schema: str) -> str:
-    """The file of one schema in PRAGMA database_list rows of (seq, name, file)."""
-    for row in rows:
-        if row[1] == schema:
-            file = row[2]
+def file_from_database_list(entries: Iterable[tuple[object, ...]], schema: str) -> str:
+    """The file of one schema in PRAGMA database_list entries of (seq, name, file)."""
+    for entry in entries:
+        if entry[1] == schema:
+            file = entry[2]
             if not isinstance(file, str) or not file:
                 raise invalid_argument(f"the database {schema!r} is in memory or temporary and has no file to back up")
             return file
     raise invalid_argument(f"no attached database named {schema!r}")
+
+
+def existing_file_uri(path: str) -> str:
+    """The ``file:`` URI that opens an existing file read-write and never creates one (``mode=rw``)."""
+    return f"file:{quote(os.path.abspath(path))}?mode=rw"
+
+
+def require_existing_file(path: str) -> None:
+    """Raises not_found unless something is at path: a pool's adapter opens existing databases only."""
+    if not os.path.exists(path):
+        raise LitebackupError(ErrorCode.NOT_FOUND, f"{path} does not exist; the adapter opens existing databases only")

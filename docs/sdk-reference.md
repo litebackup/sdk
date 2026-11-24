@@ -34,7 +34,7 @@ client, err := litebackup.Connect(ctx, &litebackup.ConnectArgs{Session: "default
 
 | Option | TypeScript | Python | Go | Meaning |
 | --- | --- | --- | --- | --- |
-| Join token | `token` | `token` | `Token` | `JOIN_TOKEN@HOST`, used only when the daemon first joins; `LITEBACKUP_TOKEN` by default |
+| API key | `apiKey` | `api_key` | `APIKey` | `JOIN_TOKEN@HOST` or `API_KEY@HOST`; the daemon keeps the key it saved unless this holds a different credential, refused with `drain_required` while the client holds write locks; `LITEBACKUP_API_KEY` by default |
 | Session | `session` | `session` | `Session` | `LITEBACKUP_SESSION`, then `default` |
 | Socket | `socketPath` | `socket_path` | `SocketPath` | Connect to this socket and never start a daemon |
 | Binary | `binaryPath` | `binary_path` | `BinaryPath` | The `litebackup` binary that starts the daemon |
@@ -47,8 +47,8 @@ nothing listens on its socket. The binary is the explicit one, then
 `LITEBACKUP_PATH`, then the one the npm package or wheel bundles, then
 `litebackup` on `PATH`, then `~/.local/bin/litebackup`. Go bundles none.
 
-Connecting fails with `incompatible_version` when the daemon is older than
-1.0.0, and the message says how to replace it: `litebackup drain --session
+Connecting fails with `daemon_unsupported` when the daemon is older than
+1.1.0, and the message says how to replace it: `litebackup drain --session
 NAME` stops it after a final sync, and the next call starts the new binary.
 `close()` closes connections and stops watches; it never stops the daemon,
 its failovers, or its acquired databases.
@@ -63,36 +63,40 @@ TypeScript also takes `file:` URLs and Python any `os.PathLike`.
 
 | TypeScript `litebackup.` | Python `litebackup.` | Go `client.` | Returns when / result |
 | --- | --- | --- | --- |
-| `backups.start(path, options?)` | `backups.start(path, ...)` | `StartBackup(ctx, path, args)` | The rule is saved. Idempotent; other settings fail with `exists` |
+| `backups.start(path, options?)` | `backups.start(path, ...)` | `StartBackup(ctx, path, args)` | The rule is saved. Idempotent; other settings fail with `rule_exists` |
 | `backups.stop(name)` | `backups.stop(name)` | `StopBackup(ctx, name)` | A single-file backup stopped |
-| `rules.list()` / `rules.stop(id)` | `rules.list()` / `rules.stop(id)` | `Backups(ctx)` / `StopBackupRule(ctx, id)` | Saved rules; a whole rule stopped |
+| `rules.list()` / `rules.stop(id)` | `rules.list()` / `rules.stop(id)` | `BackupRules(ctx)` / `StopBackupRule(ctx, id)` | Saved rules; a whole rule stopped |
 | `backups.once(path, options?)` | `backups.once(path, ...)` | `Backup(ctx, path, args)` | A foreground job is acknowledged at its `wait` |
 | `replicas.start(name, options?)` | `replicas.start(name, ...)` | `Replicate(ctx, name, args)` | The first local version is available |
-| `replicas.startPrefix(prefix, { to })` | `replicas.start_prefix(prefix, to=)` | `ReplicatePrefix(ctx, prefix, args)` | The namespace is registered; files download in the background |
-| `replicas.list()`, `stop(name)`, `stopPrefix(prefix, to)` | `replicas.list()`, `stop(name)`, `stop_prefix(prefix, to=)` | `Replicas`, `StopReplica`, `StopReplicaPrefix` | Replicas; files stay when stopped |
-| `databases.restore(name, { to, version?, time? })` | `databases.restore(name, to=, version=, time=)` | `Restore(ctx, name, args)` | A new file is written and checked; an existing file is never replaced |
+| `replicas.startPrefix(prefix, { directory })` | `replicas.start_prefix(prefix, directory=)` | `ReplicatePrefix(ctx, prefix, args)` | The namespace is registered; files download in the background |
+| `replicas.list()`, `stop(name)`, `stopPrefix(prefix, directory)` | `replicas.list()`, `stop(name)`, `stop_prefix(prefix, directory=)` | `Replicas`, `StopReplica`, `StopReplicaPrefix` | Replicas; files stay when stopped |
+| `databases.restore(name, { path, version?, time?, umask? })` | `databases.restore(name, path=, version=, time=, umask=)` | `Restore(ctx, name, args)` | A new file is written and checked; an existing file is never replaced. It gets 0666 less `umask`, this process's umask when omitted |
+| `databases.revert(name, { version?, time? })` | `databases.revert(name, version=, time=)` | `Revert(ctx, name, args)` | To roll back: the content of `version`, or of the newest version at or before `time`, is a new head, one past the current head, and every later version stays restorable. Only on the machine that writes the database, with its file closed (`still_open` otherwise); a replica or a failover standby is `invalid_argument`, and a file holding writes the server lacks is `conflict`, left untouched. The daemon takes the write lock when it does not hold it and gives it back once the new head is synced; when that sync fails for any reason but a lost lock or a refused file, which are final, it keeps the lock and syncs again on its own, so release an acquired database afterwards; writes an app makes meanwhile sync before a lock it took goes back, and a file still open keeps it (`still_open`, or `changed` when it changes during every sync) |
 | `databases.versions(name, options?)` | `databases.versions(name, ...)` | `Versions(ctx, name, args)` | Restorable versions, oldest first |
-| `databases.iterateVersions(name, options?)` | `databases.iter_versions(name, ...)` | `AllVersions(ctx, name, args)` | The same, a page at a time |
+| `databases.versionsPage(name, options?)` | `databases.versions_page(name, ...)` | `VersionsPage(ctx, name, args)` | One page of them; pass `next` as `after` to continue |
+| `databases.allVersions(name, options?)` | `databases.all_versions(name, ...)` | `AllVersions(ctx, name, args)` | The same, a page at a time |
 | `databases.acquire(name, options?)` | `databases.acquire(name, ...)` | `Acquire(ctx, name, args)` | The write lock is held and the local file is the head |
-| `databases.release(name, options?)` | `databases.release(name, ...)` | `Release(ctx, name, args)` | The final sync reached `wait` and the lock is released |
-| `databases.managed(name, options, work)` | `with databases.managed(name, ...) as db` | `Managed(ctx, client, name, args, work)` | Acquire, open, work, close, release; see below |
-| `databases.offload(name)` | `databases.offload(name)` | `Offload(ctx, name)` | A released file is removed once the bucket holds it |
+| `databases.release(name, options?)` | `databases.release(name, ...)` | `Release(ctx, name, args)` | The final sync reached `durability` and the lock is released; a write an app makes during the final upload syncs again before the lock goes back, and a file open again keeps it (`still_open`, or `changed` when it changes during every sync); a copy without its lock, as after a drain, whose file holds writes the server lacks is `changed`: acquire it again, then release it |
+| `databases.pool(options)` | `databases.pool(adapter=...)` | `NewPool(client, args)` | A pool that keeps databases open: `use` for a backup rule's database, `lease` for one that moves between machines; see below |
+| `databases.offload(name, { durability? })` | `databases.offload(name, durability=)` | `Offload(ctx, name, args)` | A released file is removed once the server holds its last version, or once the bucket holds it with `durability: "cloud"` |
 | `databases.writer(name)` | `databases.writer(name)` | `Writer(ctx, name)` | The writer's machine and lease |
 | `databases.get(name)` | `databases.get(name)` | `Database(ctx, name)` | One database's status |
-| `databases.sync(name)` | `databases.sync(name)` | `Sync(ctx, name)` | The server acknowledged a sync |
-| `databases.list()` / `iterate()` / `page()` | `databases.list()` / `iter_all()` / `page()` | `Databases` / `AllDatabases` / `DatabasesPage` | Every database on this machine |
-| `failovers.start(path, options?)` | `failovers.start(path, ...)` | `Failover(ctx, path, args)` | This machine is the origin or holds a replica |
-| `conflicts.list()` / `delete(id)` | `conflicts.list()` / `delete(id)` | `Conflicts` / `DeleteConflict` | Conflict copies |
-| `events.watch(options?)` | `events.watch(...)` | `WatchEvents(ctx, args)` | Events as they happen; failed long-polls are retried |
+| `databases.sync(name)` | `databases.sync(name)` | `Sync(ctx, name)` | The server acknowledged a sync; a released acquired database does not sync and is `invalid_argument` |
+| `databases.list()` / `page()` / `all()` | `databases.list()` / `page()` / `all()` | `Databases` / `DatabasesPage` / `AllDatabases` | Every database on this machine: all at once, a page, or one at a time |
+| `failovers.start(path, options?)` | `failovers.start(path, ...)` | `StartFailover(ctx, path, args)` | This machine is the origin or holds a replica |
+| `events.watch(options?)` | `events.watch(...)` | `WatchEvents(ctx, args)` | Events as they happen; failed long-polls are retried, and `cursor_expired` ends the watch |
 | `events.page(options?)` | `events.page(...)` | `Events(ctx, args)` | One page of events |
 | `session.status(options?)` | `session.status(...)` | `Status(ctx)` / `StatusPage` | The session, its server, and a page of databases |
-| `session.shutdown(options?)` | `session.shutdown(...)` | `Shutdown(ctx, args)` | Every database final-synced and the daemon stopped |
+| `session.shutdown(options?)` | `session.shutdown(...)` | `Shutdown(ctx, args)` | Every database final-synced and released, and the daemon stopped; each one that could not be is in `failed`, as is an acquired copy whose file holds writes the server lacks or is open again (`changed`, `still_open`) unless `durability` is `none`, and the daemon then runs on |
 
 Every TypeScript operation takes `signal`, and Go takes `ctx`. Cancelling stops
 the local wait only: the daemon may still finish the operation, and the error
 is `cancelled`. In async Python, cancelling the task raises
 `asyncio.CancelledError` as usual. Calls with a `timeout` wait that long plus
-30 seconds for the daemon's answer; others wait until it answers.
+30 seconds for the daemon's answer; others wait until it answers. A foreground
+backup (`backups.once`, `Backup`) with a `timeout` that runs 30 seconds past
+it is stopped (SIGTERM, then SIGKILL 15 seconds later) and fails with
+`timeout`.
 
 ## Options
 
@@ -100,61 +104,89 @@ is `cancelled`. In async Python, cancelling the task raises
 | --- | --- | --- | --- |
 | `name` | `name` | `Name` | Exact remote name of a single file |
 | `prefix` | `prefix` | `Prefix` | Prefix before each relative path |
-| `maximumLocalDatabases` | `maximum_local_databases` | `MaximumLocalDatabases` | Continuous rules: offload idle files past this count once the bucket holds them |
-| `wait` | `wait` | `Wait` | `backups.once`: `server` (default) or `cloud` |
+| `maximumLocalDatabases` | `maximum_local_databases` | `MaximumLocalDatabases` | Continuous rules: offload idle files past this count once `offloadDurability` holds them |
+| `offloadDurability` | `offload_durability` | `OffloadDurability` | Continuous rules: what `maximumLocalDatabases` waits for, `server` (default: the server holds the last version) or `cloud` (the bucket holds it too) |
+| `offloadRollbackJournal` | `offload_rollback_journal` | `OffloadRollbackJournal` | Continuous rules: `maximumLocalDatabases` offloads rollback-journal databases too; set it only when nothing keeps them open while idle |
+| `durability` | `durability` | `Durability` | `backups.once`: `server` (default) or `cloud` |
 | `timeout` | `timeout` | `Timeout` | `backups.once`: bounds the job |
 
 | Acquire TS | Python | Go | Meaning |
 | --- | --- | --- | --- |
-| `to` | `to` | `To` | Local file; the known path when omitted |
+| `path` | `path` | `Path` | Local file; the known path when omitted |
 | `maintenance` | `maintenance` | `Maintenance` | Checkpoint and VACUUM past the freelist threshold on release |
-| `offload: "released"` | `offload="released"` | `OffloadReleased` | Offload after release once the bucket holds it |
+| `offloadOnRelease: true` | `offload_on_release=True` | `OffloadOnRelease: true` | Offload after release once `offloadDurability` holds it |
+| `offloadDurability: "cloud"` | `offload_durability="cloud"` | `OffloadDurability: DurabilityCloud` | What that offload waits for: `server` (default) once the server holds the released version, `cloud` once the bucket holds it too |
 | `machineLabel` | `machine_label` | `MachineLabel` | What other machines see as the writer |
-| `onLost: "block"` | `on_lost="block"` | `BlockOnLost` | Block local writes after a lost lock instead of saving a conflict copy |
 | `timeout` | `timeout` | `Timeout` | Bounds downloading the head |
+| `lockTimeout` | `lock_timeout` | `LockTimeout` | How long to wait while another machine holds the write lock, trying again until it is released; 0 fails at once with `lock_unavailable`. The call may take `timeout` plus `lockTimeout` |
+| `umask` | `umask` | `Umask` | File mode creation mask: a file the acquire creates gets 0666 less it; this process's umask when omitted. A copy the head replaces keeps its bits |
+| `discardLocal` | `discard_local` | `DiscardLocal` | Replace a local file that diverged from the head with the head, discarding its writes the head lacks; without it such a file is refused with `conflict` and left untouched |
 
-Release takes `wait` (`server` or `cloud`), `offload`, and `timeout`, which
-bounds waiting for every connection to close and for `wait`. Close all SQLite
+Release takes `durability` (`server` or `cloud`), `offload`, and `timeout`, which
+bounds waiting for every connection to close and for `durability`. With `offload`
+the file is removed once `durability` holds the released version: with `server`,
+the default, right after the release; a later offload pass removes a copy
+that is not durable as asked yet. Close all SQLite
 connections first, or release fails with `still_open`.
 
-Managed scopes take the acquire options plus `create` (true by default:
-create an empty file at `to` when nothing is there; Go spells it
-`RequireExisting` for false), `durability` (required, the
-release's `wait`), `offload` (only after the work succeeded), `cleanupTimeout`
-/ `cleanup_timeout` / `CleanupTimeout` (10 minutes by default), and an
-`adapter`. See [integrations](sqlite-integrations.md) for adapters and the
-failure rules.
+A pool takes an `adapter`, which opens existing files only and never creates
+one, `idleClose` (close a rule's database after this long unused; never by
+default, 2 minutes under a rule with `maximumLocalDatabases` so it can be
+offloaded), `idleRelease` (release a lease after this long unused; a minute by
+default, 0 or a negative Go value to keep it), `cleanupTimeout` / `cleanup_timeout` / `CleanupTimeout` (one bound on
+closing and releasing a lease together, 10 minutes by default),
+`machineLabel`, and `onReleaseError` for releases the pool runs on its own.
+
+`use(name, work)` runs work with a backup rule's database: the pool opens it
+once and keeps it open, brings an offloaded copy back first, and refuses a
+name no rule on this machine covers. `lease(name, options, work)` runs work
+with a database that moves between machines, one call at a time: the first
+call acquires the write lock, later calls reuse it and the open handle, and
+the pool releases it after `idleRelease` (a minute unused by default), on
+`release(name)`, or on `close()`, never because another machine waits. Lease
+options are `path` (an empty file is created there when nothing is, unless
+`requireExisting`), `durability` (the call returns once the server or the
+bucket holds what the work committed; the release that ends the lease waits
+for it too, the server by default), `offload` (remove the file when the lease
+ends, unless the last call failed), `lockTimeout`, `acquireTimeout`, and
+`maintenance`. A lost lock ends the running call with `lock_lost`. See
+[integrations](sqlite-integrations.md) for adapters.
 
 Options equal to the daemon's defaults are not sent, so the SDKs send identical
-requests. Replica options are `to`, `writeProtection` (`lock`, `detect`, or
+requests. Replica options are `path`, `writeProtection` (`lock`, `detect`, or
 `none`), and `timeout` for the first download.
 
 ## Status and errors
 
 `DatabaseStatus` has `role` (`origin` or `replica`), `state`, the versions the
-server and bucket hold (`syncedServer`, `syncedCloud`), `localChanged`,
-`acquired`, and diagnostics such as `lastError`. States are `syncing`,
-`retrying`, `synced`, `waiting`, `offloaded`, `stopped`, `conflicted`, and
-`error`. A `retrying` origin's `lastError` says why and `nextRetryTime` when
-the next attempt runs. `firstUnsyncedChangeTime` is when the first change the
-server lacks was seen; it is absent when the server has every change seen and
-may be earlier than the real first change, never later.
+server and bucket hold (`syncedServer`, with the `time` the server took it,
+and `syncedCloud`, with the time it was `archived`), `localChanged`,
+`acquired`, and diagnostics such as `lastError`. States are `pending`,
+`syncing`, `retrying`, `synced`, `waiting`, `offloaded`, `stopped`,
+`conflicted`, and `error`. A backup or failover origin is `pending` while it
+holds no write lock, as after a start or a drain, until a sync takes it. A `retrying` origin's `lastError` says why and `nextRetryTime` when
+the next attempt runs. A backup or failover origin is `synced` while the
+server holds every change seen, and `syncing` again from its next change; an
+acquired database is `syncing` until it is released, then `synced`.
+`firstUnsyncedChangeTime` is when the first change the server lacks was seen;
+it is absent when the server has every change seen and may be earlier than the
+real first change, never later.
 
 Every failure is one error type with `code`, `message`, `status` (the HTTP
 status, or 0 for errors the SDK raised), and `details`: `LitebackupError` in
 TypeScript and Python, `*litebackup.Error` in Go (`IsCode(err, code)`).
 Codes the daemon answers with are kept verbatim; `details` holds the answer's
-other fields under their wire names, such as `details.rule` for `exists`.
+other fields under their wire names, such as `details.rule` for `rule_exists`.
 
 ```ts
-import { Litebackup, LitebackupError } from "@litebackup/sdk";
+import { ErrorCode, Litebackup, LitebackupError } from "@litebackup/sdk";
 
 const litebackup = new Litebackup();
 
 try {
-  await litebackup.databases.acquire("agents/42.sqlite", { to: "/var/lib/app/42.sqlite" });
+  await litebackup.databases.acquire("agents/42.sqlite", { path: "/var/lib/app/42.sqlite" });
 } catch (error) {
-  if (error instanceof LitebackupError && error.code === "in_use") {
+  if (error instanceof LitebackupError && error.code === ErrorCode.lockUnavailable) {
     console.error("Agent already running; retry later");
   } else {
     throw error;
@@ -165,20 +197,73 @@ try {
 | Code | Raised by | Meaning |
 | --- | --- | --- |
 | `invalid_argument` | SDK or daemon | An argument failed validation; the SDK sends nothing |
-| `binary_not_found` | SDK | No `litebackup` binary; the message has the install command |
+| `binary_not_found` | SDK | No `litebackup` binary, or `LITEBACKUP_PATH` or the binary path option names no file; the message has the install command |
 | `launch_failed` | SDK | `litebackup launch` failed |
+| `drain_required` | SDK | `litebackup launch` refused another credential while the client holds write locks; shut down with the current one first |
 | `connection_failed` | SDK | The socket refused or dropped the connection |
-| `incompatible_version` | SDK | The daemon is older than 1.0.0 |
+| `daemon_unsupported` | SDK | The daemon is older than 1.1.0 |
 | `cancelled` | SDK | The caller cancelled; the daemon may still finish |
 | `timeout` | SDK or daemon | The operation's timeout ran out |
 | `closed` | SDK | The client was closed |
 | `invalid_response` | SDK | The daemon's answer could not be decoded |
-| `scope_cleanup_failed` | SDK | A managed scope could not close or release; `details.step` says which |
+| `lease_cleanup_failed` | SDK | A pool could not close or release a leased database; the error is a `LeaseCleanupError` whose `step` is `close` (not released, still acquired) or `release` |
 | `sdk_unsupported` | daemon | This SDK is older than the daemon accepts |
-| `exists`, `in_use`, `not_found`, `still_open`, `busy` | daemon | See [troubleshooting](sqlite-backup-errors.md) |
+| `cursor_expired` | daemon | An events cursor is older than the oldest event kept (status 410); a watch ends with it, a failover resumes at the log's end |
+| `changed` | daemon | The local file changed under an offload or an acquire (status 409): written after its last sync, never synced, or written again while an acquire put the head in its place; acquire it so the write syncs, or retry once the app stops writing |
+| `not_durable` | daemon | An offload refused because the chosen durability does not hold the synced version yet (status 409): the server does not, or with `durability: "cloud"` the bucket does not; retry once it does, or release with `offload` and the same `wait`, which removes the file on a later pass |
+| `conflict` | daemon | The local file differs from the server head and continues no head this machine synced, and was left untouched (status 409): a sync, an acquire, a revert, or a failover refused it, and the message names the file; acquire with `discardLocal` to replace it with the head, restore the head to another path, or back the file up under another name |
+| `lock_lost` | daemon | This copy's write lock was lost, taken by another machine or broken by an admin, so it is kept as conflicted with its file as it was and never synced again on its own, even when nobody wrote (status 409); an acquire resumes it while the head is still the version it last synced |
+| `file_exists`, `rule_exists`, `rule_database`, `lock_unavailable`, `not_found`, `still_open`, `busy` | daemon | See [troubleshooting](sqlite-backup-errors.md) |
+| `client_unsupported` | daemon | The server needs a newer litebackup client on this machine (status 426) |
+| `not_configured`, `wrong_server`, `unauthenticated`, `forbidden`, `plan_limit`, `integrity`, `unavailable` | daemon | The server refused or could not be reached; the message says why (status 503); `unavailable` also answers a sync or an acquire while the daemon releases its locks before it stops |
 
-Only event watches retry, with backoff from 250 ms to 10 s. Acquire, release,
-start, stop, restore, shutdown, and launch are never retried.
+Only event watches and failovers retry, with backoff from 250 ms to 10 s.
+Acquire, release, start, stop, restore, revert, shutdown, and launch are
+never retried. A watch ends with `cursor_expired` when its cursor is older than the
+oldest event the daemon keeps; start again from a new cursor, such as `-1` for
+the log's end. A failover reports it, resumes at the log's end, and re-reads
+its role, so a role change it missed is still reported.
+
+A failover's role callback (`OnRoleChange`, `on_role_change`, or the
+TypeScript `origin`, `replica`, and `unknown` listeners) hears the role the
+start answered once, then every change. TypeScript calls it on the next turn
+of the event loop, so register listeners right after `failovers.start()`
+resolves; in Go and sync Python it may run before the start returns, so use
+its role argument. While the daemon does not answer, the role is `unknown`
+(Go `RoleUnknown`, TypeScript `FailoverRole`), and `IsOrigin()`, `isOrigin`,
+and `is_origin` are false: at once when a call gets no answer
+(`connection_failed`, `timeout`), and after 15 s of failed reads the daemon
+answered. Once the daemon answers again, the failover reads its role and
+reports it. A stopped failover is `unknown` too. The
+[contract](sdk-contract.md#failover-roles) has the exact rules.
+
+The refusal callback (`OnRefused`, `on_refused`, or the TypeScript `refused`
+listener) hears the daemon's message when it refused this machine's file and
+the failover stays conflicted there: a file that differs from the server head when this
+machine starts as the origin, or one holding writes the new origin never saw
+when this machine lost the origin role. The file is left exactly as it is,
+the database is `conflicted`, and the role is `unknown`, so `IsOrigin()`,
+`isOrigin`, and `is_origin` are false. A refusal made before the last role
+read, which a failover hears once its daemon answers again, is still reported
+and leaves the role that read gave: the file may have been moved and the
+failover started again meanwhile. Otherwise start it again with `discardLocal`
+(`discard_local`, Go `DiscardLocal`, `litebackup failover --discard-local`),
+which replaces the file with the head without a stop, or stop the failover,
+move the file aside, and start it again.
+
+A machine that starts a failover as a replica keeps the file at the path
+only when it is empty, already the head, or a clean copy of the version this
+machine last synced there; it then follows the head. Any other file is
+refused the same way at the start, which answers `conflict` naming the file,
+unless `discardLocal` asked for the head in its place.
+
+## Release compatibility
+
+The SDKs and the litebackup client share one release version, 1.1.0. An SDK
+refuses a client older than 1.1.0 with `daemon_unsupported`, and the client
+answers an SDK older than 1.1.0 with 426 `sdk_unsupported`. A server that needs
+a newer client on the machine is refused with `client_unsupported`. Keep the
+npm package or wheel, the Go module, and the client binary at the same version.
 
 ## Release verification
 

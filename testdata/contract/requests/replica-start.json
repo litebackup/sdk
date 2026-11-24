@@ -3,7 +3,7 @@
   "operation": "replicas.start",
   "args": {
     "name": "main.sqlite",
-    "to": "reporting.sqlite",
+    "path": "reporting.sqlite",
     "write_protection": "detect",
     "timeout": "1500ms"
   },
@@ -13,7 +13,7 @@
     "query": {},
     "body": {
       "name": "main.sqlite",
-      "to": "{cwd}/reporting.sqlite",
+      "path": "{cwd}/reporting.sqlite",
       "write_protection": "detect",
       "timeout_millis": 1500
     }

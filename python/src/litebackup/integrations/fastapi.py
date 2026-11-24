@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, TypeVar
 
-from .._wire import PathSource
+from .._wire import Durability, PathSource
 from ..client import AsyncLitebackup
 from ..errors import invalid_argument
 
@@ -31,8 +31,10 @@ def backup_lifespan(
     name: str | None = None,
     prefix: str | None = None,
     maximum_local_databases: int | None = None,
+    offload_durability: Durability = "server",
+    offload_rollback_journal: bool = False,
     lifespan: Lifespan[App] | None = None,
-    token: str | None = None,
+    api_key: str | None = None,
     session: str | None = None,
     socket_path: str | None = None,
     binary_path: str | None = None,
@@ -40,7 +42,8 @@ def backup_lifespan(
     """A lifespan that registers each source with ``backups.start()`` before the app serves, after ``lifespan``'s startup.
 
     Registration is idempotent, so every start of every worker may run it. ``name``
-    applies to a single source; ``prefix`` and ``maximum_local_databases`` apply to each.
+    applies to a single source; ``prefix``, ``maximum_local_databases``,
+    ``offload_durability``, and ``offload_rollback_journal`` apply to each.
     """
     if not sources:
         raise invalid_argument("backup_lifespan needs at least one database path")
@@ -49,11 +52,18 @@ def backup_lifespan(
 
     @asynccontextmanager
     async def registering_lifespan(app: App) -> AsyncIterator[dict[str, Any]]:
-        async with AsyncLitebackup(token=token, session=session, socket_path=socket_path, binary_path=binary_path) as litebackup:
+        async with AsyncLitebackup(api_key=api_key, session=session, socket_path=socket_path, binary_path=binary_path) as litebackup:
 
             async def register() -> None:
                 for source in sources:
-                    await litebackup.backups.start(source, name=name, prefix=prefix, maximum_local_databases=maximum_local_databases)
+                    await litebackup.backups.start(
+                        source,
+                        name=name,
+                        prefix=prefix,
+                        maximum_local_databases=maximum_local_databases,
+                        offload_durability=offload_durability,
+                        offload_rollback_journal=offload_rollback_journal,
+                    )
 
             state: dict[str, Any] = {"litebackup": litebackup}
             if lifespan is None:
