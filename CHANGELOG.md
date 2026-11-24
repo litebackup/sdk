@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0
+
+No changes to the SDKs. They are published at 1.2.0 with the litebackup client
+1.2.0, and keep working with a 1.1.0 client.
+
 ## 1.1.0
 
 The Litebackup SDKs for TypeScript, Python, and Go. They need the litebackup

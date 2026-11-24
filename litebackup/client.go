@@ -31,7 +31,7 @@ import (
 
 // SDKVersion is the version sent with every call. Daemons refuse SDKs older
 // than their minimum with sdk_unsupported.
-const SDKVersion = "1.1.0"
+const SDKVersion = "1.2.0"
 
 // MinimumDaemonVersion is the oldest daemon this SDK talks to. Connect
 // refuses an older one with daemon_unsupported.

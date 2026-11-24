@@ -44,7 +44,7 @@ test("sends the SDK version, converts answers to camelCase, and maps errors", as
   for (const request of daemon.requests) {
     assert.equal(request.headers["litebackup-sdk-version"], `typescript/${sdkVersion}`);
   }
-  assert.equal(sdkVersion, "1.1.0");
+  assert.equal(sdkVersion, "1.2.0");
 });
 
 test("startBackup awaits the local rule and stop reports a pending lease", async (t) => {

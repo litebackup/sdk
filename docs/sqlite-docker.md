@@ -24,10 +24,10 @@ RUN litebackup version
 Build the [standalone example](../examples/docker/cli.Dockerfile) with those two values. For a multi-platform release, supply the matching checksum in each platform's build.
 
 ```sh
-# artifacts[].sha256 of litebackup-linux-amd64 for 1.1.0 in the release metadata
+# artifacts[].sha256 of litebackup-linux-amd64 for 1.2.0 in the release metadata
 LITEBACKUP_SHA256=...
 docker build -f examples/docker/cli.Dockerfile --platform linux/amd64 \
-  --build-arg LITEBACKUP_VERSION=1.1.0 \
+  --build-arg LITEBACKUP_VERSION=1.2.0 \
   --build-arg LITEBACKUP_SHA256="$LITEBACKUP_SHA256" \
   -t litebackup-cli:pinned .
 docker run --rm litebackup-cli:pinned litebackup version
