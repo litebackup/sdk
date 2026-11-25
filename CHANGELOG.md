@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0
+
+The SDKs work with the litebackup client 1.6.0 and refuse an older one with
+`daemon_unsupported`. The failover event `refused` is `denied`: the
+TypeScript listener is `denied`, the Go field `OnDenied`, the Python and Ruby
+argument `on_denied`, the PHP argument `onDenied`, and the Rust notice
+`FailoverNotice::Denied`. The event type constant is `EventTypeDenied` in Go
+and `DENIED` in Ruby and PHP.
+
 ## 1.5.0
 
 The SDKs work with the litebackup client 1.5.0 and refuse an older one with

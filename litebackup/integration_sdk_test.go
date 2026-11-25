@@ -75,13 +75,13 @@ func TestIntegrationRegistrationAndManaged(t *testing.T) {
 		t.Fatalf("starting again: %+v %v", again, err)
 	}
 	_, err = worker.StartBackup(ctx, appPath, &StartBackupArgs{MaximumLocalDatabases: 3})
-	var refused *Error
-	if !errors.As(err, &refused) || refused.Code != CodeRuleExists || refused.Status != 409 {
+	var denied *Error
+	if !errors.As(err, &denied) || denied.Code != CodeRuleExists || denied.Status != 409 {
 		t.Fatalf("other settings: %v", err)
 	}
-	rule, _ := refused.Details["rule"].(map[string]any)
+	rule, _ := denied.Details["rule"].(map[string]any)
 	if rule["id"] != first.ID || rule["name"] != "main.sqlite" {
-		t.Fatalf("the refusal carries %v, want the saved rule %s", refused.Details, first.ID)
+		t.Fatalf("the refusal carries %v, want the saved rule %s", denied.Details, first.ID)
 	}
 
 	// A lease with cloud durability returns once the bucket holds its work,

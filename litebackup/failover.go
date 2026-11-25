@@ -43,7 +43,7 @@ type FailoverArgs struct {
 	// again, the role is read and reported. The first call may come before
 	// StartFailover returns, so use its role argument, not the *Failover.
 	OnRoleChange func(role Role)
-	// OnRefused is called with the daemon's message when it refused this
+	// OnDenied is called with the daemon's message when it refused this
 	// machine's file and the failover stays conflicted there, leaving the
 	// file as it is: a file that differs from the server head when this machine starts
 	// as the origin, or one that holds writes the new origin never saw when
@@ -51,7 +51,7 @@ type FailoverArgs struct {
 	// and the role is RoleUnknown, except for a refusal older than the last
 	// role read after the daemon answered again, which leaves the role that
 	// read gave.
-	OnRefused func(message string)
+	OnDenied func(message string)
 	// OnError is called when reading the daemon's events fails; watching retries.
 	// An expired cursor (cursor_expired) is reported too, and following
 	// resumes at the log's end after re-reading the role.
@@ -254,7 +254,7 @@ func (f *Failover) reportStartRole() {
 // older than the last role read changes no role, because that read holds it;
 // a refusal among them is still reported.
 func (f *Failover) applyEvent(event *Event, olderThanRoleRead bool) {
-	if olderThanRoleRead && event.Type != EventTypeRefused {
+	if olderThanRoleRead && event.Type != EventTypeDenied {
 		return
 	}
 	switch event.Type {
@@ -268,22 +268,22 @@ func (f *Failover) applyEvent(event *Event, olderThanRoleRead bool) {
 		// The daemon drains: it stops being the origin before it releases the
 		// lock, so the app stops writing while no machine may take over yet.
 		f.changeRole(RoleUnknown)
-	case EventTypeRefused:
+	case EventTypeDenied:
 		// The daemon refused this machine's file and the failover stays
 		// conflicted there: this machine neither writes nor follows the database.
 		if !olderThanRoleRead {
 			f.changeRole(RoleUnknown)
 		}
 		message := event.Message
-		if f.args.OnRefused != nil {
-			f.notify(func() { f.args.OnRefused(message) })
+		if f.args.OnDenied != nil {
+			f.notify(func() { f.args.OnDenied(message) })
 		}
 	}
 }
 
 // statusRole is the role a status read reports: RoleUnknown while the daemon
 // drains the origin, as after a draining event, and while the failover's file
-// is refused (conflicted), as after a refused event.
+// is refused (conflicted), as after a denied event.
 func statusRole(status *DatabaseStatus) Role {
 	if status.Draining || status.State == DatabaseStatusStateConflicted {
 		return RoleUnknown
@@ -295,7 +295,7 @@ func statusRole(status *DatabaseStatus) Role {
 // and draining and refused, which make it RoleUnknown.
 func changesRole(eventType EventType) bool {
 	return eventType == EventTypeRoleChanged || eventType == EventTypeDraining ||
-		eventType == EventTypeRefused
+		eventType == EventTypeDenied
 }
 
 // followProgress is what a failover's follower carries from one read to the next.

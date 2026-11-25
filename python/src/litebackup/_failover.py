@@ -39,12 +39,12 @@ machine waits out before it takes over. Tests shorten it.
 
 def _changes_role(event_type: str) -> bool:
     """Whether an event type sets a failover's role: role_changed, and draining and refused, which make it unknown."""
-    return event_type in ("role_changed", "draining", "refused")
+    return event_type in ("role_changed", "draining", "denied")
 
 
 def _status_role(status: models.DatabaseStatus) -> str:
     """The role a status read reports: unknown while the daemon drains the origin, as after a draining event,
-    and while the failover's file is refused (conflicted), as after a refused event."""
+    and while the failover's file is refused (conflicted), as after a denied event."""
     return ROLE_UNKNOWN if status.draining or status.state == "conflicted" else status.role
 
 
@@ -79,7 +79,7 @@ class _FailoverState:
         self,
         status: models.Failover,
         on_role_change: Callable[[str], None] | None,
-        on_refused: Callable[[str], None] | None,
+        on_denied: Callable[[str], None] | None,
         on_error: Callable[[LitebackupError], None] | None,
     ) -> None:
         # What the daemon answered when the failover started.
@@ -90,7 +90,7 @@ class _FailoverState:
         self._event_wait = FAILOVER_EVENT_WAIT_SECONDS
         self._confirmation_limit = ROLE_CONFIRMATION_LIMIT_SECONDS
         self._on_role_change = on_role_change
-        self._on_refused = on_refused
+        self._on_denied = on_denied
         self._on_error = on_error
         self.stopped = False
         # Held across every callback, so once _mark_stopped returns no callback runs; reentrant, so a callback may stop the failover.
@@ -123,7 +123,7 @@ class _FailoverState:
             # An event older than the last role read changes no role, because that read holds it;
             # a refusal among them is still reported.
             older_than_role_read = _changes_role(event.type) and event.id <= progress.role_read_log_end
-            if older_than_role_read and event.type != "refused":
+            if older_than_role_read and event.type != "denied":
                 return
             if event.type == "role_changed":
                 self._change_role(event.role or event.message)
@@ -131,14 +131,14 @@ class _FailoverState:
                 # The daemon drains: it stops being the origin before it releases
                 # the lock, so the app stops writing while no machine may take over yet.
                 self._change_role(ROLE_UNKNOWN)
-            elif event.type == "refused":
+            elif event.type == "denied":
                 # The daemon refused this machine's file and the failover stays conflicted there:
                 # this machine neither writes nor follows the database.
                 if not older_than_role_read:
                     self._change_role(ROLE_UNKNOWN)
                 # The role callback may have stopped the failover.
-                if not self.stopped and self._on_refused is not None:
-                    self._on_refused(event.message)
+                if not self.stopped and self._on_denied is not None:
+                    self._on_denied(event.message)
 
     def _read_unknown_role_again(self, page: models.EventList, progress: _FollowProgress) -> None:
         """Asks for a role read after a long-poll that brought no role change while the role is unknown.

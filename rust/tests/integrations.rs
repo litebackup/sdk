@@ -176,7 +176,7 @@ async fn startup_creates_a_missing_database_and_starts_its_backup() {
 }
 
 #[tokio::test]
-async fn startup_refuses_memory_databases_missing_directories_and_changed_rules() {
+async fn startup_denies_memory_databases_missing_directories_and_changed_rules() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("main.sqlite");
     let exists =

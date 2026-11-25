@@ -7,7 +7,7 @@
 //! # fn example(metadata: &str) -> Result<(), litebackup::release::ReleaseError> {
 //! use litebackup::release::{ReleaseSearch, find_release};
 //!
-//! let release = find_release(metadata, &ReleaseSearch::default().version("1.5.0"))?;
+//! let release = find_release(metadata, &ReleaseSearch::default().version("1.6.0"))?;
 //! if let Some(file) = release.file("litebackup-linux-amd64") {
 //!     println!("{} {} {}", file.url, file.sha256, file.size);
 //! }
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn tampered_metadata_is_refused() {
+    fn tampered_metadata_is_denied() {
         let found =
             find_release(&metadata("package-metadata-tampered.json"), &ReleaseSearch::default().version("0.3.30"));
         assert_eq!(found, Err(ReleaseError::Signature));
@@ -264,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_key_is_refused() {
+    fn an_unknown_key_is_denied() {
         let found =
             find_release_with(&metadata("package-metadata.json"), &ReleaseSearch::default().version("0.3.30"), &[]);
         assert_eq!(found, Err(ReleaseError::Signature));

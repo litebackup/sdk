@@ -322,7 +322,7 @@ async fn a_lease_after_a_failed_release_reopens_its_connection() {
 }
 
 #[tokio::test]
-async fn close_awaits_a_running_call_and_refuses_new_ones() {
+async fn close_awaits_a_running_call_and_denies_new_ones() {
     let daemon = leasing_daemon();
     let client = client_to(&daemon).await;
     let pool = client.databases().pool(CountingAdapter::new(), PoolOptions::default()).unwrap();
@@ -347,8 +347,8 @@ async fn close_awaits_a_running_call_and_refuses_new_ones() {
     };
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(!closing.is_finished(), "close returned while a call ran");
-    let refused = lease_once(&pool, LeaseOptions::default()).await.expect_err("the pool is closing");
-    assert_eq!(refused.code(), Some(ErrorCode::CLOSED));
+    let denied = lease_once(&pool, LeaseOptions::default()).await.expect_err("the pool is closing");
+    assert_eq!(denied.code(), Some(ErrorCode::CLOSED));
     release_work.send(()).unwrap();
     running.await.unwrap().unwrap();
     closing.await.unwrap().unwrap();
@@ -356,12 +356,12 @@ async fn close_awaits_a_running_call_and_refuses_new_ones() {
 }
 
 #[tokio::test]
-async fn a_lease_refuses_a_durability_besides_server_and_cloud() {
+async fn a_lease_denies_a_durability_besides_server_and_cloud() {
     let daemon = leasing_daemon();
     let client = client_to(&daemon).await;
     let pool = client.databases().pool(CountingAdapter::new(), PoolOptions::default()).unwrap();
     let error =
-        lease_once(&pool, LeaseOptions::default().durability(Durability::new("disk"))).await.expect_err("refused");
+        lease_once(&pool, LeaseOptions::default().durability(Durability::new("disk"))).await.expect_err("denied");
     assert_eq!(error.code(), Some(ErrorCode::INVALID_ARGUMENT));
     assert!(daemon.requests().is_empty());
 }
@@ -486,8 +486,8 @@ async fn a_lost_lease_whose_close_failed_blocks_calls_until_a_close_succeeds() {
     assert_eq!(lost.code(), Some(ErrorCode::LOCK_LOST));
     let blocked = lease_once(&pool, LeaseOptions::default()).await.expect_err("the lost connection is open");
     assert_eq!(blocked.code(), Some(ErrorCode::LEASE_CLEANUP_FAILED));
-    let refused = pool.use_database(NAME, async |_connection| -> Result<(), String> { Ok(()) }).await;
-    assert_eq!(refused.expect_err("no work on a lost lease").code(), Some(ErrorCode::LEASE_CLEANUP_FAILED));
+    let denied = pool.use_database(NAME, async |_connection| -> Result<(), String> { Ok(()) }).await;
+    assert_eq!(denied.expect_err("no work on a lost lease").code(), Some(ErrorCode::LEASE_CLEANUP_FAILED));
     adapter.close_as(Closing::Succeeds);
     lease_once(&pool, LeaseOptions::default()).await.unwrap();
     assert_eq!(paths(&daemon).iter().filter(|path| *path == "acquire").count(), 2, "the next lease acquires again");

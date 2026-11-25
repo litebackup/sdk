@@ -287,8 +287,8 @@ test("fails over between three machines and refuses the old origin's diverged fi
   });
   await eventually(60_000, async () => {
     const page = await restarted.events.page({ limit: 10_000 });
-    const refused = page.events.find((event) => event.type === "refused" && event.name === name && event.path === firstPath);
-    assert.ok(refused, "no refused event naming the file yet");
+    const denied = page.events.find((event) => event.type === "denied" && event.name === name && event.path === firstPath);
+    assert.ok(denied, "no denied event naming the file yet");
   });
   assert.equal(countItems(firstPath), 8);
   assert.equal(origin.isOrigin, true);

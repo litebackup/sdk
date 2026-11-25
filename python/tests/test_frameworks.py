@@ -78,7 +78,7 @@ def test_django_registers_on_startup_and_again(cwd: str, daemon: ContractDaemon)
     assert os.path.getsize(os.path.join(cwd, "data", "app.sqlite")) == 0
 
 
-def test_django_refuses_memory_and_skips_when_disabled(cwd: str, daemon: ContractDaemon) -> None:
+def test_django_denies_memory_and_skips_when_disabled(cwd: str, daemon: ContractDaemon) -> None:
     completed = setup_django(cwd, django_settings(daemon, "':memory:'", '{"databases": {"default": {}}}'))
     assert completed.returncode != 0
     assert "ImproperlyConfigured" in completed.stderr and "in-memory" in completed.stderr

@@ -1,6 +1,6 @@
 {
   "description": "An older daemon is refused.",
-  "client_version": "1.4.0",
+  "client_version": "1.5.0",
   "accepted": false,
   "expect": {
     "code": "daemon_unsupported",

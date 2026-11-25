@@ -29,10 +29,10 @@ CACHE_ROOT="${HOME}/.cache/litebackup-rust"
 SELECTED_VERSIONS=("${RUST_VERSIONS[@]}")
 INTEGRATION=0
 COMMAND=()
-while [ "${#}" -gt 0 ]; do
+while [[ "${#}" -gt 0 ]]; do
     case "${1}" in
         --rust)
-            if [ "${#}" -lt 2 ]; then
+            if [[ "${#}" -lt 2 ]]; then
                 echo "--rust needs a version: one of ${RUST_VERSIONS[*]}" >&2
                 exit 2
             fi
@@ -64,7 +64,7 @@ done
 # the stable one carries cargo-deny.
 build_test_image() {
     local deny_version=""
-    if [ "${1}" = "${STABLE_VERSION}" ]; then
+    if [[ "${1}" = "${STABLE_VERSION}" ]]; then
         deny_version="${CARGO_DENY_VERSION}"
     fi
     local tag="litebackup-rust-test:${1}"
@@ -88,7 +88,7 @@ gate_steps() {
     done
     steps+=" && cargo test --locked --workspace --all-features"
     steps+=" && RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features --package litebackup"
-    if [ "${1}" = "${STABLE_VERSION}" ]; then
+    if [[ "${1}" = "${STABLE_VERSION}" ]]; then
         steps+=" && cargo deny --locked check"
         # The committed models are what the generator writes from the spec.
         steps+=" && cargo xtask \"\${CARGO_TARGET_DIR}/models.rs\""
@@ -100,11 +100,11 @@ gate_steps() {
 CONTAINER_ARGUMENTS=()
 # The crates.io token a release's cargo publish uses, passed by name only, so
 # its value never appears in a command line.
-if [ -n "${CARGO_REGISTRY_TOKEN:-}" ]; then
+if [[ -n "${CARGO_REGISTRY_TOKEN:-}" ]]; then
     CONTAINER_ARGUMENTS+=(--env CARGO_REGISTRY_TOKEN)
 fi
-if [ "${INTEGRATION}" = 1 ]; then
-    if [ -z "${LITEBACKUP_PATH:-}" ]; then
+if [[ "${INTEGRATION}" = 1 ]]; then
+    if [[ -z "${LITEBACKUP_PATH:-}" ]]; then
         echo "--integration needs LITEBACKUP_PATH, a static litebackup binary from scripts/build" >&2
         exit 2
     fi
@@ -119,7 +119,7 @@ for RUST_VERSION in "${SELECTED_VERSIONS[@]}"; do
     TEST_IMAGE="$(build_test_image "${RUST_VERSION}")"
     RUST_CACHE="${CACHE_ROOT}/${RUST_VERSION}"
     mkdir --parents "${RUST_CACHE}/cargo" "${RUST_CACHE}/target"
-    if [ "${#COMMAND[@]}" -gt 0 ]; then
+    if [[ "${#COMMAND[@]}" -gt 0 ]]; then
         CONTAINER_STEPS='"${@}"'
     else
         CONTAINER_STEPS="$(gate_steps "${RUST_VERSION}")"

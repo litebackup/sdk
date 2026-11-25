@@ -27,8 +27,8 @@ async fn socket_listening(socket_path: &Path) -> bool {
 /// JSON: `drain_required` when the launch refused a new credential for a
 /// client that has write locks, and `launch_failed` otherwise, with the whole
 /// output when the command reported no error as JSON.
-pub(crate) fn launch_refusal(output: &str) -> (&'static str, String) {
-    let mut refusal = None;
+pub(crate) fn launch_denial(output: &str) -> (&'static str, String) {
+    let mut denial = None;
     for line in output.lines() {
         let Ok(serde_json::Value::Object(diagnostic)) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
@@ -43,16 +43,16 @@ pub(crate) fn launch_refusal(output: &str) -> (&'static str, String) {
         ) else {
             continue;
         };
-        let refusal_code =
+        let denial_code =
             if code == ErrorCode::DRAIN_REQUIRED { ErrorCode::DRAIN_REQUIRED } else { ErrorCode::LAUNCH_FAILED };
-        refusal = Some((refusal_code, message.to_owned()));
+        denial = Some((denial_code, message.to_owned()));
     }
-    refusal.unwrap_or_else(|| (ErrorCode::LAUNCH_FAILED, output.trim().to_owned()))
+    denial.unwrap_or_else(|| (ErrorCode::LAUNCH_FAILED, output.trim().to_owned()))
 }
 
 fn launch_failed(output: &str, cause: &str) -> Error {
-    let (code, refusal) = launch_refusal(output);
-    let reason = if refusal.is_empty() { cause.to_owned() } else { refusal };
+    let (code, denial) = launch_denial(output);
+    let reason = if denial.is_empty() { cause.to_owned() } else { denial };
     Error::new(code, format!("starting Litebackup failed: {reason}"))
 }
 
@@ -108,10 +108,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_last_reported_error_is_the_refusal() {
+    fn the_last_reported_error_is_the_denial() {
         let output = "{\"event\":\"warning\",\"code\":\"x\",\"message\":\"a warning\"}\n\
                       {\"code\":\"drain_required\",\"message\":\"drain first\"}\n";
-        assert_eq!(launch_refusal(output), (ErrorCode::DRAIN_REQUIRED, "drain first".to_owned()));
-        assert_eq!(launch_refusal("  plain text\n"), (ErrorCode::LAUNCH_FAILED, "plain text".to_owned()));
+        assert_eq!(launch_denial(output), (ErrorCode::DRAIN_REQUIRED, "drain first".to_owned()));
+        assert_eq!(launch_denial("  plain text\n"), (ErrorCode::LAUNCH_FAILED, "plain text".to_owned()));
     }
 }

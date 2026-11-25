@@ -45,7 +45,7 @@ function readFixture<T>(fixtureDirectory: string, name: string, cwd = "/"): T {
 }
 
 /** A daemon on a unix socket that answers the connect probe itself and hands every other request to reply. */
-async function contractDaemon(t: TestContext, reply: (request: Received) => Reply | Promise<Reply>, clientVersion: string | null = "1.5.0") {
+async function contractDaemon(t: TestContext, reply: (request: Received) => Reply | Promise<Reply>, clientVersion: string | null = "1.6.0") {
   const directory = await mkdtemp(join(tmpdir(), "lbc-"));
   const socketPath = join(directory, "client.sock");
   const received: Received[] = [];
@@ -59,7 +59,7 @@ async function contractDaemon(t: TestContext, reply: (request: Received) => Repl
       if (clientVersion !== null) res.setHeader("litebackup-client-version", clientVersion);
       if (request.method === "GET" && request.path === "/v1/status/show" && JSON.stringify(request.query) === JSON.stringify({ limit: "1" })) {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ session: "contract", server: "http://example", client_version: "1.5.0", session_id: "s", watch: "inotify", databases: [] }));
+        res.end(JSON.stringify({ session: "contract", server: "http://example", client_version: "1.6.0", session_id: "s", watch: "inotify", databases: [] }));
         return;
       }
       received.push(request);

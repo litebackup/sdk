@@ -95,7 +95,7 @@ for IMAGE_AND_LIBC in slim:gnu alpine:musl; do
         sh -c "${INSTALL_CHECK}")"
     EXPECTED_REPORT="$(printf '%s %s\n%s %s\n%s' "${PLATFORM}" "${GEM_VERSION}" "${PLATFORM}" "${GEM_VERSION}" \
         "/tmp/home/plain/bin/litebackup")"
-    if [ "${INSTALL_REPORT}" = "${EXPECTED_REPORT}" ]; then
+    if [[ "${INSTALL_REPORT}" = "${EXPECTED_REPORT}" ]]; then
         echo "ok   ${TEST_IMAGE}: RubyGems and Bundler install ${PLATFORM}, whose binary reports ${GEM_VERSION}; the plain gem uses PATH"
     else
         echo "FAIL ${TEST_IMAGE}: want" >&2

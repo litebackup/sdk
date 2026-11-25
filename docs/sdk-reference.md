@@ -82,7 +82,7 @@ bundles, then `litebackup` on `PATH`, then `~/.local/bin/litebackup`. Go,
 PHP, and Rust bundle none.
 
 Connecting fails with `daemon_unsupported` when the daemon is older than
-1.5.0, and the message says how to replace it: `litebackup drain --session
+1.6.0, and the message says how to replace it: `litebackup drain --session
 NAME` stops it after a final sync, and the next call starts the new binary.
 `close()` closes connections and stops watches; it never stops the daemon,
 its failovers, or its acquired databases.
@@ -272,7 +272,7 @@ try {
 | `launch_failed` | SDK | `litebackup launch` failed |
 | `drain_required` | SDK | `litebackup launch` refused another credential while the client holds write locks; shut down with the current one first |
 | `connection_failed` | SDK | The socket refused or dropped the connection |
-| `daemon_unsupported` | SDK | The daemon is older than 1.5.0 |
+| `daemon_unsupported` | SDK | The daemon is older than 1.6.0 |
 | `cancelled` | SDK | The caller cancelled; the daemon may still finish |
 | `timeout` | SDK or daemon | The operation's timeout ran out |
 | `closed` | SDK | The client was closed |
@@ -302,7 +302,7 @@ turn of the event loop, so register listeners right after `failovers.start()`
 resolves; in Go, sync Python, and Ruby it may run before the start returns,
 so use its role argument. Rust has no callbacks: `failover.notices()` hands
 out, once, an ordered stream whose items are `FailoverNotice::Role`,
-`FailoverNotice::Refused`, and `FailoverNotice::Error`, starting with the
+`FailoverNotice::Denied`, and `FailoverNotice::Error`, starting with the
 role the start answered, and `role()` reports `Role::UNKNOWN` 15 s after the
 last confirmation even if the follower stalls. PHP follows a failover only inside
 `$failover->follow(seconds)`, which runs the callbacks in the calling process;
@@ -316,8 +316,8 @@ answered. Once the daemon answers again, the failover reads its role and
 reports it. A stopped failover is `unknown` too. The
 [contract](sdk-contract.md#failover-roles) has the exact rules.
 
-The refusal callback (`OnRefused`, `on_refused`, `onRefused`, the
-TypeScript `refused` listener, or Rust's `FailoverNotice::Refused`) hears the daemon's message when it refused this machine's file and
+The refusal callback (`OnDenied`, `on_denied`, `onDenied`, the
+TypeScript `denied` listener, or Rust's `FailoverNotice::Denied`) hears the daemon's message when it refused this machine's file and
 the failover stays conflicted there: a file that differs from the server head when this
 machine starts as the origin, or one holding writes the new origin never saw
 when this machine lost the origin role. The file is left exactly as it is,
@@ -339,9 +339,9 @@ unless `discardLocal` asked for the head in its place.
 
 ## Release compatibility
 
-The SDKs and the litebackup client share one release version, 1.5.0. An SDK
-refuses a client older than 1.5.0 with `daemon_unsupported`, and the client
-answers an SDK older than 1.5.0 with 426 `sdk_unsupported`. A server that needs
+The SDKs and the litebackup client share one release version, 1.6.0. An SDK
+refuses a client older than 1.6.0 with `daemon_unsupported`, and the client
+answers an SDK older than 1.6.0 with 426 `sdk_unsupported`. A server that needs
 a newer client on the machine is refused with `client_unsupported`. Keep the
 npm package, wheel, gem, or Composer package, the Go module, the Rust
 crate's tag, and the client binary at the same version.

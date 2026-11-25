@@ -114,7 +114,7 @@ func (d *contractDaemon) ServeHTTP(writer http.ResponseWriter, request *http.Req
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write(
 			[]byte(
-				`{"session":"contract","server":"http://example","client_version":"1.5.0","session_id":"s","watch":"inotify","databases":[]}`,
+				`{"session":"contract","server":"http://example","client_version":"1.6.0","session_id":"s","watch":"inotify","databases":[]}`,
 			),
 		)
 		return
@@ -511,7 +511,7 @@ func TestContractRequests(t *testing.T) {
 			cwd := contractDirectory(t)
 			t.Chdir(cwd)
 			fixture := contractFixtures[requestFixture](t, "requests", cwd)[name]
-			version := "1.5.0"
+			version := "1.6.0"
 			daemon := newContractDaemon(t, &version, func(receivedRequest) (int, string, []byte) {
 				return http.StatusOK, "application/json", fixture.Response
 			})
@@ -556,7 +556,7 @@ func TestContractErrors(t *testing.T) {
 	}
 	for name, fixture := range contractFixtures[errorFixture](t, "errors", "/") {
 		t.Run(name, func(t *testing.T) {
-			version := "1.5.0"
+			version := "1.6.0"
 			daemon := newContractDaemon(t, &version, func(receivedRequest) (int, string, []byte) {
 				return fixture.Response.Status, fixture.Response.ContentType, []byte(
 					fixture.Response.Body,
@@ -624,7 +624,7 @@ func exchangeDaemon(t *testing.T, exchanges []contractExchange) *contractDaemon 
 	t.Helper()
 	var mutex sync.Mutex
 	next := 0
-	version := "1.5.0"
+	version := "1.6.0"
 	return newContractDaemon(t, &version, func(received receivedRequest) (int, string, []byte) {
 		mutex.Lock()
 		defer mutex.Unlock()
@@ -826,7 +826,7 @@ func TestContractLifecycle(t *testing.T) {
 				failing[step] = true
 			}
 			steps := &scopeSteps{}
-			version := "1.5.0"
+			version := "1.6.0"
 			daemon := newContractDaemon(
 				t,
 				&version,

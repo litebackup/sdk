@@ -66,7 +66,7 @@ func newFakeDaemon(t *testing.T) *fakeDaemon {
 		return http.StatusOK, map[string]any{
 			"session":        "unit",
 			"server":         "http://example",
-			"client_version": "1.5.0",
+			"client_version": "1.6.0",
 			"session_id":     "s",
 			"watch":          "inotify",
 			"databases":      []any{},
@@ -142,7 +142,7 @@ func (d *fakeDaemon) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	d.requests = append(d.requests, seen)
 	answer := d.routes[request.Method+" "+request.URL.Path]
 	d.mutex.Unlock()
-	writer.Header().Set("Litebackup-Client-Version", "1.5.0")
+	writer.Header().Set("Litebackup-Client-Version", "1.6.0")
 	writer.Header().Set("Content-Type", "application/json")
 	if answer == nil {
 		writer.WriteHeader(http.StatusNotFound)
@@ -220,7 +220,7 @@ func TestVersionHeaderAndErrors(t *testing.T) {
 		}
 	})
 	client := daemon.connect(t)
-	if client.ClientVersion() != "1.5.0" {
+	if client.ClientVersion() != "1.6.0" {
 		t.Fatalf("client version %q", client.ClientVersion())
 	}
 	_, err := client.StartBackup(t.Context(), "/var/lib/app/main.db", nil)
@@ -411,10 +411,10 @@ func TestFailoverEvents(t *testing.T) {
 	client := daemon.connect(t)
 
 	roles := make(chan Role, 4)
-	refusals := make(chan string, 4)
+	denials := make(chan string, 4)
 	failover, err := client.StartFailover(t.Context(), "/var/lib/app/main.db", &FailoverArgs{
 		OnRoleChange: func(role Role) { roles <- role },
-		OnRefused:    func(message string) { refusals <- message },
+		OnDenied:     func(message string) { denials <- message },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -442,12 +442,12 @@ func TestFailoverEvents(t *testing.T) {
 	}
 	pages <- map[string]any{"events": []any{
 		map[string]any{"id": 10, "time": "2026-11-15T09:02:00Z", "type": "role_changed", "message": "replica", "name": "app/main.db", "role": "replica"},
-		map[string]any{"id": 11, "time": "2026-11-15T09:02:00Z", "type": "refused", "message": refusedMessage, "name": "app/main.db", "path": "/var/lib/app/main.db"},
+		map[string]any{"id": 11, "time": "2026-11-15T09:02:00Z", "type": "denied", "message": deniedMessage, "name": "app/main.db", "path": "/var/lib/app/main.db"},
 	}, "next": 11}
 	if role := receive(t, roles); role != RoleReplica {
 		t.Fatalf("role change %s", role)
 	}
-	if message := receive(t, refusals); message != refusedMessage {
+	if message := receive(t, denials); message != deniedMessage {
 		t.Fatalf("refusal %q", message)
 	}
 	// A refused file leaves this machine neither origin nor replica.
@@ -946,11 +946,11 @@ func TestForegroundBackupLocalDeadline(t *testing.T) {
 	}
 }
 
-// TestSessionSocketRefusesSharedRuntimeDirectory checks that without
+// TestSessionSocketDeniesSharedRuntimeDirectory checks that without
 // $XDG_RUNTIME_DIR the per-user directory under the temporary directory is
 // created with mode 0700, and that one open to others is refused, so another
 // user cannot answer as the daemon.
-func TestSessionSocketRefusesSharedRuntimeDirectory(t *testing.T) {
+func TestSessionSocketDeniesSharedRuntimeDirectory(t *testing.T) {
 	temporary := t.TempDir()
 	t.Setenv("HOME", filepath.Join(temporary, "user"))
 	t.Setenv("XDG_RUNTIME_DIR", "")

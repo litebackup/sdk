@@ -107,7 +107,7 @@ def test_a_missing_platform_builds_nothing(tmp_path: Path) -> None:
     assert not (tmp_path / "out").exists()
 
 
-def test_another_version_than_the_package_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
+def test_another_version_than_the_package_is_denied(capsys: pytest.CaptureFixture[str]) -> None:
     script = load_script()
     script.require_package_version("1.1.0", "1.1.0")
     with pytest.raises(SystemExit):

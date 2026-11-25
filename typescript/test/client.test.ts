@@ -11,11 +11,11 @@ import { ErrorCode, Litebackup, LitebackupError, apiKeyEnvironment, installComma
 import { specErrorCodes } from "../src/generated/error_codes.js";
 import { foregroundBackup } from "../src/backup.js";
 import { failoverTiming } from "../src/failover.js";
-import { launchRefusal, startFailureMessage } from "../src/launch.js";
+import { launchDenial, startFailureMessage } from "../src/launch.js";
 import { FakeDaemon, databaseStatus } from "./fake.js";
 
 /** The refusal a test daemon reports for a failover's file. */
-const refusedMessage = "/var/lib/app/main.db differs from the server head; it was left as it is";
+const deniedMessage = "/var/lib/app/main.db differs from the server head; it was left as it is";
 
 test("sends the SDK version, converts answers to camelCase, and maps errors", async (t) => {
   const daemon = await FakeDaemon.start(t);
@@ -24,7 +24,7 @@ test("sends the SDK version, converts answers to camelCase, and maps errors", as
   daemon.route("POST /v1/databases/offload", () => [426, "not json"]);
   const litebackup = new Litebackup({ socketPath: daemon.socketPath });
   await litebackup.connect();
-  assert.equal(litebackup.clientVersion, "1.5.0");
+  assert.equal(litebackup.clientVersion, "1.6.0");
 
   const status = await litebackup.databases.get("app/main.db");
   assert.equal(status.syncedServer.version, 3);
@@ -44,7 +44,7 @@ test("sends the SDK version, converts answers to camelCase, and maps errors", as
   for (const request of daemon.requests) {
     assert.equal(request.headers["litebackup-sdk-version"], `typescript/${sdkVersion}`);
   }
-  assert.equal(sdkVersion, "1.5.0");
+  assert.equal(sdkVersion, "1.6.0");
 });
 
 test("startBackup awaits the local rule and stop reports a pending lease", async (t) => {
@@ -118,7 +118,7 @@ test("restore, versions, replicate, and acquire send the socket fields", async (
   assert.equal(writer.leaseRemainingMillis, 5000);
 });
 
-test("failover follows role_changed, draining, and refused events", async (t) => {
+test("failover follows role_changed, draining, and denied events", async (t) => {
   const daemon = await FakeDaemon.start(t);
   const pages: unknown[] = [];
   let waiting: (() => void) | undefined;
@@ -166,7 +166,7 @@ test("failover follows role_changed, draining, and refused events", async (t) =>
   assert.equal(failover.status.writer.writerMachineLabel, "web-1");
 
   const seen: string[] = [];
-  const next = (event: "origin" | "replica" | "unknown" | "refused") =>
+  const next = (event: "origin" | "replica" | "unknown" | "denied") =>
     new Promise<string>((resolve) => {
       const listener = (path?: string) => {
         failover.off(event, listener);
@@ -198,16 +198,16 @@ test("failover follows role_changed, draining, and refused events", async (t) =>
   assert.equal(failover.isOrigin, false);
 
   const becameReplica = next("replica");
-  const refused = next("refused");
+  const denied = next("denied");
   push({
     events: [
       { id: 11, time: "2026-11-15T09:02:00Z", type: "role_changed", message: "replica", name: "app/main.db", role: "replica" },
-      { id: 12, time: "2026-11-15T09:02:00Z", type: "refused", message: refusedMessage, name: "app/main.db", path: "/var/lib/app/main.db" },
+      { id: 12, time: "2026-11-15T09:02:00Z", type: "denied", message: deniedMessage, name: "app/main.db", path: "/var/lib/app/main.db" },
     ],
     next: 12,
   });
   await becameReplica;
-  assert.equal(await refused, refusedMessage);
+  assert.equal(await denied, deniedMessage);
   for (const request of daemon.received("/v1/events/list")) {
     if (request.query.get("wait_millis")) {
       assert.ok(Number(request.query.get("after")) >= 7, "the long-poll starts at the end of the log");
@@ -366,11 +366,11 @@ test("failover listeners hear nothing once stop is called", { timeout: 10_000 },
   // While the stop request is pending, events no longer reach listeners.
   const second = await litebackup.failovers.start("/var/lib/app/main.db");
   const late: string[] = [];
-  second.on("origin", () => late.push("origin")).on("replica", () => late.push("replica")).on("refused", () => late.push("refused"));
+  second.on("origin", () => late.push("origin")).on("replica", () => late.push("replica")).on("denied", () => late.push("denied"));
   const stopped = second.stop();
   const finish = await answerStop();
   push(roleChanged(3, "origin"));
-  push({ events: [{ id: 4, time: "2026-11-15T09:02:00Z", type: "refused", message: refusedMessage, name: "app/main.db", path: "/var/lib/app/main.db" }], next: 4 });
+  push({ events: [{ id: 4, time: "2026-11-15T09:02:00Z", type: "denied", message: deniedMessage, name: "app/main.db", path: "/var/lib/app/main.db" }], next: 4 });
   await new Promise((resolve) => setTimeout(resolve, 200));
   finish();
   await stopped;
@@ -488,8 +488,8 @@ test("failover listeners hear the role the start answered once", async (t) => {
   assert.deepEqual(heard, ["origin"]);
 });
 
-for (const refusedStatus of [false, true]) {
-  test(`a failover whose daemon stops is unknown at once, and reads its role when the daemon returns (refused status ${refusedStatus})`, { timeout: 10_000 }, async (t) => {
+for (const deniedStatus of [false, true]) {
+  test(`a failover whose daemon stops is unknown at once, and reads its role when the daemon returns (refused status ${deniedStatus})`, { timeout: 10_000 }, async (t) => {
     const daemon = await FakeDaemon.start(t);
     let returned = false;
     const logEndCursors: string[] = [];
@@ -508,7 +508,7 @@ for (const refusedStatus of [false, true]) {
           {
             events: [
               { id: 8, time: "2026-11-15T09:01:00Z", type: "role_changed", message: "replica", name: "app/main.db", role: "replica" },
-              { id: 9, time: "2026-11-15T09:02:00Z", type: "refused", message: refusedMessage, name: "app/main.db", path: "/var/lib/app/main.db" },
+              { id: 9, time: "2026-11-15T09:02:00Z", type: "denied", message: deniedMessage, name: "app/main.db", path: "/var/lib/app/main.db" },
             ],
             next: 9,
           },
@@ -518,7 +518,7 @@ for (const refusedStatus of [false, true]) {
       return [200, { events: [], next: Number(after) }];
     });
     // A refused file reads as conflicted, which makes the role unknown though the row says origin.
-    daemon.route("GET /v1/databases/status", () => [200, databaseStatus("app/main.db", "origin", refusedStatus ? "conflicted" : "syncing", 3, 3)]);
+    daemon.route("GET /v1/databases/status", () => [200, databaseStatus("app/main.db", "origin", deniedStatus ? "conflicted" : "syncing", 3, 3)]);
     daemon.route("POST /v1/failovers/start", (request) => failoverStarted(request.body!.path, "origin"));
     daemon.route("POST /v1/backup-rules/stop", () => [200, {}]);
     const litebackup = new Litebackup({ socketPath: daemon.socketPath });
@@ -526,9 +526,9 @@ for (const refusedStatus of [false, true]) {
     const failover = await litebackup.failovers.start("/var/lib/app/main.db");
     const roles: string[] = [];
     const errors: string[] = [];
-    const refusals: string[] = [];
+    const denials: string[] = [];
     failover.on("origin", () => roles.push("origin")).on("replica", () => roles.push("replica")).on("unknown", () => roles.push("unknown"));
-    failover.on("refused", (message) => refusals.push(message));
+    failover.on("denied", (message) => denials.push(message));
     failover.on("error", (error) => errors.push((error as LitebackupError).code));
     await awaitReported(roles, 1);
     assert.equal(failover.isOrigin, true);
@@ -544,16 +544,16 @@ for (const refusedStatus of [false, true]) {
 
     returned = true;
     await daemon.serve();
-    await awaitReported(refusals, 1);
+    await awaitReported(denials, 1);
     await new Promise((resolve) => setTimeout(resolve, 200));
     // The role read reports origin, or unknown for a refused file; the older role_changed in the kept
     // cursor's page is skipped, and the older refusal is reported without changing the role the read gave.
-    assert.deepEqual(roles, refusedStatus ? ["origin", "unknown"] : ["origin", "unknown", "origin"]);
-    assert.equal(failover.isOrigin, !refusedStatus);
+    assert.deepEqual(roles, deniedStatus ? ["origin", "unknown"] : ["origin", "unknown", "origin"]);
+    assert.equal(failover.isOrigin, !deniedStatus);
     // The log's end is read before the role read and again after it; a role left unknown is read again after
     // every long-poll that brings no role change.
-    assert.deepEqual(refusedStatus ? logEndCursors.slice(0, 2) : logEndCursors, ["-1", "-1"]);
-    assert.deepEqual(refusals, [refusedMessage]);
+    assert.deepEqual(deniedStatus ? logEndCursors.slice(0, 2) : logEndCursors, ["-1", "-1"]);
+    assert.deepEqual(denials, [deniedMessage]);
     await failover.stop();
   });
 }
@@ -647,8 +647,8 @@ test("a failover reads its role again when the log shows a refusal after the rol
   let returned = false;
   let roleReads = 0;
   let logEndReads = 0;
-  const racedRefusal = {
-    events: [{ id: 10, time: "2026-11-15T09:02:00Z", type: "refused", message: refusedMessage, name: "app/main.db", path: "/var/lib/app/main.db" }],
+  const racedDenial = {
+    events: [{ id: 10, time: "2026-11-15T09:02:00Z", type: "denied", message: deniedMessage, name: "app/main.db", path: "/var/lib/app/main.db" }],
     next: 10,
   };
   daemon.route("GET /v1/events/list", async (request) => {
@@ -657,10 +657,10 @@ test("a failover reads its role again when the log shows a refusal after the rol
       if (!returned) return [200, { events: [], next: 7 }];
       // The refusal lands after the first log end read.
       if (after === "-1") return [200, { events: [], next: logEndReads++ === 0 ? 9 : 10 }];
-      if (after === "9") return [200, racedRefusal];
+      if (after === "9") return [200, racedDenial];
       return [200, { events: [], next: Number(after) }];
     }
-    if (returned && after === "7") return [200, racedRefusal];
+    if (returned && after === "7") return [200, racedDenial];
     await new Promise((resolve) => setTimeout(resolve, 50));
     return [200, { events: [], next: Number(after) }];
   });
@@ -675,20 +675,20 @@ test("a failover reads its role again when the log shows a refusal after the rol
   t.after(() => litebackup.close());
   const failover = await litebackup.failovers.start("/var/lib/app/main.db");
   const roles: string[] = [];
-  const refusals: string[] = [];
+  const denials: string[] = [];
   failover.on("origin", () => roles.push("origin")).on("replica", () => roles.push("replica")).on("unknown", () => roles.push("unknown"));
-  failover.on("refused", (message) => refusals.push(message));
+  failover.on("denied", (message) => denials.push(message));
   await awaitReported(roles, 1);
   await daemon.stop();
   await awaitReported(roles, 2);
   returned = true;
   await daemon.serve();
-  await awaitReported(refusals, 1);
+  await awaitReported(denials, 1);
   await new Promise((resolve) => setTimeout(resolve, 300));
   // The first role read raced the refusal, so it is read again: no stale origin, and one refusal. A role
   // left unknown is read again after every long-poll that brings no role change.
   assert.deepEqual(roles, ["origin", "unknown"]);
-  assert.deepEqual(refusals, [refusedMessage]);
+  assert.deepEqual(denials, [deniedMessage]);
   assert.ok(roleReads >= 2, `${roleReads} role reads`);
   assert.equal(failover.isOrigin, false);
   await failover.stop();
@@ -1190,7 +1190,7 @@ test("launch_failed carries the launch command's own message, which it asks for 
     err.message === "launch_failed: starting Litebackup failed: this machine has not joined a server");
   client.close();
   assert.equal(await readFile(argumentsFile, "utf8"), "launch --session unit --stdout-format json\n");
-  assert.deepEqual(launchRefusal("plain text\n"), { code: ErrorCode.launchFailed, message: "plain text" });
+  assert.deepEqual(launchDenial("plain text\n"), { code: ErrorCode.launchFailed, message: "plain text" });
 });
 
 test("a launch that refuses another credential while locks are taken keeps drain_required", async (t) => {

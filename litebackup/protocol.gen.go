@@ -233,6 +233,7 @@ func (e ErrorCode) Valid() bool {
 // Defines values for EventType.
 const (
 	EventTypeAcquired         EventType = "acquired"
+	EventTypeDenied           EventType = "denied"
 	EventTypeDownloadFinished EventType = "download_finished"
 	EventTypeDownloadStarted  EventType = "download_started"
 	EventTypeDraining         EventType = "draining"
@@ -242,7 +243,6 @@ const (
 	EventTypeOffloaded        EventType = "offloaded"
 	EventTypePathUnreadable   EventType = "path_unreadable"
 	EventTypeRebased          EventType = "rebased"
-	EventTypeRefused          EventType = "refused"
 	EventTypeReleased         EventType = "released"
 	EventTypeReplicating      EventType = "replicating"
 	EventTypeRestored         EventType = "restored"
@@ -258,6 +258,8 @@ const (
 func (e EventType) Valid() bool {
 	switch e {
 	case EventTypeAcquired:
+		return true
+	case EventTypeDenied:
 		return true
 	case EventTypeDownloadFinished:
 		return true
@@ -276,8 +278,6 @@ func (e EventType) Valid() bool {
 	case EventTypePathUnreadable:
 		return true
 	case EventTypeRebased:
-		return true
-	case EventTypeRefused:
 		return true
 	case EventTypeReleased:
 		return true
@@ -556,7 +556,7 @@ type Event struct {
 	Role string    `json:"role,omitempty"`
 	Time time.Time `json:"time"`
 
-	// Type What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), refused (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
+	// Type What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), denied (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
 	Type EventType `json:"type"`
 }
 
@@ -568,7 +568,7 @@ type EventList struct {
 	Next int64 `json:"next"`
 }
 
-// EventType What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), refused (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
+// EventType What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), denied (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
 type EventType string
 
 // FailoverRequest defines model for FailoverRequest.
@@ -830,7 +830,7 @@ type Writer struct {
 
 // RevertDatabaseParams defines parameters for RevertDatabase.
 type RevertDatabaseParams struct {
-	// SDKVersion the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported
+	// SDKVersion the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported
 	SDKVersion string `json:"Litebackup-SDK-Version"`
 }
 

@@ -22,10 +22,10 @@ CACHE_ROOT="${HOME}/.cache/litebackup-ruby"
 SELECTED_RUBY_VERSIONS=("${RUBY_VERSIONS[@]}")
 INTEGRATION=0
 COMMAND=()
-while [ "${#}" -gt 0 ]; do
+while [[ "${#}" -gt 0 ]]; do
     case "${1}" in
         --ruby)
-            if [ "${#}" -lt 2 ]; then
+            if [[ "${#}" -lt 2 ]]; then
                 echo "--ruby needs a version: one of ${RUBY_VERSIONS[*]}" >&2
                 exit 2
             fi
@@ -81,11 +81,11 @@ for RUBY_VERSION in "${SELECTED_RUBY_VERSIONS[@]}"; do
     )
     # The RubyGems key a release's gem push uses, passed by name only, so
     # its value never appears in a command line.
-    if [ -n "${GEM_HOST_API_KEY:-}" ]; then
+    if [[ -n "${GEM_HOST_API_KEY:-}" ]]; then
         DOCKER_ENVIRONMENT+=(--env GEM_HOST_API_KEY)
     fi
-    if [ "${INTEGRATION}" = 1 ]; then
-        if [ -z "${LITEBACKUP_PATH:-}" ]; then
+    if [[ "${INTEGRATION}" = 1 ]]; then
+        if [[ -z "${LITEBACKUP_PATH:-}" ]]; then
             echo "--integration needs LITEBACKUP_PATH, a static litebackup binary from scripts/build" >&2
             exit 2
         fi
@@ -95,7 +95,7 @@ for RUBY_VERSION in "${SELECTED_RUBY_VERSIONS[@]}"; do
             --env LITEBACKUP_INTEGRATION=1
         )
     fi
-    if [ "${#COMMAND[@]}" -gt 0 ]; then
+    if [[ "${#COMMAND[@]}" -gt 0 ]]; then
         CONTAINER_STEPS="bundle install --quiet && \"\${@}\""
     else
         CONTAINER_STEPS="bundle install --quiet && bundle exec rake test && bundle exec rubocop"

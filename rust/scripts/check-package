@@ -116,7 +116,7 @@ tar --extract --gzip --file "${CRATE}" --directory /work/packaged
 cd /work/consumer
 cargo run --quiet --target-dir /work/consumer-target
 SCRIPT
-REPORT="$(docker run --rm \
+if ! REPORT="$(docker run --rm \
     --user "$(id --user):$(id --group)" \
     --volume "${WORK_DIRECTORY}:/work" \
     --volume "${CACHE_ROOT}/cargo:/tmp/cargo" \
@@ -124,10 +124,14 @@ REPORT="$(docker run --rm \
     --env CARGO_HOME=/tmp/cargo \
     --env "PACKAGE_VERSION=${PACKAGE_VERSION}" \
     "litebackup-rust-test:${RUST_VERSION}" \
-    bash -c "${PACKAGE_CHECK}" 2>&1)" || { echo "FAIL the package check:" >&2; echo "${REPORT:-}" >&2; exit 1; }
+    bash -c "${PACKAGE_CHECK}" 2>&1)"; then
+    echo "FAIL the package check:" >&2
+    echo "${REPORT:-}" >&2
+    exit 1
+fi
 EXPECTED="header rust/${PACKAGE_VERSION}
 launch starting Litebackup failed: stand-in /work/consumer/bin/litebackup"
-if [ "${REPORT}" != "${EXPECTED}" ]; then
+if [[ "${REPORT}" != "${EXPECTED}" ]]; then
     echo "FAIL rust:${RUST_VERSION}: want" >&2
     echo "${EXPECTED}" >&2
     echo "got" >&2

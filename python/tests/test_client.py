@@ -41,7 +41,7 @@ from .contract_daemon import ContractDaemon, Received, Reply
 
 METADATA = Path(__file__).resolve().parents[2] / "testdata" / "contract" / "binary"
 # The refusal a test daemon reports for a failover's file.
-REFUSED_MESSAGE = "/data/app.sqlite differs from the server head; it was left as it is"
+DENIED_MESSAGE = "/data/app.sqlite differs from the server head; it was left as it is"
 
 
 def empty_rules(_received: Received) -> Reply:
@@ -62,7 +62,7 @@ def test_keep_alive_reuses_one_connection() -> None:
         with Litebackup(socket_path=daemon.socket_path) as client:
             for _ in range(5):
                 assert client.rules.list() == []
-            assert client.client_version == "1.5.0"
+            assert client.client_version == "1.6.0"
         assert len(connections) == 1
     finally:
         daemon.close()
@@ -204,7 +204,7 @@ JOIN_TOKEN = "litebackup_join_exampletokenvalue@backups.example.com"
 API_KEY = "litebackup_examplekeyvalue@backups.example.com"
 
 
-def test_invite_credentials_are_refused_without_echoing_them() -> None:
+def test_invite_credentials_are_denied_without_echoing_them() -> None:
     for arguments in ({"api_key": INVITE}, {"environment": {API_KEY_ENVIRONMENT: INVITE}}):
         with pytest.raises(LitebackupError) as raised:
             Litebackup(socket_path="/tmp/x.sock", **arguments)
@@ -343,10 +343,10 @@ async def test_launch_failed_carries_the_command_message(tmp_path: Path) -> None
         assert raised.value.code == ErrorCode.LAUNCH_FAILED
         assert raised.value.message == "starting Litebackup failed: this machine has not joined a server"
         assert arguments.read_text() == "launch --session unit --stdout-format json\n"
-    assert _launch.launch_refusal("plain text\n") == (ErrorCode.LAUNCH_FAILED, "plain text")
+    assert _launch.launch_denial("plain text\n") == (ErrorCode.LAUNCH_FAILED, "plain text")
 
 
-def test_a_launch_that_refuses_another_credential_keeps_drain_required(tmp_path: Path) -> None:
+def test_a_launch_that_denies_another_credential_keeps_drain_required(tmp_path: Path) -> None:
     message = "drain it first with litebackup drain, then change the key"
     binary = executable(tmp_path / "litebackup", f'echo \'{{"code":"{spec_codes.DRAIN_REQUIRED}","message":"{message}"}}\' >&2\nexit 1')
     environment = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "run")}
@@ -863,10 +863,10 @@ class RoleDaemon:
         elif self.returned and after == "7":
             older = {"id": 8, "time": "2026-01-01T00:00:00Z", "type": "role_changed", "message": "replica", "name": "app.sqlite"}
             older["role"] = "replica"
-            refusal = {"id": 9, "time": "2026-01-01T00:01:00Z", "type": "refused", "message": REFUSED_MESSAGE, "name": "app.sqlite"}
-            refusal["path"] = "/data/app.sqlite"
+            denial = {"id": 9, "time": "2026-01-01T00:01:00Z", "type": "denied", "message": DENIED_MESSAGE, "name": "app.sqlite"}
+            denial["path"] = "/data/app.sqlite"
             raced = self.raced_changes["events"] if isinstance(self.raced_changes["events"], list) else []
-            body = {"events": [older, refusal, *raced], "next": max([9, *(event["id"] for event in raced)])}
+            body = {"events": [older, denial, *raced], "next": max([9, *(event["id"] for event in raced)])}
         else:
             threading.Event().wait(0.05)
             body = {"events": [], "next": int(after)}
@@ -912,13 +912,13 @@ def test_failover_role_is_unknown_while_the_daemon_is_stopped() -> None:
     fake = RoleDaemon()
     roles: list[str] = []
     errors: list[str] = []
-    refusals: list[str] = []
+    denials: list[str] = []
     try:
         with Litebackup(socket_path=fake.daemon.socket_path) as client:
             failover = client.failovers.start(
                 "/data/app.sqlite",
                 on_role_change=roles.append,
-                on_refused=refusals.append,
+                on_denied=denials.append,
                 on_error=lambda error: errors.append(error.code),
             )
             await_reported(lambda: roles == ["origin"])
@@ -931,7 +931,7 @@ def test_failover_role_is_unknown_while_the_daemon_is_stopped() -> None:
             assert errors[0] == ErrorCode.CONNECTION_FAILED
             fake.returned = True
             fake.daemon.serve()
-            await_reported(lambda: refusals == [REFUSED_MESSAGE])
+            await_reported(lambda: denials == [DENIED_MESSAGE])
             time.sleep(0.2)
             # The role read reports origin; the older role change in the kept cursor's page is skipped,
             # and the older refusal is reported without changing the role the read gave.
@@ -946,10 +946,10 @@ def test_failover_role_is_unknown_while_the_daemon_is_stopped() -> None:
 async def test_async_failover_role_is_unknown_while_the_daemon_is_stopped() -> None:
     fake = RoleDaemon()
     roles: list[str] = []
-    refusals: list[str] = []
+    denials: list[str] = []
     try:
         async with AsyncLitebackup(socket_path=fake.daemon.socket_path) as client:
-            failover = await client.failovers.start("/data/app.sqlite", on_role_change=roles.append, on_refused=refusals.append)
+            failover = await client.failovers.start("/data/app.sqlite", on_role_change=roles.append, on_denied=denials.append)
             await await_reported_async(lambda: roles == ["origin"])
             fake.daemon.stop()
             stopped = time.monotonic()
@@ -958,7 +958,7 @@ async def test_async_failover_role_is_unknown_while_the_daemon_is_stopped() -> N
             assert roles == ["origin", "unknown"] and not failover.is_origin
             fake.returned = True
             fake.daemon.serve()
-            await await_reported_async(lambda: refusals == [REFUSED_MESSAGE])
+            await await_reported_async(lambda: denials == [DENIED_MESSAGE])
             await asyncio.sleep(0.2)
             assert roles == ["origin", "unknown", "origin"] and failover.is_origin
             # The log's end is read before the role read and again after it.
@@ -1039,16 +1039,16 @@ def test_failover_reads_its_role_again_when_the_log_shows_a_role_change_after_th
         fake.close()
 
 
-def test_failover_reads_its_role_again_when_the_log_shows_a_refusal_after_the_role_read() -> None:
+def test_failover_reads_its_role_again_when_the_log_shows_a_denial_after_the_role_read() -> None:
     fake = RoleDaemon()
     fake.conflicted_from_read = 2
-    refusal = {"id": 10, "time": "2026-01-01T00:02:00Z", "type": "refused", "message": REFUSED_MESSAGE, "name": "app.sqlite"}
-    fake.raced_changes = {"events": [refusal], "next": 10}
+    denial = {"id": 10, "time": "2026-01-01T00:02:00Z", "type": "denied", "message": DENIED_MESSAGE, "name": "app.sqlite"}
+    fake.raced_changes = {"events": [denial], "next": 10}
     roles: list[str] = []
-    refusals: list[str] = []
+    denials: list[str] = []
     try:
         with Litebackup(socket_path=fake.daemon.socket_path) as client:
-            failover = client.failovers.start("/data/app.sqlite", on_role_change=roles.append, on_refused=refusals.append)
+            failover = client.failovers.start("/data/app.sqlite", on_role_change=roles.append, on_denied=denials.append)
             await_reported(lambda: roles == ["origin"])
             fake.daemon.stop()
             await_reported(lambda: len(roles) == 2)
@@ -1058,7 +1058,7 @@ def test_failover_reads_its_role_again_when_the_log_shows_a_refusal_after_the_ro
             time.sleep(0.3)
             # The first role read raced the refusal, so it is read again: no stale origin, and each refusal once.
             assert roles == ["origin", "unknown"] and not failover.is_origin
-            assert refusals == [REFUSED_MESSAGE, REFUSED_MESSAGE]
+            assert denials == [DENIED_MESSAGE, DENIED_MESSAGE]
             failover.stop()
     finally:
         fake.close()
@@ -1200,7 +1200,7 @@ async def test_close_while_once_starts_drains_a_job_that_fills_its_output(tmp_pa
     assert raised.value.code == "closed"
 
 
-def test_page_limits_outside_1_to_1000_are_refused_before_sending() -> None:
+def test_page_limits_outside_1_to_1000_are_denied_before_sending() -> None:
     daemon = ContractDaemon(lambda received: (200, "application/json", b'{"databases": []}'))
     try:
         with Litebackup(socket_path=daemon.socket_path) as client:
@@ -1441,7 +1441,7 @@ async def test_cancelling_an_async_close_still_ends_every_failover() -> None:
         fake.daemon.close()
 
 
-def test_session_socket_refuses_a_shared_runtime_directory(tmp_path: Path) -> None:
+def test_session_socket_denies_a_shared_runtime_directory(tmp_path: Path) -> None:
     missing = str(tmp_path / "client.json")
     environment = {"TMPDIR": str(tmp_path), "HOME": str(tmp_path / "user")}
     runtime_root = tmp_path / f"litebackup-{os.getuid()}"
@@ -1498,23 +1498,23 @@ def test_a_role_read_while_the_daemon_drains_reports_unknown() -> None:
     del draining["draining"]
     assert _failover._status_role(_decode.decode(models.DatabaseStatus, draining)) == "origin"
     # A refused file reads as conflicted, which makes the role unknown too.
-    refused = {**draining, "role": "replica", "state": "conflicted"}
-    assert _failover._status_role(_decode.decode(models.DatabaseStatus, refused)) == "unknown"
+    denied = {**draining, "role": "replica", "state": "conflicted"}
+    assert _failover._status_role(_decode.decode(models.DatabaseStatus, denied)) == "unknown"
 
 
-def test_a_role_callback_that_stops_the_failover_hears_no_refusal() -> None:
+def test_a_role_callback_that_stops_the_failover_hears_no_denial() -> None:
     status = _decode.decode(models.Failover, {"name": "app.sqlite", "path": "/data/app.sqlite", "role": "origin"})
-    refusals: list[str] = []
+    denials: list[str] = []
     failover: _failover._FailoverState
 
     def stop_on_unknown(role: str) -> None:
         if role == "unknown":
             failover._mark_stopped()
 
-    failover = _failover._FailoverState(status, stop_on_unknown, refusals.append, None)
-    refusal = {"id": 9, "time": "2026-01-01T00:01:00Z", "type": "refused", "message": REFUSED_MESSAGE, "name": "app.sqlite"}
-    failover._apply_event(_decode.decode(models.Event, refusal), _failover._FollowProgress(7))
-    assert refusals == [] and failover.role == "unknown"
+    failover = _failover._FailoverState(status, stop_on_unknown, denials.append, None)
+    denial = {"id": 9, "time": "2026-01-01T00:01:00Z", "type": "denied", "message": DENIED_MESSAGE, "name": "app.sqlite"}
+    failover._apply_event(_decode.decode(models.Event, denial), _failover._FollowProgress(7))
+    assert denials == [] and failover.role == "unknown"
 
 
 async def test_unusable_binary_names_its_interpreter(tmp_path: Path) -> None:

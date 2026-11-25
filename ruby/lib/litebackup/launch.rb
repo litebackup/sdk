@@ -49,9 +49,9 @@ module Litebackup
     # JSON: drain_required when the launch refused a new credential for a
     # client that has write locks, and launch_failed otherwise, also with the
     # whole output when the command reported no error as JSON.
-    def launch_refusal(output)
-      refusal = ""
-      refusal_code = ErrorCode::LAUNCH_FAILED
+    def launch_denial(output)
+      denial = ""
+      denial_code = ErrorCode::LAUNCH_FAILED
       output.each_line do |line|
         diagnostic = begin
           JSON.parse(line)
@@ -64,17 +64,17 @@ module Litebackup
         message = diagnostic["message"]
         next unless message.is_a?(String) && !message.empty?
 
-        refusal = message
-        refusal_code = diagnostic["code"] == ErrorCode::DRAIN_REQUIRED ? ErrorCode::DRAIN_REQUIRED : ErrorCode::LAUNCH_FAILED
+        denial = message
+        denial_code = diagnostic["code"] == ErrorCode::DRAIN_REQUIRED ? ErrorCode::DRAIN_REQUIRED : ErrorCode::LAUNCH_FAILED
       end
-      return [ErrorCode::LAUNCH_FAILED, output.strip] if refusal.empty?
+      return [ErrorCode::LAUNCH_FAILED, output.strip] if denial.empty?
 
-      [refusal_code, refusal]
+      [denial_code, denial]
     end
 
     def launch_failed(output, cause)
-      code, refusal = launch_refusal(output)
-      Error.new(code, "starting Litebackup failed: #{refusal.empty? ? cause : refusal}")
+      code, denial = launch_denial(output)
+      Error.new(code, "starting Litebackup failed: #{denial.empty? ? cause : denial}")
     end
 
     # Starts the session daemon when nothing listens on its socket.

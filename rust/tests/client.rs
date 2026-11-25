@@ -72,7 +72,7 @@ async fn a_call_past_its_deadline_is_timeout_with_status_0() {
 }
 
 #[tokio::test]
-async fn closing_ends_a_waiting_call_and_refuses_later_ones() {
+async fn closing_ends_a_waiting_call_and_denies_later_ones() {
     let slow = Answer::json(RULES, &json!({"rules": []})).delay(Duration::from_secs(600));
     let daemon = FakeDaemon::start(vec![slow]);
     let client = client_to(&daemon).await;
@@ -151,7 +151,7 @@ fn session_daemon(directory: &Path) -> FakeDaemon {
 }
 
 #[tokio::test]
-async fn a_launch_that_refuses_a_new_credential_is_drain_required() {
+async fn a_launch_that_denies_a_new_credential_is_drain_required() {
     let directory = tempfile::tempdir().expect("a temporary directory");
     let seen = directory.path().join("seen");
     let binary = stand_in(

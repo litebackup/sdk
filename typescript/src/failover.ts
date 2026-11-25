@@ -35,7 +35,7 @@ const roleUnknown: FailoverRole = "unknown";
 
 /** Whether an event type sets a failover's role: role_changed, and draining and refused, which make it unknown. */
 function changesRole(type: Event["type"]): boolean {
-  return type === "role_changed" || type === "draining" || type === "refused";
+  return type === "role_changed" || type === "draining" || type === "denied";
 }
 
 /**
@@ -62,7 +62,7 @@ export interface FailoverEvents {
   /** The daemon stopped answering, so this machine's role is unknown; once it answers again, the role is read and reported. */
   unknown: [];
   /** The daemon refused this machine's file and the failover stays conflicted there, leaving the file as it is: a file that differs from the server head when this machine starts as the origin, or one that holds writes the new origin never saw when this machine lost the origin role. The database's state is conflicted, and the role is unknown, except for a refusal older than the last role read after the daemon answered again, which leaves the role that read gave. The argument is the daemon's message. */
-  refused: [message: string];
+  denied: [message: string];
   /** Reading the daemon's events failed; watching retries. An expired cursor (cursor_expired) is reported too, and following resumes at the log's end after re-reading the role. Only reported when a listener is registered. */
   error: [error: Error];
 }
@@ -211,7 +211,7 @@ export class Failover {
    * @internal
    */
   applyEvent(event: Event, olderThanRoleRead = false): void {
-    if (olderThanRoleRead && event.type !== "refused") {
+    if (olderThanRoleRead && event.type !== "denied") {
       return;
     }
     if (event.type === "role_changed") {
@@ -220,11 +220,11 @@ export class Failover {
       // The daemon drains: it stops being the origin before it releases the
       // lock, so the app stops writing while no machine may take over yet.
       this.changeRole(roleUnknown);
-    } else if (event.type === "refused" && !this.stopped) {
+    } else if (event.type === "denied" && !this.stopped) {
       // The daemon refused this machine's file and the failover stays
       // conflicted there: this machine neither writes nor follows the database.
       if (!olderThanRoleRead) this.changeRole(roleUnknown);
-      if (!this.stopped) this.notify("refused", event.message);
+      if (!this.stopped) this.notify("denied", event.message);
     }
   }
 
@@ -318,7 +318,7 @@ export class Failover {
       progress.roleReadPending = false;
       if (!this.controller.signal.aborted) {
         // A drain says the role is unknown, as its draining event does, and
-        // so does a refused file, as its refused event does.
+        // so does a refused file, as its denied event does.
         this.changeRole(database.draining || database.state === "conflicted" ? roleUnknown : database.role);
       }
       return;

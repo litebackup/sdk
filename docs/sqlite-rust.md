@@ -6,7 +6,7 @@ Add the crate `litebackup` from crates.io, with the features you need:
 
 ```toml
 [dependencies]
-litebackup = { version = "1.5.0", features = ["rusqlite"] }
+litebackup = { version = "1.6.0", features = ["rusqlite"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -259,7 +259,7 @@ if let Some(mut notices) = failover.notices() {
         while let Some(notice) = notices.next().await {
             match notice {
                 FailoverNotice::Role(role) => eprintln!("this machine is now {role}"),
-                FailoverNotice::Refused(message) => eprintln!("the daemon refused this file: {message}"),
+                FailoverNotice::Denied(message) => eprintln!("the daemon denied this file: {message}"),
                 FailoverNotice::Error(error) => eprintln!("reading the failover's events failed: {error}"),
                 _ => {}
             }

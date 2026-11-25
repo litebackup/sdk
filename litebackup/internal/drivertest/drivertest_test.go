@@ -97,8 +97,8 @@ func TestResolvedPathIsDriverFile(t *testing.T) {
 	}
 }
 
-// TestInMemoryAndTemporaryDatabasesAreRefused refuses every DSN that opens no file.
-func TestInMemoryAndTemporaryDatabasesAreRefused(t *testing.T) {
+// TestInMemoryAndTemporaryDatabasesAreDenied refuses every DSN that opens no file.
+func TestInMemoryAndTemporaryDatabasesAreDenied(t *testing.T) {
 	for _, driver := range drivers {
 		for _, dsn := range []string{"", ":memory:", "file::memory:", "file::memory:?cache=shared", "file:named?mode=memory&cache=shared", "file:", "file:x.sqlite?vfs=memdb", "x.sqlite?vfs=memdb"} {
 			if _, err := driver.resolve(dsn); !errors.Is(err, sqlitedsn.ErrNoFile) {
@@ -111,9 +111,9 @@ func TestInMemoryAndTemporaryDatabasesAreRefused(t *testing.T) {
 	}
 }
 
-// TestSQLAdapterCloseRefusesOpenTransaction fails Close while a
+// TestSQLAdapterCloseDeniesOpenTransaction fails Close while a
 // transaction holds a connection, and rolls it back once it is closed.
-func TestSQLAdapterCloseRefusesOpenTransaction(t *testing.T) {
+func TestSQLAdapterCloseDeniesOpenTransaction(t *testing.T) {
 	for _, driver := range drivers {
 		t.Run(driver.name, func(t *testing.T) {
 			ctx := context.Background()

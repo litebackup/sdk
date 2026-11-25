@@ -66,7 +66,7 @@ end
 STATUS_ANSWER = ContractDaemon::STATUS_BODY
 
 def write_answer(connection, body, headers = {})
-  head = ["HTTP/1.1 200 OK", "Litebackup-Client-Version: 1.5.0", "Content-Type: application/json"]
+  head = ["HTTP/1.1 200 OK", "Litebackup-Client-Version: 1.6.0", "Content-Type: application/json"]
   head += headers.map { |name, value| "#{name}: #{value}" }
   head << "Content-Length: #{body.bytesize}" unless headers.key?("Transfer-Encoding")
   connection.write("#{head.join("\r\n")}\r\n\r\n#{body}")
@@ -306,7 +306,7 @@ class TransportTest < Minitest::Test
     daemon&.close
   end
 
-  def test_a_client_made_before_a_fork_is_refused_in_the_child
+  def test_a_client_made_before_a_fork_is_denied_in_the_child
     daemon = ContractDaemon.new { json_answer("rules" => []) }
     client = Litebackup::Client.new(socket_path: daemon.socket_path)
     client.rules.list
@@ -373,7 +373,7 @@ class ArgumentTest < Minitest::Test
     assert_equal("", settings.foreground_environment[Litebackup::API_KEY_ENVIRONMENT])
   end
 
-  def test_a_zero_umask_is_sent_and_one_past_0777_is_refused
+  def test_a_zero_umask_is_sent_and_one_past_0777_is_denied
     assert_equal(0, Litebackup::Wire.restore("a.sqlite", path: "b.sqlite", umask: 0).body["umask"])
     assert_equal("invalid_argument",
                  assert_raises(Litebackup::Error) { Litebackup::Wire.restore("a", path: "b", umask: 0o1000) }.code)
@@ -381,12 +381,12 @@ class ArgumentTest < Minitest::Test
                  assert_raises(Litebackup::Error) { Litebackup::Wire.restore("a", path: "b", umask: -1) }.code)
   end
 
-  def test_infinite_durations_are_refused
+  def test_infinite_durations_are_denied
     error = assert_raises(Litebackup::Error) { Litebackup::Wire.release("a", timeout: Float::INFINITY) }
     assert_equal("invalid_argument", error.code)
   end
 
-  def test_negative_and_non_numeric_durations_are_refused
+  def test_negative_and_non_numeric_durations_are_denied
     assert_equal("invalid_argument", assert_raises(Litebackup::Error) do
       Litebackup::Wire.release("a", timeout: -1)
     end.code)
@@ -412,14 +412,14 @@ class ArgumentTest < Minitest::Test
                  assert_raises(Litebackup::Error) { Litebackup::Wire.wire_time("2026-11-15 09:30") }.code)
   end
 
-  def test_a_name_and_a_prefix_together_are_refused_but_empty_strings_are_not_set
+  def test_a_name_and_a_prefix_together_are_denied_but_empty_strings_are_not_set
     assert_equal("invalid_argument",
                  assert_raises(Litebackup::Error) { Litebackup::Wire.start_backup("a", name: "x", prefix: "y") }.code)
     body = Litebackup::Wire.start_backup("a", name: "", prefix: "y", maximum_local_databases: 0).body
     assert_equal({ "path" => File.join(@working_directory, "a"), "prefix" => "y" }, body)
   end
 
-  def test_page_limits_outside_1_to_1000_are_refused_before_sending
+  def test_page_limits_outside_1_to_1000_are_denied_before_sending
     daemon = ContractDaemon.new { json_answer({}) }
     Litebackup::Client.open(socket_path: daemon.socket_path) do |client|
       [0, 1001, -1].each do |limit|
@@ -531,7 +531,7 @@ class LaunchTest < Minitest::Test
     assert_raises(Litebackup::Error) { Litebackup::Paths.session_socket("Bad Name", {}, missing) }
   end
 
-  def test_session_socket_refuses_a_shared_runtime_directory
+  def test_session_socket_denies_a_shared_runtime_directory
     shared = File.join(@working_directory, "litebackup-#{Process.uid}")
     Dir.mkdir(shared, 0o777)
     File.chmod(0o777, shared)
@@ -542,7 +542,7 @@ class LaunchTest < Minitest::Test
     assert_includes(error.message, "this user's alone")
   end
 
-  def test_invite_credentials_are_refused_without_repeating_them
+  def test_invite_credentials_are_denied_without_repeating_them
     [{ api_key: INVITE }, { environment: { Litebackup::API_KEY_ENVIRONMENT => INVITE } }].each do |arguments|
       error = assert_raises(Litebackup::Error) { Litebackup::Client.new(socket_path: "/tmp/x.sock", **arguments) }
       assert_equal("invalid_argument", error.code)
@@ -604,10 +604,10 @@ class LaunchTest < Minitest::Test
       assert_equal("starting Litebackup failed: this machine has not joined a server", error.message)
     end
     assert_equal("launch --session unit --stdout-format json\n", File.read(arguments))
-    assert_equal(["launch_failed", "plain text"], Litebackup::Launch.launch_refusal("plain text\n"))
+    assert_equal(["launch_failed", "plain text"], Litebackup::Launch.launch_denial("plain text\n"))
   end
 
-  def test_a_launch_that_refuses_a_new_credential_keeps_drain_required
+  def test_a_launch_that_denies_a_new_credential_keeps_drain_required
     message = "drain it first with litebackup drain, then change the key"
     binary = executable(File.join(@working_directory, "litebackup"),
                         "echo '{\"code\":\"drain_required\",\"message\":\"#{message}\"}' >&2\nexit 1")

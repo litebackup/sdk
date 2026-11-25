@@ -334,8 +334,8 @@ func TestFailoverReportsStartRole(t *testing.T) {
 	}
 }
 
-// refusedMessage is the refusal a test daemon reports for a failover's file.
-const refusedMessage = "/var/lib/app/main.db differs from the server head; it was left as it is"
+// deniedMessage is the refusal a test daemon reports for a failover's file.
+const deniedMessage = "/var/lib/app/main.db differs from the server head; it was left as it is"
 
 // TestFailoverRoleUnknownWhileDaemonStopped checks that an origin whose
 // daemon stops reports RoleUnknown at once and IsOrigin false, and that once
@@ -368,8 +368,8 @@ func TestFailoverRoleUnknownWhileDaemonStopped(t *testing.T) {
 				map[string]any{
 					"id":      9,
 					"time":    "2026-11-15T09:02:00Z",
-					"type":    EventTypeRefused,
-					"message": refusedMessage,
+					"type":    EventTypeDenied,
+					"message": deniedMessage,
 					"name":    "app/main.db",
 					"path":    "/var/lib/app/main.db",
 				},
@@ -384,11 +384,11 @@ func TestFailoverRoleUnknownWhileDaemonStopped(t *testing.T) {
 	})
 	client := daemon.connect(t)
 	roles := make(chan Role, 8)
-	refusals := make(chan string, 4)
+	denials := make(chan string, 4)
 	reported := make(chan error, 64)
 	failover, err := client.StartFailover(t.Context(), "/var/lib/app/main.db", &FailoverArgs{
 		OnRoleChange: func(role Role) { roles <- role },
-		OnRefused:    func(message string) { refusals <- message },
+		OnDenied:     func(message string) { denials <- message },
 		OnError:      func(err error) { reported <- err },
 	})
 	if err != nil {
@@ -425,7 +425,7 @@ func TestFailoverRoleUnknownWhileDaemonStopped(t *testing.T) {
 	}
 	// The refusal made while the daemon was stopped is older than the role
 	// read: it is reported, and leaves the role the read gave.
-	if message := receive(t, refusals); message != refusedMessage {
+	if message := receive(t, denials); message != deniedMessage {
 		t.Fatalf("refusal %q, want the one made while the daemon was stopped", message)
 	}
 	select {
@@ -579,11 +579,11 @@ func TestFailoverRereadsRacedRole(t *testing.T) {
 	}
 }
 
-// TestFailoverRereadsRoleRacedByRefusal checks that a refusal the log shows
+// TestFailoverRereadsRoleRacedByDenial checks that a refusal the log shows
 // after a role read is a role change too: the follower reads the role again,
 // which a refused file answers as conflicted, reports no stale origin, and
 // hears the refusal once, through the long-poll from its kept cursor.
-func TestFailoverRereadsRoleRacedByRefusal(t *testing.T) {
+func TestFailoverRereadsRoleRacedByDenial(t *testing.T) {
 	daemon := failoverDaemon(t, nil, nil)
 	daemon.route("POST /v1/failovers/start", func(request *fakeRequest) (int, any) {
 		return http.StatusOK, map[string]any{
@@ -594,12 +594,12 @@ func TestFailoverRereadsRoleRacedByRefusal(t *testing.T) {
 	})
 	var returned atomic.Bool
 	var logEndReads atomic.Int32
-	racedRefusal := map[string]any{"events": []any{
+	racedDenial := map[string]any{"events": []any{
 		map[string]any{
 			"id":      10,
 			"time":    "2026-11-15T09:02:00Z",
-			"type":    EventTypeRefused,
-			"message": refusedMessage,
+			"type":    EventTypeDenied,
+			"message": deniedMessage,
 			"name":    "app/main.db",
 			"path":    "/var/lib/app/main.db",
 		},
@@ -616,13 +616,13 @@ func TestFailoverRereadsRoleRacedByRefusal(t *testing.T) {
 				// The refusal landed after the first log end read.
 				return http.StatusOK, map[string]any{"events": []any{}, "next": 10}
 			case after == "9":
-				return http.StatusOK, racedRefusal
+				return http.StatusOK, racedDenial
 			}
 			next, _ := strconv.ParseInt(after, 10, 64)
 			return http.StatusOK, map[string]any{"events": []any{}, "next": next}
 		}
 		if returned.Load() && after == "7" {
-			return http.StatusOK, racedRefusal
+			return http.StatusOK, racedDenial
 		}
 		time.Sleep(50 * time.Millisecond)
 		next, _ := strconv.ParseInt(after, 10, 64)
@@ -638,10 +638,10 @@ func TestFailoverRereadsRoleRacedByRefusal(t *testing.T) {
 	})
 	client := daemon.connect(t)
 	roles := make(chan Role, 8)
-	refusals := make(chan string, 4)
+	denials := make(chan string, 4)
 	failover, err := client.StartFailover(t.Context(), "/var/lib/app/main.db", &FailoverArgs{
 		OnRoleChange: func(role Role) { roles <- role },
-		OnRefused:    func(message string) { refusals <- message },
+		OnDenied:     func(message string) { denials <- message },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -655,13 +655,13 @@ func TestFailoverRereadsRoleRacedByRefusal(t *testing.T) {
 	}
 	returned.Store(true)
 	daemon.serve()
-	if message := receive(t, refusals); message != refusedMessage {
+	if message := receive(t, denials); message != deniedMessage {
 		t.Fatalf("refusal %q", message)
 	}
 	select {
 	case role := <-roles:
 		t.Fatalf("a role the refusal superseded was reported: %s", role)
-	case message := <-refusals:
+	case message := <-denials:
 		t.Fatalf("the refusal was reported again: %q", message)
 	case <-time.After(300 * time.Millisecond):
 	}
@@ -928,8 +928,8 @@ func TestStatusRoleWhileDraining(t *testing.T) {
 	if role := statusRole(&DatabaseStatus{Role: RoleOrigin, Draining: true}); role != RoleUnknown {
 		t.Fatalf("a draining origin reads as %s", role)
 	}
-	refused := &DatabaseStatus{Role: RoleReplica, State: DatabaseStatusStateConflicted}
-	if role := statusRole(refused); role != RoleUnknown {
+	denied := &DatabaseStatus{Role: RoleReplica, State: DatabaseStatusStateConflicted}
+	if role := statusRole(denied); role != RoleUnknown {
 		t.Fatalf("a refused replica reads as %s", role)
 	}
 	if role := statusRole(&DatabaseStatus{Role: RoleOrigin}); role != RoleOrigin {

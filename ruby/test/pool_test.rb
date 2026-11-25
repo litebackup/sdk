@@ -178,7 +178,7 @@ class PoolTest < Minitest::Test
     refute_includes(daemon.steps, "sync")
   end
 
-  def test_release_ends_the_lease_and_refuses_one_the_pool_does_not_lease
+  def test_release_ends_the_lease_and_denies_one_the_pool_does_not_lease
     daemon = lease_daemon(acquired_status(path))
     pool = nil
     with_pool(daemon) do |lease_pool|
@@ -257,7 +257,7 @@ class PoolTest < Minitest::Test
     end
   end
 
-  def test_pool_refuses_bad_settings
+  def test_pool_denies_bad_settings
     Litebackup::Client.open(socket_path: "/nonexistent/client.sock") do |client|
       adapter = PoolStepAdapter.new([])
       [{ cleanup_timeout: 0 }, { cleanup_timeout: -1 }, { idle_release: -1 }].each do |options|
@@ -273,7 +273,7 @@ class PoolTest < Minitest::Test
     end
   end
 
-  def test_create_empty_file_refuses_a_path_whose_directory_is_a_file
+  def test_create_empty_file_denies_a_path_whose_directory_is_a_file
     File.write(File.join(@working_directory, "plain"), "")
     error = assert_raises(Litebackup::Error) { Litebackup::Pool.create_empty_file("plain/7.sqlite") }
     assert_equal("invalid_argument", error.code)
@@ -466,7 +466,7 @@ class PoolTest < Minitest::Test
     assert_equal(1, daemon.steps.count("open"))
   end
 
-  def test_a_pool_made_before_a_fork_is_refused_in_the_child
+  def test_a_pool_made_before_a_fork_is_denied_in_the_child
     daemon = lease_daemon(acquired_status(path))
     with_pool(daemon) do |pool|
       reader, writer = IO.pipe
@@ -545,7 +545,7 @@ class PoolTest < Minitest::Test
     assert_equal(%w[acquire open close release], daemon.steps)
   end
 
-  def test_an_infinite_cleanup_timeout_is_refused
+  def test_an_infinite_cleanup_timeout_is_denied
     Litebackup::Client.open(socket_path: "/nonexistent/client.sock") do |client|
       error = assert_raises(Litebackup::Error) do
         client.databases.pool(PoolStepAdapter.new([]), cleanup_timeout: Float::INFINITY)

@@ -606,11 +606,11 @@ func TestIntegrationFailover(t *testing.T) {
 			return err
 		}
 		for _, event := range page.Events {
-			if event.Type == EventTypeRefused && event.Name == name && event.Path == firstPath {
+			if event.Type == EventTypeDenied && event.Name == name && event.Path == firstPath {
 				return nil
 			}
 		}
-		return fmt.Errorf("no refused event yet")
+		return fmt.Errorf("no denied event yet")
 	})
 	if countItems(t, firstPath) != 8 {
 		t.Fatalf(

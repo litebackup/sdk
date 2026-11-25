@@ -30,7 +30,7 @@ class Received:
 
 
 Reply = tuple[int, str, bytes]
-STATUS_BODY = b'{"session":"contract","server":"http://example","client_version":"1.5.0","session_id":"s","watch":"inotify","databases":[]}'
+STATUS_BODY = b'{"session":"contract","server":"http://example","client_version":"1.6.0","session_id":"s","watch":"inotify","databases":[]}'
 
 
 class _Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
@@ -41,7 +41,7 @@ class _Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 class ContractDaemon:
     """Answers the connect probe itself and hands every other request to reply."""
 
-    def __init__(self, reply: Callable[[Received], Reply], client_version: str | None = "1.5.0") -> None:
+    def __init__(self, reply: Callable[[Received], Reply], client_version: str | None = "1.6.0") -> None:
         self.directory = tempfile.mkdtemp(prefix="lbp-")
         self.socket_path = os.path.join(self.directory, "client.sock")
         self.received: list[Received] = []

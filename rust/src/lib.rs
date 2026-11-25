@@ -93,7 +93,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The oldest daemon this SDK talks to. Connecting to an older one fails with
 /// `daemon_unsupported`.
-pub const MINIMUM_DAEMON_VERSION: &str = "1.5.0";
+pub const MINIMUM_DAEMON_VERSION: &str = "1.6.0";
 
 impl Durability {
     /// `none`: a shutdown returns without waiting for any final sync to reach

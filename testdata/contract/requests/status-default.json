@@ -13,7 +13,7 @@
   "response": {
     "session": "default",
     "server": "https://example.litebackup.cloud",
-    "client_version": "1.5.0",
+    "client_version": "1.6.0",
     "session_id": "s1",
     "watch": "inotify",
     "databases": [],

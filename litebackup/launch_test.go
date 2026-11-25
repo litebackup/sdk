@@ -115,11 +115,11 @@ func TestConnectPassesTheCredential(t *testing.T) {
 	}
 }
 
-// TestConnectRefusesInviteCredentials checks that an invite token, in
+// TestConnectDeniesInviteCredentials checks that an invite token, in
 // ConnectArgs.APIKey or LITEBACKUP_API_KEY, fails with invalid_argument
 // before litebackup runs, as a malformed variable does for a foreground
 // backup.
-func TestConnectRefusesInviteCredentials(t *testing.T) {
+func TestConnectDeniesInviteCredentials(t *testing.T) {
 	const invite = "litebackup_invite_exampleinvitevalue@backups.example.com"
 	binary, calls := credentialStandIn(t)
 	t.Setenv(APIKeyEnvironment, "")
@@ -209,9 +209,9 @@ func TestLaunchFailedCarriesTheCommandMessage(t *testing.T) {
 	if string(launchArguments) != "launch --session unit --stdout-format json\n" {
 		t.Fatalf("arguments %q", launchArguments)
 	}
-	code, refusal := launchRefusal([]byte("plain text\n"))
-	if code != CodeLaunchFailed || refusal != "plain text" {
-		t.Fatalf("plain output %s %q", code, refusal)
+	code, denial := launchDenial([]byte("plain text\n"))
+	if code != CodeLaunchFailed || denial != "plain text" {
+		t.Fatalf("plain output %s %q", code, denial)
 	}
 }
 

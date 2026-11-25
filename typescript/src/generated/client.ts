@@ -98,7 +98,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Publish the content of a past version again as a new head, one past the current head, as git revert adds a commit; the head is not rewound, and the versions after the chosen one stay restorable. Set version or time. The database must be an origin this machine acquired or backs up, and its file closed; a file a process has open is refused with 409 still_open, a replica or a failover standby with 400 invalid_argument, and a file holding writes the server lacks with 409 conflict naming the file, which is left untouched. The client takes the write lock when it does not hold it (423 lock_unavailable when another machine holds its write lock), downloads the version, puts it in place of the file only while the file is closed and unchanged, syncs it at once, and gives back a lock it took once the new head is synced. When that sync fails for any reason but a lost lock or a refused file, which are final, the version stays in place and the client keeps the lock and syncs again on its own. Before it gives back a lock it took, it makes the checks a release makes, so writes an app made meanwhile sync first, and a file still open keeps the lock (409 still_open, or 409 changed when it changes during every sync), so release an acquired database once its app closes it. The server sees an ordinary sync. */
+        /** @description Publish the content of a past version again as a new head, one past the current head, as git revert adds a commit; the head is not rewound, and the versions after the chosen one stay restorable. Set version or time. The database must be an origin this machine acquired or backs up, and its file closed; a file a process has open is denied with 409 still_open, a replica or a failover standby with 400 invalid_argument, and a file holding writes the server lacks with 409 conflict naming the file, which is left untouched. The client takes the write lock when it does not hold it (423 lock_unavailable when another machine holds its write lock), downloads the version, puts it in place of the file only while the file is closed and unchanged, syncs it at once, and gives back a lock it took once the new head is synced. When that sync fails for any reason but a lost lock or a denied file, which are final, the version stays in place and the client keeps the lock and syncs again on its own. Before it gives back a lock it took, it makes the checks a release makes, so writes an app made meanwhile sync first, and a file still open keeps the lock (409 still_open, or 409 changed when it changes during every sync), so release an acquired database once its app closes it. The server sees an ordinary sync. */
         post: operations["revertDatabase"];
         delete?: never;
         options?: never;
@@ -115,7 +115,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Sync a database now and wait for the server acknowledgement. An acquired database that is released, by a release or a drain, does not sync and is refused with 400 invalid_argument; acquire it to sync its writes. */
+        /** @description Sync a database now and wait for the server acknowledgement. An acquired database that is released, by a release or a drain, does not sync and is denied with 400 invalid_argument; acquire it to sync its writes. */
         post: operations["syncDatabase"];
         delete?: never;
         options?: never;
@@ -132,7 +132,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Take the write lock on a database and make the local file the server head, for worker pools that move databases between machines. An existing file becomes the first version when the server has none, is kept when its hashes match the head, and is fast-forwarded when it is a clean but stale copy. An empty file, as an app leaves after opening a new database without writing, counts as no copy; it becomes a new database when the server has none and is replaced by the head otherwise. A copy this machine wrote on top of the head it last synced is resumed. Any other file that differs from the head is refused with 409 conflict naming the file, which is left untouched; with discard_local the head replaces it instead. Without a path, the path this machine already uses is taken, which brings an offloaded database back. */
+        /** @description Take the write lock on a database and make the local file the server head, for worker pools that move databases between machines. An existing file becomes the first version when the server has none, is kept when its hashes match the head, and is fast-forwarded when it is a clean but stale copy. An empty file, as an app leaves after opening a new database without writing, counts as no copy; it becomes a new database when the server has none and is replaced by the head otherwise. A copy this machine wrote on top of the head it last synced is resumed. Any other file that differs from the head is denied with 409 conflict naming the file, which is left untouched; with discard_local the head replaces it instead. Without a path, the path this machine already uses is taken, which brings an offloaded database back. */
         post: operations["acquireDatabase"];
         delete?: never;
         options?: never;
@@ -149,7 +149,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Sync an acquired database a final time, run its maintenance, and release its write lock. A write the app made during an upload syncs again before the lock goes back, up to 3 times; a file open again keeps the lock (409 still_open), and so does one that changes during every sync (409 changed). A copy without its write lock, as after a drain, whose file holds writes the server lacks is refused with 409 changed and left as it is; acquire it again, then release it. */
+        /** @description Sync an acquired database a final time, run its maintenance, and release its write lock. A write the app made during an upload syncs again before the lock goes back, up to 3 times; a file open again keeps the lock (409 still_open), and so does one that changes during every sync (409 changed). A copy without its write lock, as after a drain, whose file holds writes the server lacks is denied with 409 changed and left as it is; acquire it again, then release it. */
         post: operations["releaseDatabase"];
         delete?: never;
         options?: never;
@@ -251,7 +251,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Run a database on several identical machines. The machine that holds the write lock is the origin and backs the file up; the others keep live readonly replicas at the same path. Each replica asks for the lock about once a second, so one of them takes over once the origin's lease runs out. A file at the path that differs from the server head, and is not a clean copy of the version this machine last synced, is refused with 409 conflict naming the file, which is left untouched; with discard_local the head replaces it. */
+        /** @description Run a database on several identical machines. The machine that holds the write lock is the origin and backs the file up; the others keep live readonly replicas at the same path. Each replica asks for the lock about once a second, so one of them takes over once the origin's lease runs out. A file at the path that differs from the server head, and is not a clean copy of the version this machine last synced, is denied with 409 conflict naming the file, which is left untouched; with discard_local the head replaces it. */
         post: operations["startFailover"];
         delete?: never;
         options?: never;
@@ -317,7 +317,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Events after an event ID, oldest first. With wait_millis, the call waits up to that long for the first new event. Failovers report role_changed and refused here. Every hour the client deletes events older than its --event-retention and the oldest past its --maximum-events. A current path_unreadable event (one per backup rule and path it cannot read) is added again as a new event when its old one goes, so those failures stay and can take the count past --maximum-events. */
+        /** @description Events after an event ID, oldest first. With wait_millis, the call waits up to that long for the first new event. Failovers report role_changed and denied here. Every hour the client deletes events older than its --event-retention and the oldest past its --maximum-events. A current path_unreadable event (one per backup rule and path it cannot read) is added again as a new event when its old one goes, so those failures stay and can take the count past --maximum-events. */
         get: operations["listEvents"];
         put?: never;
         post?: never;
@@ -366,10 +366,10 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * @description What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), refused (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
+         * @description What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), denied (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
          * @enum {string}
          */
-        EventType: "acquired" | "download_finished" | "download_started" | "draining" | "image_written" | "local_write" | "lock_lost" | "offloaded" | "path_unreadable" | "rebased" | "refused" | "released" | "replicating" | "restored" | "reverted" | "role_changed" | "rollback_scan" | "server_generation" | "stopped" | "tracked";
+        EventType: "acquired" | "denied" | "download_finished" | "download_started" | "draining" | "image_written" | "local_write" | "lock_lost" | "offloaded" | "path_unreadable" | "rebased" | "released" | "replicating" | "restored" | "reverted" | "role_changed" | "rollback_scan" | "server_generation" | "stopped" | "tracked";
         Event: {
             /** Format: int64 */
             id: number;
@@ -863,7 +863,7 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -893,7 +893,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -925,7 +925,7 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -955,7 +955,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -985,7 +985,7 @@ export interface operations {
                 name: string;
             };
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1026,7 +1026,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -1048,7 +1048,7 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1089,7 +1089,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -1117,7 +1117,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1173,7 +1173,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -1212,7 +1212,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1279,7 +1279,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -1318,7 +1318,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1385,7 +1385,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -1424,7 +1424,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1491,7 +1491,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -1530,7 +1530,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1586,7 +1586,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -1625,7 +1625,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1681,7 +1681,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -1711,7 +1711,7 @@ export interface operations {
                 name: string;
             };
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1752,7 +1752,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -1780,7 +1780,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1836,7 +1836,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -1875,7 +1875,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1905,7 +1905,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -1933,7 +1933,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -1978,7 +1978,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -2006,7 +2006,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -2062,7 +2062,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -2101,7 +2101,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -2157,7 +2157,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -2196,7 +2196,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -2226,7 +2226,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -2254,7 +2254,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -2299,7 +2299,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -2332,7 +2332,7 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -2373,7 +2373,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -2390,7 +2390,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -2420,7 +2420,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];
@@ -2448,7 +2448,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is refused with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
+                /** @description the calling SDK's or command's version, optionally after its name, as in typescript/1.1.0; without it the call is denied with 400 invalid_argument, and older than Litebackup-Minimum-SDK-Version with 426 sdk_unsupported */
                 "Litebackup-SDK-Version": string;
             };
             path?: never;
@@ -2482,7 +2482,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server refuses this client as older than it accepts */
+            /** @description sdk_unsupported, when the calling SDK is older than Litebackup-Minimum-SDK-Version; client_unsupported, when the server denies this client as older than it accepts */
             426: {
                 headers: {
                     "Litebackup-Client-Version": components["headers"]["ClientVersion"];

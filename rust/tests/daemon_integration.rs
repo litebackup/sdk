@@ -407,7 +407,7 @@ async fn a_failed_close_keeps_the_database_acquired_until_release() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn fails_over_and_refuses_the_old_origins_diverged_file() {
+async fn fails_over_and_denies_the_old_origins_diverged_file() {
     let Some(mut server) = Server::start().await else {
         eprintln!("skipping: set LITEBACKUP_INTEGRATION=1 and LITEBACKUP_PATH");
         return;
@@ -452,19 +452,19 @@ async fn fails_over_and_refuses_the_old_origins_diverged_file() {
 
     let restarted = server.reconnect("first").await;
     let _ = restarted.failovers().start(&first_path, FailoverOptions::default().name("shared.db")).await;
-    let refused_path = first_path.display().to_string();
+    let denied_path = first_path.display().to_string();
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let page = restarted.events().page(EventsOptions::default().limit(10_000)).await.unwrap();
-        let refused = page.events.iter().any(|event| {
-            event.r#type.as_str() == "refused"
+        let denied = page.events.iter().any(|event| {
+            event.r#type.as_str() == "denied"
                 && event.name.as_deref() == Some("shared.db")
-                && event.path.as_deref() == Some(refused_path.as_str())
+                && event.path.as_deref() == Some(denied_path.as_str())
         });
-        if refused {
+        if denied {
             break;
         }
-        assert!(Instant::now() < deadline, "no refused event naming the file");
+        assert!(Instant::now() < deadline, "no denied event naming the file");
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     assert_eq!(count_items(&first_path), 8);

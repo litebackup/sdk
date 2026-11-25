@@ -1,6 +1,6 @@
 {
   "name": "@litebackup/bin-linux-arm64",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "The litebackup binary for linux arm64, installed by @litebackup/sdk",
   "license": "MIT",
   "os": [

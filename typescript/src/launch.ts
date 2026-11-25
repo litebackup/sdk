@@ -141,9 +141,9 @@ export function socketListening(socketPath: string): Promise<boolean> {
  * is drain_required when the launch refused another credential for a client
  * that holds write locks, and launch_failed otherwise.
  */
-export function launchRefusal(stderr: string): { code: string; message: string } {
-  let refusal = "";
-  let refusalCode: string = ErrorCode.launchFailed;
+export function launchDenial(stderr: string): { code: string; message: string } {
+  let denial = "";
+  let denialCode: string = ErrorCode.launchFailed;
   for (const line of stderr.split("\n")) {
     let launchDiagnostic: unknown;
     try {
@@ -155,11 +155,11 @@ export function launchRefusal(stderr: string): { code: string; message: string }
     const { event, code, message } = launchDiagnostic as Record<string, unknown>;
     // A warning carries an event; an error does not.
     if (event === undefined && typeof code === "string" && typeof message === "string" && message !== "") {
-      refusal = message;
-      refusalCode = code === ErrorCode.drainRequired ? ErrorCode.drainRequired : ErrorCode.launchFailed;
+      denial = message;
+      denialCode = code === ErrorCode.drainRequired ? ErrorCode.drainRequired : ErrorCode.launchFailed;
     }
   }
-  return refusal ? { code: refusalCode, message: refusal } : { code: ErrorCode.launchFailed, message: stderr.trim() };
+  return denial ? { code: denialCode, message: denial } : { code: ErrorCode.launchFailed, message: stderr.trim() };
 }
 
 /**
@@ -187,8 +187,8 @@ export async function launchDaemon(args: { session: string; socketPath: string; 
           reject(new LitebackupError(ErrorCode.launchFailed, startFailureMessage(binary, startFailure), 0, { cause: error }));
           return;
         }
-        const refusal = launchRefusal(stderr);
-        reject(new LitebackupError(refusal.code, `starting Litebackup failed: ${refusal.message || error.message}`, 0, { cause: error }));
+        const denial = launchDenial(stderr);
+        reject(new LitebackupError(denial.code, `starting Litebackup failed: ${denial.message || error.message}`, 0, { cause: error }));
         return;
       }
       resolve();

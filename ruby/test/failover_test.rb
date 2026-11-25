@@ -2,7 +2,7 @@
 
 require_relative "test_helper"
 
-REFUSED_MESSAGE = "/data/app.sqlite differs from the server head; it was left as it is"
+DENIED_MESSAGE = "/data/app.sqlite differs from the server head; it was left as it is"
 APP_DATABASE = { "name" => "app.sqlite", "path" => "/data/app.sqlite", "role" => "origin", "state" => "syncing" }.freeze
 
 def failover_start(role, this_machine:)
@@ -150,10 +150,10 @@ class RoleDaemon
       json_answer(body)
     elsif @returned && after == "7"
       older = role_event(8, "replica")
-      refusal = { "id" => 9, "time" => "2026-01-01T00:01:00Z", "type" => "refused", "message" => REFUSED_MESSAGE,
-                  "name" => "app.sqlite", "path" => "/data/app.sqlite" }
+      denial = { "id" => 9, "time" => "2026-01-01T00:01:00Z", "type" => "denied", "message" => DENIED_MESSAGE,
+                 "name" => "app.sqlite", "path" => "/data/app.sqlite" }
       raced = @raced_changes["events"]
-      json_answer("events" => [older, refusal, *raced], "next" => [9, *raced.map { |event| event["id"] }].max)
+      json_answer("events" => [older, denial, *raced], "next" => [9, *raced.map { |event| event["id"] }].max)
     else
       sleep(0.05)
       json_answer("events" => [], "next" => after.to_i)
@@ -401,10 +401,10 @@ class FailoverTest < Minitest::Test
     fake = RoleDaemon.new
     roles = []
     errors = []
-    refusals = []
+    denials = []
     Litebackup::Client.open(socket_path: fake.daemon.socket_path) do |client|
       failover = client.failovers.start("/data/app.sqlite", on_role_change: ->(role) { roles << role },
-                                                            on_refused: ->(message) { refusals << message },
+                                                            on_denied: ->(message) { denials << message },
                                                             on_error: ->(error) { errors << error.code })
       await_reported { roles == ["origin"] }
       assert(failover.origin?)
@@ -417,7 +417,7 @@ class FailoverTest < Minitest::Test
       assert_equal("connection_failed", errors.first)
       fake.returned = true
       fake.daemon.serve
-      await_reported { refusals == [REFUSED_MESSAGE] }
+      await_reported { denials == [DENIED_MESSAGE] }
       sleep(0.2)
       # The role read reports origin; the older role change in the cursor's
       # page is skipped, and the older refusal is reported without changing
@@ -481,17 +481,17 @@ class FailoverTest < Minitest::Test
     fake.close
   end
 
-  def test_failover_reads_its_role_again_when_the_log_shows_a_refusal_after_the_role_read
+  def test_failover_reads_its_role_again_when_the_log_shows_a_denial_after_the_role_read
     fake = RoleDaemon.new
     fake.conflicted_from_read = 2
-    refusal = { "id" => 10, "time" => "2026-01-01T00:02:00Z", "type" => "refused", "message" => REFUSED_MESSAGE,
-                "name" => "app.sqlite" }
-    fake.raced_changes = { "events" => [refusal], "next" => 10 }
+    denial = { "id" => 10, "time" => "2026-01-01T00:02:00Z", "type" => "denied", "message" => DENIED_MESSAGE,
+               "name" => "app.sqlite" }
+    fake.raced_changes = { "events" => [denial], "next" => 10 }
     roles = []
-    refusals = []
+    denials = []
     Litebackup::Client.open(socket_path: fake.daemon.socket_path) do |client|
       failover = client.failovers.start("/data/app.sqlite", on_role_change: ->(role) { roles << role },
-                                                            on_refused: ->(message) { refusals << message })
+                                                            on_denied: ->(message) { denials << message })
       await_reported { roles == ["origin"] }
       fake.daemon.stop
       await_reported { roles.length == 2 }
@@ -503,7 +503,7 @@ class FailoverTest < Minitest::Test
       # origin, and each refusal once.
       assert_equal(%w[origin unknown], roles)
       refute(failover.origin?)
-      assert_equal([REFUSED_MESSAGE, REFUSED_MESSAGE], refusals)
+      assert_equal([DENIED_MESSAGE, DENIED_MESSAGE], denials)
       failover.stop
     end
   ensure
@@ -531,10 +531,10 @@ end
 
 # The follower's decisions, without a daemon.
 class FailoverStateTest < Minitest::Test
-  def failover_state(on_role_change: nil, on_refused: nil)
+  def failover_state(on_role_change: nil, on_denied: nil)
     status = Litebackup::Models::Failover.from_wire("name" => "app.sqlite", "path" => "/data/app.sqlite",
                                                     "role" => "origin")
-    Litebackup::Failover.new(Object.new, status, 7, on_role_change: on_role_change, on_refused: on_refused)
+    Litebackup::Failover.new(Object.new, status, 7, on_role_change: on_role_change, on_denied: on_denied)
   end
 
   def event(fields)
@@ -588,19 +588,19 @@ class FailoverStateTest < Minitest::Test
     assert_equal("unknown", failover.send(:status_role, Litebackup::DatabaseStatus.from_wire(draining)))
     assert_equal("origin", failover.send(:status_role, Litebackup::DatabaseStatus.from_wire(APP_DATABASE)))
     # A refused file reads as conflicted, which makes the role unknown too.
-    refused = APP_DATABASE.merge("role" => "replica", "state" => "conflicted")
-    assert_equal("unknown", failover.send(:status_role, Litebackup::DatabaseStatus.from_wire(refused)))
+    denied = APP_DATABASE.merge("role" => "replica", "state" => "conflicted")
+    assert_equal("unknown", failover.send(:status_role, Litebackup::DatabaseStatus.from_wire(denied)))
   end
 
-  def test_a_role_callback_that_stops_the_failover_hears_no_refusal
-    refusals = []
+  def test_a_role_callback_that_stops_the_failover_hears_no_denial
+    denials = []
     failover = nil
     stop_on_unknown = ->(role) { failover.send(:mark_stopped) if role == "unknown" }
-    failover = failover_state(on_role_change: stop_on_unknown, on_refused: ->(message) { refusals << message })
-    refusal = { "id" => 9, "time" => "2026-01-01T00:01:00Z", "type" => "refused", "message" => REFUSED_MESSAGE,
-                "name" => "app.sqlite" }
-    failover.send(:apply_event, event(refusal), Litebackup::Failover::FollowProgress.new(7))
-    assert_empty(refusals)
+    failover = failover_state(on_role_change: stop_on_unknown, on_denied: ->(message) { denials << message })
+    denial = { "id" => 9, "time" => "2026-01-01T00:01:00Z", "type" => "denied", "message" => DENIED_MESSAGE,
+               "name" => "app.sqlite" }
+    failover.send(:apply_event, event(denial), Litebackup::Failover::FollowProgress.new(7))
+    assert_empty(denials)
     assert_equal("unknown", failover.role)
   end
 

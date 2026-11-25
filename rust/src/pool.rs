@@ -666,7 +666,7 @@ impl<A: Adapter> Pool<A> {
     /// a database the pool does not lease.
     #[cfg_attr(feature = "tracing", tracing::instrument(name = "litebackup.release", skip_all, fields(database = name)))]
     pub async fn release(&self, name: &str) -> Result<()> {
-        self.shared.refuse_forked_child()?;
+        self.shared.deny_forked_child()?;
         let Some(entry) = self.shared.entries_lock().by_name.get(name).cloned() else {
             return Err(Error::invalid_argument(format!("{name} is not leased in this pool")));
         };
@@ -691,7 +691,7 @@ impl<A: Adapter> Pool<A> {
     /// [`PoolCloseError`] with each database that stays as it was.
     #[cfg_attr(feature = "tracing", tracing::instrument(name = "litebackup.pool_close", skip_all))]
     pub async fn close(&self) -> Result<(), PoolCloseError> {
-        if let Err(error) = self.shared.refuse_forked_child() {
+        if let Err(error) = self.shared.deny_forked_child() {
             return Err(PoolCloseError { errors: vec![error] });
         }
         {
@@ -716,7 +716,7 @@ impl<A: Adapter> PoolShared<A> {
 
     /// Fails with `invalid_argument` in a forked child, before anything
     /// touches the pool's locks or connections, which the parent owns.
-    fn refuse_forked_child(&self) -> Result<()> {
+    fn deny_forked_child(&self) -> Result<()> {
         if self.owner_pid == std::process::id() {
             return Ok(());
         }
@@ -731,7 +731,7 @@ impl<A: Adapter> PoolShared<A> {
         if name.is_empty() {
             return Err(Error::invalid_argument("a pool call needs a database name"));
         }
-        self.refuse_forked_child()?;
+        self.deny_forked_child()?;
         let mut entries = self.entries_lock();
         if entries.closed {
             return Err(Error::new(ErrorCode::CLOSED, "the pool is closed"));

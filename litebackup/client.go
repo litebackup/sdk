@@ -31,11 +31,11 @@ import (
 
 // SDKVersion is the version sent with every call. Daemons refuse SDKs older
 // than their minimum with sdk_unsupported.
-const SDKVersion = "1.5.0"
+const SDKVersion = "1.6.0"
 
 // MinimumDaemonVersion is the oldest daemon this SDK talks to. Connect
 // refuses an older one with daemon_unsupported.
-const MinimumDaemonVersion = "1.5.0"
+const MinimumDaemonVersion = "1.6.0"
 
 const (
 	sdkVersionHeader    = "Litebackup-SDK-Version"

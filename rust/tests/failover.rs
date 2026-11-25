@@ -98,18 +98,17 @@ async fn the_start_role_comes_first_then_each_change() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_refusal_makes_the_role_unknown_and_is_reported() {
+async fn a_denial_makes_the_role_unknown_and_is_reported() {
     let mut answers = started_as("origin");
-    let refused =
-        json!({"id": 6, "name": NAME, "type": "refused", "message": "the file holds writes the server lacks"});
-    answers.push(Answer::json(EVENTS, &events(&[refused], 6)).query(long_poll(5)).uses(1));
+    let denied = json!({"id": 6, "name": NAME, "type": "denied", "message": "the file holds writes the server lacks"});
+    answers.push(Answer::json(EVENTS, &events(&[denied], 6)).query(long_poll(5)).uses(1));
     answers.push(Answer::json("/v1/databases/status", &status("origin", "conflicted")));
     answers.push(quiet_long_polls());
     let daemon = FakeDaemon::start(answers);
     let (_client, failover, mut notices) = start(&daemon).await;
     assert_eq!(notice_role(&next_notice(&mut notices).await), Some("origin"));
     assert_eq!(notice_role(&next_notice(&mut notices).await), Some("unknown"));
-    let FailoverNotice::Refused(message) = next_notice(&mut notices).await else { panic!("not a refusal") };
+    let FailoverNotice::Denied(message) = next_notice(&mut notices).await else { panic!("not a refusal") };
     assert_eq!(message, "the file holds writes the server lacks");
     assert_eq!(failover.role(), Role::UNKNOWN);
 }

@@ -44,14 +44,14 @@ def _launch_command(
     return [binary, "launch", "--session", session, "--stdout-format", "json"], launch_environment
 
 
-def launch_refusal(output: str) -> tuple[str, str]:
+def launch_denial(output: str) -> tuple[str, str]:
     """The code and message of the last error the launch command reported as JSON.
 
     The code is drain_required when the launch refused another credential for a client that holds write locks, and
     launch_failed otherwise, also with the whole output when the command reported no error as JSON.
     """
-    refusal = ""
-    refusal_code: str = ErrorCode.LAUNCH_FAILED
+    denial = ""
+    denial_code: str = ErrorCode.LAUNCH_FAILED
     for line in output.splitlines():
         try:
             launch_diagnostic = json.loads(line)
@@ -61,17 +61,17 @@ def launch_refusal(output: str) -> tuple[str, str]:
         if isinstance(launch_diagnostic, dict) and "event" not in launch_diagnostic and isinstance(launch_diagnostic.get("code"), str):
             message = launch_diagnostic.get("message")
             if isinstance(message, str) and message:
-                refusal = message
+                denial = message
                 drain_required = launch_diagnostic["code"] == ErrorCode.DRAIN_REQUIRED
-                refusal_code = ErrorCode.DRAIN_REQUIRED if drain_required else ErrorCode.LAUNCH_FAILED
-    if not refusal:
+                denial_code = ErrorCode.DRAIN_REQUIRED if drain_required else ErrorCode.LAUNCH_FAILED
+    if not denial:
         return ErrorCode.LAUNCH_FAILED, output.strip()
-    return refusal_code, refusal
+    return denial_code, denial
 
 
 def _launch_failed(output: str, cause: str) -> LitebackupError:
-    code, refusal = launch_refusal(output)
-    return LitebackupError(code, f"starting Litebackup failed: {refusal or cause}")
+    code, denial = launch_denial(output)
+    return LitebackupError(code, f"starting Litebackup failed: {denial or cause}")
 
 
 def launch_daemon(session: str, socket_path: str, environment: Mapping[str, str], api_key: str | None, binary_path: str | None) -> None:

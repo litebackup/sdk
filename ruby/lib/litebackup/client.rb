@@ -117,7 +117,7 @@ module Litebackup
     end
 
     # Connects, starting the daemon when needed; fails with daemon_unsupported
-    # for a daemon older than 1.5.0.
+    # for a daemon older than 1.6.0.
     def connect
       ensure_open
       @connect_lock.synchronize do
@@ -500,18 +500,18 @@ module Litebackup
     # Runs the database at path, the same on every machine; returns once this
     # machine is the origin or has a replica. See Failover for the callbacks:
     # on_role_change hears the role the start answered, then every change;
-    # on_refused hears the daemon's message when it refused this machine's
+    # on_denied hears the daemon's message when it refused this machine's
     # file; on_error hears each failed read. A file at the path that differs
     # from the server head, and is not a clean copy of the version this
     # machine last synced, is refused with conflict and left untouched;
     # discard_local replaces it with the head.
-    def start(path, name: nil, timeout: nil, discard_local: false, on_role_change: nil, on_refused: nil, on_error: nil)
+    def start(path, name: nil, timeout: nil, discard_local: false, on_role_change: nil, on_denied: nil, on_error: nil)
       call = Wire.start_failover(path, name: name, timeout: timeout, discard_local: discard_local)
       log_end = @client.call(Wire.events_page(after: -1))
       started = @client.call(call)
       @client.ensure_open
       failover = Failover.new(@client, started, log_end.next, on_role_change: on_role_change,
-                                                              on_refused: on_refused, on_error: on_error)
+                                                              on_denied: on_denied, on_error: on_error)
       @client.add_failover(failover)
       failover.start_following
       failover

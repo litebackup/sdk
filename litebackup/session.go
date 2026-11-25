@@ -211,14 +211,14 @@ func socketListening(path string) bool {
 	return connection.Close() == nil
 }
 
-// launchRefusal is the code and message of the last error the launch
+// launchDenial is the code and message of the last error the launch
 // command reported as JSON, or launch_failed and its whole output when it
 // reported none. The code is drain_required when the launch refused another
 // credential for a client that holds write locks, and launch_failed
 // otherwise.
-func launchRefusal(output []byte) (code string, message string) {
+func launchDenial(output []byte) (code string, message string) {
 	code = CodeLaunchFailed
-	var refusal string
+	var denial string
 	for line := range strings.SplitSeq(string(output), "\n") {
 		var launchDiagnostic struct {
 			Event   string `json:"event"`
@@ -231,17 +231,17 @@ func launchRefusal(output []byte) (code string, message string) {
 		// A warning carries an event; an error does not.
 		if launchDiagnostic.Event == "" && launchDiagnostic.Code != "" &&
 			launchDiagnostic.Message != "" {
-			refusal = launchDiagnostic.Message
+			denial = launchDiagnostic.Message
 			code = CodeLaunchFailed
 			if launchDiagnostic.Code == CodeDrainRequired {
 				code = CodeDrainRequired
 			}
 		}
 	}
-	if refusal == "" {
+	if denial == "" {
 		return CodeLaunchFailed, strings.TrimSpace(string(output))
 	}
-	return code, refusal
+	return code, denial
 }
 
 // launchDaemon starts the session daemon when nothing listens. It runs
@@ -293,10 +293,10 @@ func launchDaemon(
 	if err != nil {
 		var exitError *exec.ExitError
 		if errors.As(err, &exitError) && len(strings.TrimSpace(string(output))) > 0 {
-			code, refusal := launchRefusal(output)
+			code, denial := launchDenial(output)
 			return &Error{
 				Code:    code,
-				Message: "starting Litebackup failed: " + refusal,
+				Message: "starting Litebackup failed: " + denial,
 				Err:     err,
 			}
 		}

@@ -192,7 +192,7 @@ def test_failed_block_keeps_the_lease_and_does_not_offload(tmp_path: Path, lease
     assert daemon.request_bodies("/v1/databases/release") == [{"name": LEASED_NAME, "durability": "server", "timeout_millis": 600000}]
 
 
-def test_release_ends_the_lease_and_refuses_one_the_pool_does_not_lease(tmp_path: Path, lease_daemons: Callable[..., LeaseDaemon]) -> None:
+def test_release_ends_the_lease_and_denies_one_the_pool_does_not_lease(tmp_path: Path, lease_daemons: Callable[..., LeaseDaemon]) -> None:
     path = str(tmp_path / "7.sqlite")
     daemon = lease_daemons(acquired_status(path))
     with Litebackup(socket_path=daemon.daemon.socket_path) as client, client.databases.pool(StepAdapter(daemon.steps)) as pool:
@@ -361,7 +361,7 @@ async def test_async_use_closes_idle_when_rule_offloads(
         assert RULE_NAME not in pool._entries
 
 
-def test_pool_refuses_bad_settings() -> None:
+def test_pool_denies_bad_settings() -> None:
     with Litebackup(socket_path="/nonexistent/client.sock") as client:
         assert client.databases.pool(StepAdapter([]))._settings.idle_release == _pool.DEFAULT_IDLE_RELEASE == 60
         assert client.databases.pool(StepAdapter([]), idle_release=0)._settings.idle_release is None
@@ -371,15 +371,15 @@ def test_pool_refuses_bad_settings() -> None:
             assert raised.value.code == ErrorCode.INVALID_ARGUMENT, options
         with client.databases.pool(StepAdapter([])) as pool:
             for lease_options in ({"durability": "none"}, {"lock_timeout": -1}, {"acquire_timeout": -1}):
-                with pytest.raises(LitebackupError) as refused, pool.lease(LEASED_NAME, **lease_options):
+                with pytest.raises(LitebackupError) as denied, pool.lease(LEASED_NAME, **lease_options):
                     pass
-                assert refused.value.code == ErrorCode.INVALID_ARGUMENT, lease_options
+                assert denied.value.code == ErrorCode.INVALID_ARGUMENT, lease_options
             with pytest.raises(LitebackupError) as unnamed, pool.use(""):
                 pass
             assert unnamed.value.code == ErrorCode.INVALID_ARGUMENT
 
 
-def test_create_empty_file_refuses_a_path_whose_directory_is_a_file(tmp_path: Path) -> None:
+def test_create_empty_file_denies_a_path_whose_directory_is_a_file(tmp_path: Path) -> None:
     (tmp_path / "file").write_text("")
     for to in (tmp_path / "file" / "app.db", tmp_path / "file" / "sub" / "app.db"):
         with pytest.raises(LitebackupError) as raised:
@@ -495,9 +495,9 @@ def test_close_awaits_active_blocks(call: str, tmp_path: Path, lease_daemons: Ca
         closing = threading.Thread(target=pool.close)
         closing.start()
         wait_until(lambda: pool._closing)
-        with pytest.raises(LitebackupError) as refused, pool.lease("agents/8.sqlite"):
+        with pytest.raises(LitebackupError) as denied, pool.lease("agents/8.sqlite"):
             pass
-        assert refused.value.code == ErrorCode.CLOSED
+        assert denied.value.code == ErrorCode.CLOSED
         time.sleep(0.1)
         assert "close" not in daemon.steps
         block_return_allowed.set()

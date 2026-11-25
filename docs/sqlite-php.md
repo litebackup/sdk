@@ -176,7 +176,7 @@ start answered. Nothing follows the failover outside it, so `role()` reports
 the last confirmed role for 15 seconds after its confirmation and
 `Failover::UNKNOWN` after that, and `isOrigin()` turns false. A process that
 writes only while `isOrigin()` holds never writes as a stale origin.
-`onRefused` hears the daemon's message when it refused this machine's file,
+`onDenied` hears the daemon's message when it refused this machine's file,
 and `$failover->stop()` stops the failover and releases its write lock.
 
 ## Laravel

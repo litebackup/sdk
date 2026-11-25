@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// TestUnknownAcquireChoicesAreRefused checks that an offload durability the
+// TestUnknownAcquireChoicesAreDenied checks that an offload durability the
 // daemon does not know is invalid_argument before anything is sent, and that
 // a lease refuses an unknown durability before it creates the local file.
-func TestUnknownAcquireChoicesAreRefused(t *testing.T) {
+func TestUnknownAcquireChoicesAreDenied(t *testing.T) {
 	daemon := newFakeDaemon(t)
 	client := daemon.connect(t)
 	for _, args := range []*AcquireArgs{

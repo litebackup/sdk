@@ -18,7 +18,7 @@ use crate::model_fields::null_as_default;
 
 /// What happened to a database: role_changed (role is origin or replica, and message is text),
 /// draining (a failover origin stops being the origin before a drain releases its lock: its role is
-/// unknown until the next role_changed), refused (path names the refused file, such as a failover's
+/// unknown until the next role_changed), denied (path names the refused file, such as a failover's
 /// file that holds writes the server lacks), path_unreadable (path names the path a backup rule
 /// could not read), and the others by their names.
 ///
@@ -31,6 +31,8 @@ pub struct EventType(pub(crate) Cow<'static, str>);
 impl EventType {
     /// `acquired`.
     pub const ACQUIRED: Self = Self(Cow::Borrowed("acquired"));
+    /// `denied`.
+    pub const DENIED: Self = Self(Cow::Borrowed("denied"));
     /// `download_finished`.
     pub const DOWNLOAD_FINISHED: Self = Self(Cow::Borrowed("download_finished"));
     /// `download_started`.
@@ -49,8 +51,6 @@ impl EventType {
     pub const PATH_UNREADABLE: Self = Self(Cow::Borrowed("path_unreadable"));
     /// `rebased`.
     pub const REBASED: Self = Self(Cow::Borrowed("rebased"));
-    /// `refused`.
-    pub const REFUSED: Self = Self(Cow::Borrowed("refused"));
     /// `released`.
     pub const RELEASED: Self = Self(Cow::Borrowed("released"));
     /// `replicating`.
@@ -305,9 +305,9 @@ pub struct Event {
     pub name: Option<String>,
     /// What happened to a database: role_changed (role is origin or replica, and message is text),
     /// draining (a failover origin stops being the origin before a drain releases its lock: its
-    /// role is unknown until the next role_changed), refused (path names the refused file, such as
-    /// a failover's file that holds writes the server lacks), path_unreadable (path names the path
-    /// a backup rule could not read), and the others by their names.
+    /// role is unknown until the next role_changed), denied (path names the refused file, such as a
+    /// failover's file that holds writes the server lacks), path_unreadable (path names the path a
+    /// backup rule could not read), and the others by their names.
     #[serde(deserialize_with = "null_as_default")]
     pub r#type: EventType,
     /// The daemon's `message`.

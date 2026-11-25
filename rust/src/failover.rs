@@ -33,7 +33,7 @@ const ROLE_CONFIRMATION_LIMIT: Duration = Duration::from_secs(15);
 
 impl Role {
     /// `unknown`: a failover's role while its daemon does not answer, from a
-    /// draining or refused event until the role is read again, and once the
+    /// draining or denied event until the role is read again, and once the
     /// failover stopped or its client closed. The SDK sets it; the daemon
     /// never reports it.
     pub const UNKNOWN: Self = Self(std::borrow::Cow::Borrowed("unknown"));
@@ -71,7 +71,7 @@ pub enum FailoverNotice {
     /// server head when this machine starts as the origin, or one holding
     /// writes the new origin never saw when it lost the origin role. The
     /// message is the daemon's.
-    Refused(String),
+    Denied(String),
     /// Reading the daemon's events failed; the follower tries again. An
     /// expired cursor (`cursor_expired`) is reported too, and following
     /// resumes at the log's end after reading the role again.
@@ -287,7 +287,7 @@ struct FollowProgress {
 
 /// The role a status read reports: unknown while the daemon drains the
 /// origin, as after a draining event, and while the failover's file is
-/// refused (conflicted), as after a refused event.
+/// refused (conflicted), as after a denied event.
 fn status_role(status: &DatabaseStatus) -> Role {
     if status.draining == Some(true) || status.state == DatabaseState::CONFLICTED {
         return Role::UNKNOWN;
@@ -298,7 +298,7 @@ fn status_role(status: &DatabaseStatus) -> Role {
 /// Whether an event type sets a failover's role: `role_changed`, and
 /// `draining` and `refused`, which make it unknown.
 fn changes_role(event_type: &EventType) -> bool {
-    *event_type == EventType::ROLE_CHANGED || *event_type == EventType::DRAINING || *event_type == EventType::REFUSED
+    *event_type == EventType::ROLE_CHANGED || *event_type == EventType::DRAINING || *event_type == EventType::DENIED
 }
 
 /// Whether a read failed without an answer from the daemon: an error this
@@ -517,7 +517,7 @@ impl FailoverShared {
     /// the last role read changes no role, because that read holds it; a
     /// refusal among them is still reported.
     fn apply_event(&self, event: &Event, older_than_role_read: bool) {
-        if older_than_role_read && event.r#type != EventType::REFUSED {
+        if older_than_role_read && event.r#type != EventType::DENIED {
             return;
         }
         if event.r#type == EventType::ROLE_CHANGED {
@@ -530,11 +530,11 @@ impl FailoverShared {
             // the lock, so the app stops writing while no machine may take
             // over yet.
             self.change_role(Role::UNKNOWN);
-        } else if event.r#type == EventType::REFUSED {
+        } else if event.r#type == EventType::DENIED {
             if !older_than_role_read {
                 self.change_role(Role::UNKNOWN);
             }
-            self.notify(FailoverNotice::Refused(event.message.clone()));
+            self.notify(FailoverNotice::Denied(event.message.clone()));
         }
     }
 

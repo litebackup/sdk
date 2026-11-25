@@ -139,7 +139,7 @@ Every call sends `Litebackup-SDK-Version: <language>/<version>`, such as
 
 Connecting sends `GET /v1/status/show?limit=1`. When the answer's
 `Litebackup-Client-Version` is missing or older than the SDK's minimum
-daemon version (1.5.0), the connect fails with `daemon_unsupported`. The
+daemon version (1.6.0), the connect fails with `daemon_unsupported`. The
 message names both versions and how to replace the daemon: `litebackup drain
 --session <session>` stops it after a final sync, and the next call starts the
 new binary. A service that `litebackup install service` set up is restarted
@@ -194,7 +194,7 @@ only the first two; the SDKs set `unknown` themselves (Go `RoleUnknown`,
 TypeScript `FailoverRole`, Python and Ruby `"unknown"`, PHP
 `Failover::UNKNOWN`, Rust `Role::UNKNOWN`), and `IsOrigin()`, `isOrigin`,
 `is_origin`, `origin?`, PHP's `isOrigin()`, and Rust's `is_origin()` are
-false while it holds. A `refused` event newer than the
+false while it holds. A `denied` event newer than the
 last role read, and a role read whose state is `conflicted`, make it
 `unknown`: the daemon refused this machine's file, and the failover stays conflicted
 there until it is started again with `discard_local` or stopped.
@@ -207,7 +207,7 @@ there until it is started again with `discard_local` or stopped.
   is past the 15 s confirmation limit. Then it hears every change.
 - Rust has no callbacks: its follower reports to an ordered stream,
   `failover.notices()`, handed out once, whose items are
-  `FailoverNotice::Role`, `FailoverNotice::Refused`, and
+  `FailoverNotice::Role`, `FailoverNotice::Denied`, and
   `FailoverNotice::Error`, starting with the role the start answered. Notices
   are never merged, and dropping the stream does not stop following.
   `role()` reads the role with its confirmation time, so it reports

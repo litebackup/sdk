@@ -9,6 +9,7 @@ from typing import Literal, TypeAlias
 
 EventType: TypeAlias = Literal[
     "acquired",
+    "denied",
     "download_finished",
     "download_started",
     "draining",
@@ -18,7 +19,6 @@ EventType: TypeAlias = Literal[
     "offloaded",
     "path_unreadable",
     "rebased",
-    "refused",
     "released",
     "replicating",
     "restored",
@@ -30,7 +30,7 @@ EventType: TypeAlias = Literal[
     "tracked",
 ]
 """
-What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), refused (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
+What happened to a database: role_changed (role is origin or replica, and message is text), draining (a failover origin stops being the origin before a drain releases its lock: its role is unknown until the next role_changed), denied (path names the refused file, such as a failover's file that holds writes the server lacks), path_unreadable (path names the path a backup rule could not read), and the others by their names.
 """
 
 

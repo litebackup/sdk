@@ -9,7 +9,7 @@ Add the crate `litebackup` from crates.io, at the version of the
 
 ```toml
 [dependencies]
-litebackup = "1.5.0"
+litebackup = "1.6.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -60,7 +60,7 @@ this machine, so no other machine writes it, and keeps the lock until the
 pool releases it. With the `rusqlite` feature:
 
 ```toml
-litebackup = { version = "1.5.0", features = ["rusqlite"] }
+litebackup = { version = "1.6.0", features = ["rusqlite"] }
 ```
 
 ```rust
@@ -118,7 +118,7 @@ if failover.is_origin() {
 ```
 
 `notices()` is an ordered stream of the follower's notices:
-`FailoverNotice::Role`, `FailoverNotice::Refused`, and `FailoverNotice::Error`.
+`FailoverNotice::Role`, `FailoverNotice::Denied`, and `FailoverNotice::Error`.
 `role()` reports `Role::UNKNOWN` 15 s after the daemon last confirmed it,
 even if the follower stalls, so `is_origin()` never holds for a stale origin.
 

@@ -300,7 +300,7 @@ async fn error_fixtures_decode_the_daemons_answer() {
 }
 
 #[tokio::test]
-async fn version_fixtures_accept_or_refuse_the_daemon() {
+async fn version_fixtures_accept_or_deny_the_daemon() {
     for name in fixture_names("version") {
         let fixture = read_fixture("version", &name);
         let daemon = FakeDaemon::start(Vec::new());

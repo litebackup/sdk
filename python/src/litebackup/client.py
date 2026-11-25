@@ -137,7 +137,7 @@ class Litebackup:
             raise _closed_error()
 
     def connect(self) -> None:
-        """Connects, starting the daemon when needed; fails with daemon_unsupported for a daemon older than 1.5.0."""
+        """Connects, starting the daemon when needed; fails with daemon_unsupported for a daemon older than 1.6.0."""
         self._ensure_open()
         with self._connect_lock:
             if self._connected:
@@ -533,7 +533,7 @@ class Failovers(_Group):
         timeout: Duration | None = None,
         discard_local: bool = False,
         on_role_change: Callable[[str], None] | None = None,
-        on_refused: Callable[[str], None] | None = None,
+        on_denied: Callable[[str], None] | None = None,
         on_error: Callable[[LitebackupError], None] | None = None,
     ) -> Failover:
         """Runs the database at ``path``, the same on every machine; returns once this machine is the origin or holds a replica.
@@ -541,7 +541,7 @@ class Failovers(_Group):
         ``on_role_change`` is called once with the role the start answered, then with every change:
         ``"origin"``, ``"replica"``, or ``"unknown"`` when the daemon stops answering; once it answers
         again, the role is read and reported. ``is_origin`` is False while the role is unknown.
-        ``on_refused`` is called with the daemon's message when it refused this machine's file and the
+        ``on_denied`` is called with the daemon's message when it refused this machine's file and the
         failover stays conflicted there, leaving the file as it is: a file that differs from the server head when
         this machine starts as the origin, or one holding writes the new origin never saw when this
         machine lost the origin role. The database's state is conflicted, and the role is ``"unknown"``, except for a
@@ -554,7 +554,7 @@ class Failovers(_Group):
         end = client._call(_wire.events_page(after=-1))
         status = client._call(call)
         client._ensure_open()
-        failover = Failover(client, status, end.next, on_role_change=on_role_change, on_refused=on_refused, on_error=on_error)
+        failover = Failover(client, status, end.next, on_role_change=on_role_change, on_denied=on_denied, on_error=on_error)
         client._failovers.add(failover)
         return failover
 
@@ -611,7 +611,7 @@ class AsyncLitebackup:
             raise _closed_error()
 
     async def connect(self) -> None:
-        """Connects, starting the daemon when needed; fails with daemon_unsupported for a daemon older than 1.5.0."""
+        """Connects, starting the daemon when needed; fails with daemon_unsupported for a daemon older than 1.6.0."""
         self._ensure_open()
         if self._connect_lock is None:
             self._connect_lock = asyncio.Lock()
@@ -945,7 +945,7 @@ class AsyncFailovers(_AsyncGroup):
         timeout: Duration | None = None,
         discard_local: bool = False,
         on_role_change: Callable[[str], None] | None = None,
-        on_refused: Callable[[str], None] | None = None,
+        on_denied: Callable[[str], None] | None = None,
         on_error: Callable[[LitebackupError], None] | None = None,
     ) -> AsyncFailover:
         client = self._client
@@ -953,6 +953,6 @@ class AsyncFailovers(_AsyncGroup):
         end = await client._call(_wire.events_page(after=-1))
         status = await client._call(call)
         client._ensure_open()
-        failover = AsyncFailover(client, status, end.next, on_role_change=on_role_change, on_refused=on_refused, on_error=on_error)
+        failover = AsyncFailover(client, status, end.next, on_role_change=on_role_change, on_denied=on_denied, on_error=on_error)
         client._failovers.add(failover)
         return failover

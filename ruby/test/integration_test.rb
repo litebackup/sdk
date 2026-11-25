@@ -175,8 +175,8 @@ class IntegrationTest < Minitest::Test
     database.close
     assert_equal("main.db", rule.name)
     assert_equal(rule.id, web1.backups.start(main_path).id)
-    refused = assert_raises(Litebackup::Error) { web1.backups.start(main_path, maximum_local_databases: 4) }
-    assert_equal(["rule_exists", rule.id], [refused.code, refused.details["rule"]["id"]])
+    denied = assert_raises(Litebackup::Error) { web1.backups.start(main_path, maximum_local_databases: 4) }
+    assert_equal(["rule_exists", rule.id], [denied.code, denied.details["rule"]["id"]])
     web1.databases.sync(rule.name)
     add_items(main_path, 5)
     synced = web1.databases.sync(rule.name)
@@ -274,7 +274,7 @@ class IntegrationTest < Minitest::Test
   # The origin dies and the replica takes over within seconds of the 3 s
   # lease; the old origin comes back with writes the server lacks and is
   # refused, its file left as it is.
-  def test_fails_over_and_refuses_the_old_origins_diverged_file
+  def test_fails_over_and_denies_the_old_origins_diverged_file
     first = @server.connect("first")
     second = @server.connect("second")
     first_path = @server.path("first", "shared.db")
@@ -311,10 +311,10 @@ class IntegrationTest < Minitest::Test
       raise unless e.code == "conflict"
     end
     eventually(60) do
-      refused = restarted.events.page(limit: 10_000).events.find do |event|
-        event.type == "refused" && event.name == "shared.db" && event.path == first_path
+      denied = restarted.events.page(limit: 10_000).events.find do |event|
+        event.type == "denied" && event.name == "shared.db" && event.path == first_path
       end
-      refute_nil(refused, "no refused event naming the file yet")
+      refute_nil(denied, "no denied event naming the file yet")
     end
     assert_equal(8, count_items(first_path))
     assert(second_failover.origin?)

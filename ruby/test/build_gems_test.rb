@@ -124,7 +124,7 @@ class BuildGemsTest < Minitest::Test
     refute_path_exists("out")
   end
 
-  def test_a_release_version_unlike_the_gems_is_refused
+  def test_a_release_version_unlike_the_gems_is_denied
     metadata, keys = signed_release(stand_in_binaries, version: "0.3.30")
     error = assert_raises(GemBuild::BuildError) { build(keys, metadata, version: "0.3.30") }
     assert_includes(error.message, "every release is lockstep")
@@ -157,7 +157,7 @@ class BuildGemsTest < Minitest::Test
     refute_path_exists("out")
   end
 
-  def test_the_command_refuses_the_real_release_without_its_binaries
+  def test_the_command_denies_the_real_release_without_its_binaries
     output, status = Open3.capture2e(RbConfig.ruby, SCRIPT, "--version", "0.3.30", "--output", "out",
                                      @working_directory, File.join(METADATA, "package-metadata.json"))
     assert_equal(1, status.exitstatus, output)

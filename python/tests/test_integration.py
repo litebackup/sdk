@@ -141,9 +141,9 @@ def test_backup_restore_and_idempotent_registration(server: DevelopmentServer) -
     with Litebackup(session=session, api_key=token, environment=server.environment) as litebackup:
         rule = litebackup.backups.start(sqlite3_support.database_path(connection))
         assert litebackup.backups.start(path).id == rule.id
-        with pytest.raises(LitebackupError) as refused:
+        with pytest.raises(LitebackupError) as denied:
             litebackup.backups.start(path, maximum_local_databases=4)
-        assert refused.value.code == ErrorCode.RULE_EXISTS and refused.value.details["rule"]["id"] == rule.id
+        assert denied.value.code == ErrorCode.RULE_EXISTS and denied.value.details["rule"]["id"] == rule.id
         status = litebackup.databases.sync(rule.name)
         assert status.synced_server.version > 0
         versions = litebackup.databases.versions(rule.name)

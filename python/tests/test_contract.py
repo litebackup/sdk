@@ -185,7 +185,7 @@ def daemons() -> Iterator[list[ContractDaemon]]:
         daemon.close()
 
 
-def start_daemon(daemons: list[ContractDaemon], reply: Callable[[Received], Reply], client_version: str | None = "1.5.0") -> ContractDaemon:
+def start_daemon(daemons: list[ContractDaemon], reply: Callable[[Received], Reply], client_version: str | None = "1.6.0") -> ContractDaemon:
     daemon = ContractDaemon(reply, client_version)
     daemons.append(daemon)
     return daemon

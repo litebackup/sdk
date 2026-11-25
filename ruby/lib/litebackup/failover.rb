@@ -23,8 +23,8 @@ module Litebackup
     EVENT_PAGE = 1000
     ROLE_CHANGED = Models::EventType::ROLE_CHANGED
     DRAINING = Models::EventType::DRAINING
-    REFUSED = Models::EventType::REFUSED
-    ROLE_EVENT_TYPES = [ROLE_CHANGED, DRAINING, REFUSED].freeze
+    DENIED = Models::EventType::DENIED
+    ROLE_EVENT_TYPES = [ROLE_CHANGED, DRAINING, DENIED].freeze
     # Error codes the event reading never retries: they end following. An
     # expired cursor is not one: a failover resumes at the log's end.
     FATAL_ERROR_CODES = [
@@ -68,7 +68,7 @@ module Litebackup
     # What the daemon answered when the failover started.
     attr_reader :status, :name, :path
 
-    def initialize(client, status, cursor, on_role_change: nil, on_refused: nil, on_error: nil)
+    def initialize(client, status, cursor, on_role_change: nil, on_denied: nil, on_error: nil)
       @client = client
       @status = status
       @name = status.name
@@ -78,7 +78,7 @@ module Litebackup
       @event_wait = Failover.event_wait_seconds
       @confirmation_limit = Failover.confirmation_limit_seconds
       @on_role_change = on_role_change
-      @on_refused = on_refused
+      @on_denied = on_denied
       @on_error = on_error
       @stopped = false
       @owner_pid = Process.pid
@@ -160,7 +160,7 @@ module Litebackup
 
     # The role a status read reports: unknown while the daemon drains the
     # origin, as after a draining event, and while the failover's file is
-    # refused (conflicted), as after a refused event.
+    # refused (conflicted), as after a denied event.
     def status_role(database)
       database.draining == true || database.state == Wire::STATE_CONFLICTED ? UNKNOWN : database.role
     end
@@ -189,7 +189,7 @@ module Litebackup
         # An event older than the last role read changes no role, because
         # that read has it; a refusal among them is still reported.
         older_than_role_read = role_event?(event.type) && event.id <= progress.role_read_log_end
-        return if older_than_role_read && event.type != REFUSED
+        return if older_than_role_read && event.type != DENIED
 
         case event.type
         when ROLE_CHANGED
@@ -199,12 +199,12 @@ module Litebackup
           # the lock, so the app stops writing while no machine is allowed to
           # take over yet.
           change_role(UNKNOWN)
-        when REFUSED
+        when DENIED
           # The daemon refused this machine's file and the failover stays
           # conflicted there: this machine neither writes nor follows the database.
           change_role(UNKNOWN) unless older_than_role_read
           # The role callback could have stopped the failover.
-          @on_refused.call(event.message) if !@stopped && !@on_refused.nil?
+          @on_denied.call(event.message) if !@stopped && !@on_denied.nil?
         end
       end
     end

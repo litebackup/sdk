@@ -266,7 +266,7 @@ def test_sqlalchemy_engine_path_leaves_open_transactions_alone(cwd: str) -> None
             engine.dispose()
 
 
-def test_sqlalchemy_refuses_memory_and_foreign_backends() -> None:
+def test_sqlalchemy_denies_memory_and_foreign_backends() -> None:
     for url in (
         "sqlite://",
         "sqlite:///:memory:",

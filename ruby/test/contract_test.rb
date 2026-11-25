@@ -130,7 +130,7 @@ module ContractDaemons
     super
   end
 
-  def start_daemon(client_version: "1.5.0", &reply)
+  def start_daemon(client_version: "1.6.0", &reply)
     daemon = ContractDaemon.new(client_version: client_version, &reply)
     @daemons << daemon
     daemon
