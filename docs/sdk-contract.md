@@ -1,12 +1,13 @@
 # SDK contract
 
-The Go, TypeScript, and Python SDKs are three spellings of one client. This
-page is the behavior they share; `testdata/contract/` holds the fixtures each
-SDK's test suite runs, so a change here is a change to every SDK at once.
+The Go, TypeScript, Python, Ruby, PHP, and Rust SDKs are six spellings of one client.
+This page is the behavior they share; `testdata/contract/` holds the fixtures
+each SDK's test suite runs, so a change here is a change to every SDK at once.
 
 The wire protocol is `client-openapi.yaml`. Wire names are snake_case and are
-never renamed on the wire. TypeScript returns camelCase keys, Go uses its own
-field names, and Python keeps the wire names.
+never renamed on the wire. TypeScript and PHP return camelCase keys and
+properties, Go uses its own field names, and Python, Ruby, and Rust keep the
+wire names (Rust writes `type` as `r#type`).
 
 ## Fixtures
 
@@ -16,8 +17,8 @@ field names, and Python keeps the wire names.
 | `errors/` | a daemon answer and the error the SDK raises from it | every SDK |
 | `version/` | the daemon version a connect sees and whether the SDK accepts it | every SDK |
 | `pagination/`, `events/` | request and answer exchanges, and the items an iterator yields | every SDK |
-| `lifecycle/` | a pool lease scenario: which steps fail, the daemon calls, and the errors the lease and closing the pool raise | every SDK |
-| `binary/` | platforms and their npm package, release file, and wheel platform | TypeScript, Python, wheel builds |
+| `lifecycle/` | a pool lease scenario: which steps fail, the daemon calls, and the errors the lease and closing the pool raise | every SDK; those with `cancel` only against async clients, Rust's included |
+| `binary/` | platforms and their npm package, release file, wheel platform, and gem platforms | TypeScript, Python, Ruby, wheel and gem builds; PHP and Rust bundle no binary |
 | `credentials/` | a `LITEBACKUP_API_KEY` value and whether it is an API key, a join token, none, or refused | every SDK |
 
 Arguments in fixtures are snake_case and language-neutral:
@@ -27,19 +28,22 @@ Arguments in fixtures are snake_case and language-neutral:
 - `"{umask}"`, the whole string with its quotes, is the test process's file
   mode creation mask as a JSON number, such as `18` for 022.
 - `{"$path": "data/main.sqlite"}` is the language's path type: a `pathlib.Path`
-  in Python, a `file:` URL in TypeScript (made absolute against `{cwd}`), and a
-  plain string in Go.
+  in Python, a `Pathname` in Ruby, an `SplFileInfo` in PHP, a `file:` URL in
+  TypeScript (made absolute against `{cwd}`), a plain string in Go, and a
+  `PathBuf` in Rust, whose calls take `impl AsRef<Path>`.
 - Durations are strings such as `"1500ms"`, `"90s"`, or `"2m"`. Times are RFC 3339
   strings. Each runner converts them to `time.Duration`/`time.Time`, a `Duration`
-  string/`Date`, or `timedelta`/`datetime`.
+  string/`Date`, `timedelta`/`datetime`, `Numeric` seconds/`Time`,
+  `int|float` seconds/`DateTimeImmutable`, or
+  `std::time::Duration`/`jiff::Timestamp`.
 - `offload_on_release` on acquire is `OffloadOnRelease` in Go, a bool.
   `offload_durability` on acquire and on a backup start is
   `OffloadDurability` in Go, a `Durability`, and `durability` on offload is
   `OffloadArgs.Durability`.
-- `names/sdk-names.json` lists each operation's name in the three SDKs
-  and the types all three export under one name; each SDK's tests check
-  their own names against it, and the Go tests check that every fixture's
-  operation is listed.
+- `names/sdk-names.json` lists each operation's name in every SDK, Ruby
+  spelling them as Python does and PHP as TypeScript does, and the types every SDK exports under one
+  name; each SDK's tests check their own names against it, and the Go tests
+  check that every fixture's operation is listed.
 
 A request's `query` compares as a map of strings regardless of order. Its
 `body` compares as JSON: a field absent from the fixture must be absent from
@@ -52,8 +56,9 @@ operation's own requests.
 
 - **Paths.** Every local path is sent absolute and cleaned: a relative path
   resolves against the working directory when the call is made, and `..`
-  segments are removed. Python accepts `os.PathLike`, and TypeScript accepts
-  `file:` URLs.
+  segments are removed. Python accepts `os.PathLike`, Ruby anything with
+  `to_path`, PHP a string, an `SplFileInfo`, or any `Stringable`, Rust
+  anything that is `AsRef<Path>`, and TypeScript accepts `file:` URLs.
 - **Defaults are omitted.** An option left out, or set to the daemon's
   default (`maintenance: false`, `offload_on_release: false`, `offload: false`,
   `offload_durability: "server"`, a zero duration), is not
@@ -66,8 +71,8 @@ operation's own requests.
   when the call is made, unless the `umask` option gives one; `0` is sent
   like any other value. On Linux it reads the `Umask` line of
   `/proc/self/status`, which leaves the mask alone; elsewhere, as on
-  macOS, it sets the mask and puts it back at once (Go and Python under a
-  lock, Node in `process.umask()`), so a file another thread creates in that
+  macOS, it sets the mask and puts it back at once (Go, Python, and Rust
+  under a lock, Node in `process.umask()`, PHP in a request without threads), so a file another thread creates in that
   moment could get the mask 0. A umask outside 0 to 0777 is
   `invalid_argument`.
 - **Durations.** A server-side `timeout` is sent as `timeout_millis`, in whole
@@ -86,7 +91,11 @@ operation's own requests.
 
 Every failure is one error type with four fields: `code`, `message`,
 `status`, and `details`. Go has `*litebackup.Error`, TypeScript has
-`LitebackupError`, and Python has `litebackup.LitebackupError`.
+`LitebackupError`, Python has `litebackup.LitebackupError`, Ruby has
+`Litebackup::Error`, PHP has `Litebackup\LitebackupError`, whose code is
+`$error->errorCode` because PHP's `Exception::getCode()` is final and an
+integer, and Rust has `litebackup::Error`, whose fields are the methods
+`error.code()`, `message()`, `status()`, and `details()`.
 
 Decoding a non-200 answer:
 
@@ -124,7 +133,8 @@ client as the server sees it (`client_unsupported`).
 ## Version negotiation
 
 Every call sends `Litebackup-SDK-Version: <language>/<version>`, such as
-`go/1.1.0`, `typescript/1.1.0`, or `python/1.1.0`. Every answer carries
+`go/1.1.0`, `typescript/1.1.0`, `python/1.1.0`, `ruby/1.1.0`, `php/1.1.0`, or
+`rust/1.2.0`. Every answer carries
 `Litebackup-Client-Version`, the daemon's version, which the client records.
 
 Connecting sends `GET /v1/status/show?limit=1`. When the answer's
@@ -149,7 +159,15 @@ part and ignores any `-suffix`.
   release may still release it. In async Python, cancelling the task raises
   `asyncio.CancelledError` unchanged, as asyncio code expects; the sync Python
   client has no cancellation, so the lifecycle fixtures with `cancel` run
-  only against the async client.
+  only against async clients. Ruby and PHP have no async client, so their
+  runners skip them, as the sync Python client does.
+- Rust calls are async, and dropping any call's future stops its wait, with
+  no error, as the daemon may still finish the operation. A pool lease also
+  takes a `CancellationToken` in `LeaseOptions::cancellation`, which gives
+  `cancelled` exactly as a TypeScript signal does, so the Rust runner runs
+  the lifecycle fixtures with `cancel`. A dropped lease future counts as a
+  cancelled call: the pool keeps its lease, and the release that ends it
+  offloads nothing.
 - When a client-side deadline passes before the daemon answers, the error is
   `timeout` with status 0, and its message says the daemon may still finish.
 
@@ -173,8 +191,10 @@ session's launch lock, so one daemon starts.
 
 A failover's role is `origin`, `replica`, or `unknown`. The daemon reports
 only the first two; the SDKs set `unknown` themselves (Go `RoleUnknown`,
-TypeScript `FailoverRole`, Python `"unknown"`), and `IsOrigin()`, `isOrigin`,
-and `is_origin` are false while it holds. A `refused` event newer than the
+TypeScript `FailoverRole`, Python and Ruby `"unknown"`, PHP
+`Failover::UNKNOWN`, Rust `Role::UNKNOWN`), and `IsOrigin()`, `isOrigin`,
+`is_origin`, `origin?`, PHP's `isOrigin()`, and Rust's `is_origin()` are
+false while it holds. A `refused` event newer than the
 last role read, and a role read whose state is `conflicted`, make it
 `unknown`: the daemon refused this machine's file, and the failover stays conflicted
 there until it is started again with `discard_local` or stopped.
@@ -182,8 +202,16 @@ there until it is started again with `discard_local` or stopped.
 - The role callback (`OnRoleChange`, `on_role_change`, the TypeScript
   `origin`, `replica`, and `unknown` listeners) first hears the role the
   start answered, once, on the follower: TypeScript on the next turn of the
-  event loop, Go and sync Python possibly before the start returns. Then it
-  hears every change.
+  event loop, Go, sync Python, and Ruby possibly before the start returns, and
+  PHP in its first `follow()`, which reports `unknown` instead when that role
+  is past the 15 s confirmation limit. Then it hears every change.
+- Rust has no callbacks: its follower reports to an ordered stream,
+  `failover.notices()`, handed out once, whose items are
+  `FailoverNotice::Role`, `FailoverNotice::Refused`, and
+  `FailoverNotice::Error`, starting with the role the start answered. Notices
+  are never merged, and dropping the stream does not stop following.
+  `role()` reads the role with its confirmation time, so it reports
+  `unknown` 15 s after the last confirmation even if the follower stalls.
 - A failover long-poll waits 10 s. The role is confirmed whenever the daemon
   answers a long-poll or a role read. Every follower read has a client-side
   deadline 15 s after the last confirmation (after the read's start once the
@@ -196,6 +224,13 @@ there until it is started again with `discard_local` or stopped.
   heartbeat interval, a quarter of the default 60 s session lease another
   machine waits out before it takes over. `sdk_unsupported` and `closed`
   end following and make the role `unknown` too.
+- PHP has no threads, so a PHP failover is followed only inside
+  `follow(seconds)`, which reads in the calling process and runs the
+  callbacks there. Outside it nothing confirms the role, so `role()` reports
+  the last confirmed role only for 15 s after its confirmation and `unknown`
+  after that: a process that does not follow never reports a stale origin. A
+  `follow()` that starts more than 15 s after the last confirmation reads the
+  log's end and the role, as after an unknown role, before it trusts origin.
 - Once the role is `unknown`, the follower reads the log's end
   (`after: -1`), then the database's role, then the log's end again and,
   without waiting, the events up to that second end, however many pages,
@@ -225,8 +260,12 @@ When nothing listens on the session socket, the SDK starts the daemon with
 
 1. the explicit override: the client option (`BinaryPath`, `binaryPath`,
    `binary_path`), then `LITEBACKUP_PATH`;
-2. the bundled binary: the npm platform package or the wheel's
-   `litebackup/_bin/litebackup` (Go bundles none);
+2. the bundled binary: the npm platform package, the wheel's
+   `litebackup/_bin/litebackup`, or the platform gem's
+   `lib/litebackup/bin/litebackup`, which is no gem executable, so installing
+   it puts no `litebackup` command on `PATH` (Go, PHP, and Rust bundle none:
+   Composer has no platform packages, and the binary is over the crates.io
+   size limit);
 3. the installed command: `litebackup` on `PATH`, then `~/.local/bin/litebackup`.
 
 When none exists, the error is `binary_not_found` with the install command.
@@ -242,7 +281,7 @@ runtime.
 
 A machine has one credential: `LITEBACKUP_API_KEY`, or the client option
 (`APIKey`, `apiKey`, `api_key`), which overrides it. An empty option is no
-credential in TypeScript and Python, whatever the variable holds; Go reads the
+credential in TypeScript, Python, Ruby, PHP, and Rust, whatever the variable holds; Go reads the
 variable when `APIKey` is empty. Its value is an API key
 or a join token, then `@` and the server's address
 (`litebackup_join_...@your-instance.litebackup.cloud`). The SDK tells the two
@@ -265,7 +304,9 @@ backups as `LITEBACKUP_API_KEY`. The daemon decides when it starts:
   one, unless the client holds a write lock: then the launch refuses it with
   `drain_required` before it sends or saves anything, and the SDK raises
   that code (`CodeDrainRequired`, `ErrorCode.drainRequired`,
-  `ErrorCode.DRAIN_REQUIRED`) with the launch command's message. A shutdown
+  `ErrorCode.DRAIN_REQUIRED`, `Litebackup::ErrorCode::DRAIN_REQUIRED`,
+  `Litebackup\ErrorCode::DRAIN_REQUIRED`, `litebackup::ErrorCode::DRAIN_REQUIRED`)
+  with the launch command's message. A shutdown
   with the current credential releases the locks first.
 
 A daemon that is already running keeps its key until it restarts. A
@@ -326,8 +367,9 @@ machine no longer holds it. A fixture's `expect.raised` are the lease call's err
   returns once the server, or the bucket, holds the version. The release that
   ends the lease waits for it too, `server` when omitted.
 - `offload` defaults to false, and the release requests it only when the last
-  call succeeded. A failed or cancelled call keeps the lease and its local
-  copy. A call counts as cancelled when the caller's signal, context, or task
+  call succeeded: its work returned and, with `durability`, its sync and wait
+  for that durability finished. A failed or cancelled call, a failed
+  durability wait included, keeps the lease and its local copy. A call counts as cancelled when the caller's signal, context, task, or Rust token
   was cancelled by the time the work returns, even if the work returned
   normally; the lease then raises `cancelled` (in async Python, the
   `CancelledError`).
@@ -339,6 +381,23 @@ machine no longer holds it. A fixture's `expect.raised` are the lease call's err
   `lock_lost` without running its work, and the call after it acquires again.
 - Built-in adapters roll back unfinished transactions and never commit. Work
   that wants its changes kept commits them.
+- PHP has no threads, so its idle close and idle release are cooperative:
+  they run at the start of each pool call and in `close()`, and an idle
+  worker that makes no call keeps its lease until it calls, closes, or exits.
+  Under PHP-FPM a pool lasts its request. `exit` and an execution-time fatal
+  error skip `finally`, so a PHP pool marks a lease call unfinished before
+  its work runs and finished only after its work and durability wait, and a
+  shutdown function releases a lease whose call never finished without
+  offload. SIGTERM and SIGKILL run no shutdown function, and the daemon keeps
+  renewing its session, so a lease such a process held stays acquired until
+  `litebackup release NAME`, a release from another process, or a session
+  shutdown ends it. PDO has no `close()`: the PDO adapter checks that
+  nothing else holds the connection, and a statement or variable that does
+  makes the close fail, so the lease is not released.
+  After an execution-time fatal error the shutdown function runs with the
+  work's frame still holding its PDO connection, so that close fails and the
+  lease stays acquired too; the SQLite3 adapter closes its database itself
+  and releases.
 
 Failures:
 
@@ -347,6 +406,7 @@ Failures:
 | acquire | acquire | the acquire error | nothing |
 | open | acquire, open, release without offload | the open error, grouped with the release's `lease_cleanup_failed` if the release failed too | the release again, if it failed |
 | work | acquire, open, work; close, release without offload | the work error | a cleanup failure, if there was one |
+| sync | acquire, open, work, sync; close, release without offload | the sync error | a cleanup failure, if there was one |
 | close | acquire, open, work, close; **no release** | nothing | `lease_cleanup_failed` for the close |
 | release | acquire, open, work, close, release | nothing | `lease_cleanup_failed` for the release |
 
@@ -360,9 +420,15 @@ details are `{step: "release", name, path, durability}`. Each
 
 When more than one error is raised, the first is the one that ended the work
 (the open or work error) and the rest follow in step order: Go returns
-`errors.Join(...)`, TypeScript throws an `AggregateError`, and Python raises an
-`ExceptionGroup`. A call with one error raises that error alone.
+`errors.Join(...)`, TypeScript throws an `AggregateError`, Python raises an
+`ExceptionGroup`, and Ruby and PHP, which have none, raise a
+`Litebackup::ErrorGroup` and a `Litebackup\ErrorGroup` whose `errors` hold
+them. Rust names each case: an open error grouped with its release is
+`LeaseError::Open { error, release_failure }`, and closing the pool fails
+with a `PoolCloseError { errors }`. A call with one error raises that error alone.
 
 A fixture may carry `skip: {language: reason}` where a language's conventions
 differ: Go's zero values mean defaults, so a Go `Limit` or `CleanupTimeout` of
-0 cannot mean zero.
+0 cannot mean zero. Rust's `Duration` and `u32` umask cannot be negative, so
+`requests/acquire-negative-timeout.json` and
+`requests/restore-umask-negative.json` carry `skip.rust`.

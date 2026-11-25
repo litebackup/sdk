@@ -8,5 +8,8 @@
   },
   "error": {
     "code": "invalid_argument"
+  },
+  "skip": {
+    "rust": "Rust's umask is a u32, so the type rules out a negative one"
   }
 }

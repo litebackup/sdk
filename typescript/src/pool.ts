@@ -481,11 +481,13 @@ export class Pool<DB> {
       workFailed = true;
       workError = new LitebackupError(ErrorCode.cancelled, `the lease of ${entry.name} was cancelled while its work ran`, 0, { cause: options.signal.reason });
     }
-    entry.lastCallFailed = workFailed;
+    // The call counts as failed until its work and its durability wait both finished.
+    entry.lastCallFailed = true;
     if (workFailed) throw workError;
     if (options.durability) {
       await this.#waitDurable(entry.name, options.durability, options.signal);
     }
+    entry.lastCallFailed = false;
     return returned as T;
   }
 

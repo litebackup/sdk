@@ -1,0 +1,23 @@
+# cargo-deny's checks of the crate's dependency graph: advisories, licenses,
+# bans, and sources. scripts/test runs `cargo deny check` on stable.
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+# Licenses that let a closed-source app ship the crate.
+allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "Unicode-3.0", "Zlib"]
+confidence-threshold = 0.9
+
+[bans]
+# Two versions of one crate are allowed, and listed, rather than refused:
+# hyper's and tokio's ecosystems release on their own schedules.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

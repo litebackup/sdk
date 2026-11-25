@@ -1,0 +1,53 @@
+#!/bin/bash
+# Run a Ruby script of the SDK in the pinned Ruby 3.4 test image, as the
+# calling user, with the gem and its development gems loaded, for tests that
+# run Ruby steps from another language's suite (LITEBACKUP_RUBY in
+# sdk/python/tests/test_integration.py).
+#
+# Usage: scripts/ruby-in-docker SCRIPT [ARGUMENT...]
+#
+# The container uses the host's network, so its daemon reaches a server on
+# localhost. It mounts the SDK, LITEBACKUP_PATH (a static litebackup binary
+# from scripts/build, whose daemon runs in the container), and the test's
+# temporary tree, the directory holding XDG_RUNTIME_DIR, at the same paths,
+# and receives the test's LITEBACKUP_ and XDG_ variables and HOME.
+set -o errexit
+set -o nounset
+set -o pipefail
+
+GEM_DIRECTORY="$(cd "$(dirname "${0}")/.." && pwd)"
+SDK_DIRECTORY="$(dirname "${GEM_DIRECTORY}")"
+RUBY_VERSION=3.4.13
+RUBY_CACHE="${HOME}/.cache/litebackup-ruby/${RUBY_VERSION}"
+: "${LITEBACKUP_PATH:?set LITEBACKUP_PATH to a static litebackup binary}"
+: "${XDG_RUNTIME_DIR:?set XDG_RUNTIME_DIR inside the temporary tree of the test}"
+TEST_DIRECTORY="$(dirname "${XDG_RUNTIME_DIR}")"
+
+docker build --quiet \
+    --build-arg "RUBY_IMAGE=ruby:${RUBY_VERSION}-slim" \
+    --tag "litebackup-ruby-test:${RUBY_VERSION}" \
+    --file "${GEM_DIRECTORY}/test/Dockerfile" \
+    "${GEM_DIRECTORY}/test" >/dev/null
+mkdir --parents "${RUBY_CACHE}/bundle" "${RUBY_CACHE}/home"
+FORWARDED_VARIABLES=()
+for VARIABLE in LITEBACKUP_API_KEY LITEBACKUP_SESSION LITEBACKUP_PATH XDG_RUNTIME_DIR XDG_STATE_HOME \
+    XDG_CONFIG_HOME HOME; do
+    if [ -n "${!VARIABLE+set}" ]; then
+        FORWARDED_VARIABLES+=(--env "${VARIABLE}")
+    fi
+done
+exec docker run --rm \
+    --network host \
+    --user "$(id --user):$(id --group)" \
+    --volume "${SDK_DIRECTORY}:${SDK_DIRECTORY}" \
+    --volume "${LITEBACKUP_PATH}:${LITEBACKUP_PATH}:ro" \
+    --volume "${TEST_DIRECTORY}:${TEST_DIRECTORY}" \
+    --volume "${RUBY_CACHE}/bundle:/bundle" \
+    --volume "${RUBY_CACHE}/home:/tmp/bundler-home" \
+    "${FORWARDED_VARIABLES[@]}" \
+    --env BUNDLE_PATH=/bundle \
+    --env BUNDLE_APP_CONFIG=/tmp/bundler-home/.bundle \
+    --env "BUNDLE_GEMFILE=${GEM_DIRECTORY}/Gemfile" \
+    --workdir "${GEM_DIRECTORY}" \
+    "litebackup-ruby-test:${RUBY_VERSION}" \
+    bundle exec ruby -Ilib "${@}"

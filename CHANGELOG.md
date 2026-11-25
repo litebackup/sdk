@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0
+
+The Ruby, PHP, and Rust SDKs join TypeScript, Python, and Go, at 1.3.0 with
+the litebackup client 1.3.0, and work with a client 1.1.0 or later. The Ruby
+gem is on RubyGems, with platform gems that carry the client for Linux and
+macOS; the PHP package `litebackup/sdk` is on Packagist; and the `litebackup`
+crate is on crates.io, needing Rust 1.94 or later. The PHP package and the
+crate bundle no client: they find it through `LITEBACKUP_PATH`, `PATH`, or
+`~/.local/bin`. The TypeScript, Python, and Go SDKs have no changes.
+
 ## 1.2.0
 
 No changes to the SDKs. They are published at 1.2.0 with the litebackup client

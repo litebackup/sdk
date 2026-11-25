@@ -1,5 +1,5 @@
 {
-  "description": "Each supported platform: the npm package and release file that carry its binary, and its wheel platform tags. A static Linux binary gets both tags; a dynamic one gets manylinux_<glibc>. macOS tags use the binary's minimum OS from LC_BUILD_VERSION.",
+  "description": "Each supported platform: the npm package and release file that carry its binary, its wheel platform tags, and its gem platforms. A static Linux binary gets both wheel tags and both gem platforms, -gnu and -musl, because RubyGems tells glibc and musl apart; a dynamic one gets manylinux_<glibc> and no gem. macOS wheel tags use the binary's minimum OS from LC_BUILD_VERSION.",
   "platforms": [
     {
       "os": "linux",
@@ -11,6 +11,10 @@
       "static_wheel_platforms": [
         "manylinux_2_17_x86_64",
         "musllinux_1_2_x86_64"
+      ],
+      "gem_platforms": [
+        "x86_64-linux-gnu",
+        "x86_64-linux-musl"
       ]
     },
     {
@@ -23,6 +27,10 @@
       "static_wheel_platforms": [
         "manylinux_2_17_aarch64",
         "musllinux_1_2_aarch64"
+      ],
+      "gem_platforms": [
+        "aarch64-linux-gnu",
+        "aarch64-linux-musl"
       ]
     },
     {
@@ -32,7 +40,10 @@
       "machine": "x86_64",
       "npm_package": "@litebackup/bin-darwin-x64",
       "release_file": "litebackup-darwin-amd64",
-      "wheel_platform": "macosx_{major}_{minor}_x86_64"
+      "wheel_platform": "macosx_{major}_{minor}_x86_64",
+      "gem_platforms": [
+        "x86_64-darwin"
+      ]
     },
     {
       "os": "darwin",
@@ -41,7 +52,10 @@
       "machine": "arm64",
       "npm_package": "@litebackup/bin-darwin-arm64",
       "release_file": "litebackup-darwin-arm64",
-      "wheel_platform": "macosx_{major}_{minor}_arm64"
+      "wheel_platform": "macosx_{major}_{minor}_arm64",
+      "gem_platforms": [
+        "arm64-darwin"
+      ]
     }
   ]
 }

@@ -1,0 +1,60 @@
+{
+  "description": "A durability wait that fails is an unfinished call: the lease raises the sync error and keeps its copy, and closing the pool releases it without the offload the lease asked for.",
+  "fail": [
+    "sync"
+  ],
+  "acquire_response": {
+    "database": {
+      "name": "agents/42.sqlite",
+      "path": "{cwd}/agents/42.sqlite",
+      "role": "origin",
+      "state": "syncing",
+      "acquired": true,
+      "failover": false,
+      "local_changed": false,
+      "synced_server": {
+        "version": 3
+      },
+      "synced_cloud": {
+        "version": 2
+      },
+      "journal_mode": "wal",
+      "page_count": 2,
+      "sync_count": 3,
+      "hint_misses": 0
+    },
+    "decision": "created"
+  },
+  "expect": {
+    "steps": [
+      "acquire",
+      "open",
+      "work",
+      "sync",
+      "close",
+      "release"
+    ],
+    "acquire_body": {
+      "name": "agents/42.sqlite",
+      "path": "{cwd}/agents/42.sqlite",
+      "umask": "{umask}"
+    },
+    "release_body": {
+      "name": "agents/42.sqlite",
+      "durability": "server",
+      "timeout_millis": 600000
+    },
+    "raised": [
+      {
+        "code": "unavailable"
+      }
+    ],
+    "close_raised": []
+  },
+  "lease": {
+    "name": "agents/42.sqlite",
+    "path": "agents/42.sqlite",
+    "durability": "server",
+    "offload": true
+  }
+}

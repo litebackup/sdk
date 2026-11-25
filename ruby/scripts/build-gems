@@ -1,0 +1,190 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Builds the litebackup gems from a verified litebackup release.
+#
+# Usage: scripts/build-gems [--version VERSION] [--output DIRECTORY] RELEASE-DIRECTORY METADATA-JSON
+#
+# RELEASE-DIRECTORY holds the cli release's files under their published
+# names (litebackup-linux-amd64, ...), and METADATA-JSON is the package
+# metadata https://litebackup.com/pkg/metadata serves. The release comes from
+# its signed document, which must verify with Litebackup's release keys, and
+# every binary must match its signed SHA-256 and size, and be the static
+# Linux or the macOS binary of its platform, before any gem is built.
+#
+# It builds the plain ruby gem, which carries no binary and uses the
+# installed litebackup command, and one gem per platform in each platform's
+# gem_platforms (testdata/contract/binary/platforms.json), with the binary at
+# lib/litebackup/bin/litebackup. VERSION is the gem's version unless given;
+# the gem, the signed release, and the binaries share one version.
+
+require "digest"
+require "fileutils"
+require "json"
+require "optparse"
+require "rubygems/package"
+require "tmpdir"
+
+GEM_ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(GEM_ROOT, "lib"))
+require "litebackup"
+
+# Building the gems; scripts/build-gems runs it, and the build test calls it
+# with a release signed by a test key.
+module GemBuild
+  PLATFORMS = File.join(GEM_ROOT, "..", "testdata", "contract", "binary", "platforms.json")
+  ELF_MACHINES = { "x86_64" => 62, "aarch64" => 183 }.freeze
+  MACHO_CPUS = { "x86_64" => 0x01000007, "arm64" => 0x0100000C }.freeze
+  # PT_INTERP names a dynamic binary's loader.
+  PT_INTERP = 3
+
+  # A build that stops, with what to fix.
+  class BuildError < StandardError; end
+
+  module_function
+
+  # Refuses a Linux binary that is not a static 64-bit little-endian ELF
+  # binary of machine: a dynamic one carries no musl or glibc gem.
+  def check_elf(content, machine)
+    unless content.byteslice(0, 4) == "\x7fELF".b && content.getbyte(4) == 2 && content.getbyte(5) == 1
+      raise BuildError, "expected a 64-bit little-endian ELF binary"
+    end
+
+    elf_machine = content.unpack1("v", offset: 18)
+    unless elf_machine == ELF_MACHINES.fetch(machine)
+      raise BuildError,
+            "the binary is for ELF machine #{elf_machine}, not #{machine}"
+    end
+
+    program_offset = content.unpack1("Q<", offset: 32)
+    program_size, program_count = content.unpack("vv", offset: 54)
+    segments = Array.new(program_count) do |index|
+      content.unpack1("V", offset: program_offset + (index * program_size))
+    end
+    return unless segments.include?(PT_INTERP)
+
+    raise BuildError,
+          "the binary is dynamic; gems carry the static binaries scripts/build makes"
+  end
+
+  # Refuses a macOS binary that is not a 64-bit Mach-O binary of machine.
+  def check_macho(content, machine)
+    magic, cpu = content.unpack("Vl<")
+    raise BuildError, "expected a 64-bit Mach-O binary" unless magic == 0xFEEDFACF
+    return if cpu == MACHO_CPUS.fetch(machine)
+
+    raise BuildError, "the binary is for Mach-O CPU #{format("%#x", cpu)}, not #{machine}"
+  end
+
+  # The VERSION the gem's code reports, read as text, as the gemspec reads it.
+  def runtime_version
+    File.read(File.join(GEM_ROOT, "lib", "litebackup", "version.rb"))[/^  VERSION = "(.+)"$/, 1]
+  end
+
+  # Refuses a release other than the gem's own: every release is lockstep.
+  def require_package_version(version, package_version)
+    return if version == package_version
+
+    raise BuildError, "--version #{version} is not the gem's version #{package_version}; every release is lockstep"
+  end
+
+  # The verified binary and the gem platforms of each platform in platforms.json.
+  def verified_binaries(release, release_directory, version)
+    JSON.parse(File.read(PLATFORMS))["platforms"].map do |platform|
+      file = begin
+        release.file(platform["release_file"])
+      rescue Litebackup::Release::NotListed => e
+        raise BuildError, e.message
+      end
+      source = File.join(release_directory, file.filename)
+      raise BuildError, "#{source} is missing; every platform is built together" unless File.file?(source)
+
+      content = File.binread(source)
+      digest = Digest::SHA256.hexdigest(content)
+      if digest != file.sha256 || content.bytesize != file.size
+        raise BuildError, "#{source} does not match release #{version}: " \
+                          "SHA-256 #{digest}, #{content.bytesize} bytes; signed #{file.sha256}, #{file.size} bytes"
+      end
+      platform["os"] == "linux" ? check_elf(content, platform["machine"]) : check_macho(content, platform["machine"])
+      [source, platform.fetch("gem_platforms")]
+    end
+  end
+
+  # Builds one gem from a copy of the gem's files in staging, with binary at
+  # lib/litebackup/bin/litebackup when given, and moves it to output.
+  def build_gem(staging, output, gem_platform: nil, binary: nil)
+    directory = File.join(staging, gem_platform || "ruby")
+    FileUtils.mkdir_p(directory)
+    FileUtils.cp_r(File.join(GEM_ROOT, "lib"), directory)
+    %w[litebackup.gemspec README.md LICENSE].each do |file|
+      FileUtils.cp(File.join(GEM_ROOT, file), directory) if File.exist?(File.join(GEM_ROOT, file))
+    end
+    bundled = File.join(directory, "lib", "litebackup", "bin", "litebackup")
+    FileUtils.rm_rf(File.dirname(bundled))
+    unless binary.nil?
+      FileUtils.mkdir_p(File.dirname(bundled))
+      FileUtils.cp(binary, bundled)
+      File.chmod(0o755, bundled)
+    end
+    Dir.chdir(directory) do
+      # Specification.load caches by path, so each staging copy is loaded by its own.
+      specification = Gem::Specification.load(File.join(directory, "litebackup.gemspec"))
+      specification.platform = Gem::Platform.new(gem_platform) unless gem_platform.nil?
+      built = Gem::DefaultUserInteraction.use_ui(Gem::SilentUI.new) { Gem::Package.build(specification) }
+      FileUtils.mv(built, output)
+      File.join(output, built)
+    end
+  end
+
+  # Verifies the release, then builds the plain gem and every platform gem
+  # into output; returns their paths.
+  def build_gems(release_directory:, metadata:, version:, package_version:, output:,
+                 keys: Litebackup::Release::RELEASE_KEYS)
+    release = begin
+      Litebackup::Release.find_release(File.read(metadata), version: version, keys: keys)
+    rescue Litebackup::Release::SignatureError, Litebackup::Release::NotListed => e
+      raise BuildError, "the metadata does not hold a verified release #{version}: #{e.message}"
+    end
+    binaries = verified_binaries(release, release_directory, version)
+    require_package_version(version, package_version)
+    require_package_version(version, runtime_version)
+    output = File.expand_path(output)
+    FileUtils.mkdir_p(output)
+    Dir.mktmpdir("litebackup-gems-") do |staging|
+      built = [build_gem(staging, output)]
+      binaries.each do |source, gem_platforms|
+        gem_platforms.each do |gem_platform|
+          built << build_gem(staging, output, gem_platform: gem_platform, binary: source)
+        end
+      end
+      built
+    end
+  end
+
+  def main(arguments)
+    options = { output: File.join(GEM_ROOT, "pkg") }
+    parser = OptionParser.new do |option_parser|
+      option_parser.banner = "Usage: scripts/build-gems [--version VERSION] [--output DIRECTORY] " \
+                             "RELEASE-DIRECTORY METADATA-JSON"
+      option_parser.on("--version VERSION", "the release to package; the gem's version by default") do |version|
+        options[:version] = version
+      end
+      option_parser.on("--output DIRECTORY", "where the gems go; pkg by default") do |directory|
+        options[:output] = directory
+      end
+    end
+    release_directory, metadata = parser.parse(arguments)
+    raise BuildError, parser.banner if metadata.nil?
+
+    version = options.fetch(:version, Litebackup::VERSION)
+    build_gems(release_directory: release_directory, metadata: metadata, version: version,
+               package_version: Litebackup::VERSION, output: options[:output]).each do |path|
+      puts("built #{File.basename(path)} from verified release #{version}")
+    end
+  rescue BuildError, OptionParser::ParseError => e
+    warn("error: #{e.message}")
+    exit(1)
+  end
+end
+
+GemBuild.main(ARGV) if $PROGRAM_NAME == __FILE__

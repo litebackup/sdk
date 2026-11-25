@@ -561,8 +561,8 @@ class Pool(_PoolCore[DB]):
         server, or the bucket with ``"cloud"``, holds what it committed; without it,
         the block's writes sync in the background. The release that ends the lease
         waits for the same durability, the server when None, and with ``offload``
-        removes the local file, unless the last block raised. A block that raises keeps
-        the lease and its error propagates.
+        removes the local file, unless the last call failed: its block raised or its
+        durability wait did. A block that raises keeps the lease and its error propagates.
 
         The lease ends after ``idle_release`` without a block, on ``release``, or on
         ``close``; the app coordinates handovers between machines. The adapters never
@@ -581,14 +581,12 @@ class Pool(_PoolCore[DB]):
                     self._acquire_lease(entry, lease_settings)
                 elif not entry.opened:
                     self._reopen_lease(entry)
-                try:
-                    yield cast(DB, entry.db)
-                except BaseException:
-                    entry.last_call_failed = True
-                    raise
-                entry.last_call_failed = False
+                # The call counts as failed until its work and its durability wait both finished.
+                entry.last_call_failed = True
+                yield cast(DB, entry.db)
                 if lease_settings.durability is not None:
                     self._wait_durable(name, lease_settings.durability)
+                entry.last_call_failed = False
         finally:
             self._leave(entry)
 
@@ -904,19 +902,16 @@ class AsyncPool(_PoolCore[DB]):
                     await self._acquire_lease(entry, lease_settings)
                 elif not entry.opened:
                     await self._reopen_lease(entry)
-                try:
-                    yield cast(DB, entry.db)
-                except BaseException:
-                    entry.last_call_failed = True
-                    raise
+                # The call counts as failed until its work and its durability wait both finished.
+                entry.last_call_failed = True
+                yield cast(DB, entry.db)
                 task = asyncio.current_task()
                 if task is not None and task.cancelling():
                     # The block caught its cancellation and returned: it still counts as cancelled.
-                    entry.last_call_failed = True
                     raise asyncio.CancelledError()
-                entry.last_call_failed = False
                 if lease_settings.durability is not None:
                     await self._wait_durable(name, lease_settings.durability)
+                entry.last_call_failed = False
         finally:
             self._leave(entry)
 

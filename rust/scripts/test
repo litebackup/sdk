@@ -1,0 +1,142 @@
+#!/bin/bash
+# Run the Rust SDK's gates in pinned rust images, as the calling user, with
+# each toolchain's Cargo home and build directory under ~/.cache/litebackup-rust.
+#
+# Usage:
+#   scripts/test [--rust VERSION] [--integration]   rustfmt, Clippy, the tests, rustdoc,
+#                                           and, on stable, cargo-deny and the generated models
+#   scripts/test [--rust VERSION] -- COMMAND...   a command in the crate's directory
+#   scripts/test generate                   regenerate src/generated/models.rs
+#
+# --rust picks one of RUST_VERSIONS; both run by default: the minimum
+# supported version, 1.94, and the current stable. Clippy runs with each
+# feature alone, with none, and with all, so every feature builds by itself.
+# --integration also runs tests/daemon_integration.rs against LITEBACKUP_PATH,
+# a static litebackup binary from scripts/build, mounted at the same path.
+set -o errexit
+set -o nounset
+set -o pipefail
+
+RUST_VERSIONS=(1.94.1 1.100.0)
+STABLE_VERSION="${RUST_VERSIONS[-1]}"
+CARGO_DENY_VERSION=0.22.1
+# Each feature builds alone; scripts/test checks every one.
+FEATURES=(release rusqlite sqlx tracing)
+CRATE_DIRECTORY="$(cd "$(dirname "${0}")/.." && pwd)"
+SDK_DIRECTORY="$(dirname "${CRATE_DIRECTORY}")"
+CACHE_ROOT="${HOME}/.cache/litebackup-rust"
+
+SELECTED_VERSIONS=("${RUST_VERSIONS[@]}")
+INTEGRATION=0
+COMMAND=()
+while [ "${#}" -gt 0 ]; do
+    case "${1}" in
+        --rust)
+            if [ "${#}" -lt 2 ]; then
+                echo "--rust needs a version: one of ${RUST_VERSIONS[*]}" >&2
+                exit 2
+            fi
+            SELECTED_VERSIONS=("${2}")
+            shift 2
+            ;;
+        --integration)
+            INTEGRATION=1
+            shift
+            ;;
+        generate)
+            SELECTED_VERSIONS=("${STABLE_VERSION}")
+            COMMAND=(cargo xtask)
+            shift
+            ;;
+        --)
+            shift
+            COMMAND=("${@}")
+            break
+            ;;
+        *)
+            echo "unknown argument ${1}" >&2
+            exit 2
+            ;;
+    esac
+done
+
+# build_test_image builds the test image of one toolchain and prints its tag;
+# the stable one carries cargo-deny.
+build_test_image() {
+    local deny_version=""
+    if [ "${1}" = "${STABLE_VERSION}" ]; then
+        deny_version="${CARGO_DENY_VERSION}"
+    fi
+    local tag="litebackup-rust-test:${1}"
+    docker build --quiet \
+        --build-arg "RUST_IMAGE=rust:${1}-bookworm" \
+        --build-arg "CARGO_DENY_VERSION=${deny_version}" \
+        --tag "${tag}" \
+        --file "${CRATE_DIRECTORY}/scripts/Dockerfile" \
+        "${CRATE_DIRECTORY}/scripts" >/dev/null
+    echo "${tag}"
+}
+
+# gate_steps prints the shell steps of the gates on toolchain ${1}.
+gate_steps() {
+    local steps="cargo fmt --all --check"
+    steps+=" && cargo clippy --locked --workspace --all-targets --all-features -- -D warnings"
+    steps+=" && cargo clippy --locked --all-targets --no-default-features -- -D warnings"
+    local feature
+    for feature in "${FEATURES[@]}"; do
+        steps+=" && cargo clippy --locked --all-targets --no-default-features --features ${feature} -- -D warnings"
+    done
+    steps+=" && cargo test --locked --workspace --all-features"
+    steps+=" && RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features --package litebackup"
+    if [ "${1}" = "${STABLE_VERSION}" ]; then
+        steps+=" && cargo deny --locked check"
+        # The committed models are what the generator writes from the spec.
+        steps+=" && cargo xtask \"\${CARGO_TARGET_DIR}/models.rs\""
+        steps+=" && diff --unified src/generated/models.rs \"\${CARGO_TARGET_DIR}/models.rs\""
+    fi
+    echo "${steps}"
+}
+
+INTEGRATION_OPTIONS=()
+# The crates.io token a release's cargo publish uses, passed by name only, so
+# its value never appears in a command line.
+if [ -n "${CARGO_REGISTRY_TOKEN:-}" ]; then
+    INTEGRATION_OPTIONS+=(--env CARGO_REGISTRY_TOKEN)
+fi
+if [ "${INTEGRATION}" = 1 ]; then
+    if [ -z "${LITEBACKUP_PATH:-}" ]; then
+        echo "--integration needs LITEBACKUP_PATH, a static litebackup binary from scripts/build" >&2
+        exit 2
+    fi
+    INTEGRATION_OPTIONS+=(
+        --volume "${LITEBACKUP_PATH}:${LITEBACKUP_PATH}:ro"
+        --env "LITEBACKUP_PATH=${LITEBACKUP_PATH}"
+        --env LITEBACKUP_INTEGRATION=1
+    )
+fi
+
+for RUST_VERSION in "${SELECTED_VERSIONS[@]}"; do
+    TEST_IMAGE="$(build_test_image "${RUST_VERSION}")"
+    RUST_CACHE="${CACHE_ROOT}/${RUST_VERSION}"
+    mkdir --parents "${RUST_CACHE}/cargo" "${RUST_CACHE}/target"
+    if [ "${#COMMAND[@]}" -gt 0 ]; then
+        CONTAINER_STEPS='"${@}"'
+    else
+        CONTAINER_STEPS="$(gate_steps "${RUST_VERSION}")"
+    fi
+    echo "Rust ${RUST_VERSION}"
+    docker run --rm \
+        --user "$(id --user):$(id --group)" \
+        --volume "${SDK_DIRECTORY}:${SDK_DIRECTORY}" \
+        --volume "${RUST_CACHE}/cargo:/tmp/cargo" \
+        --volume "${RUST_CACHE}/target:/tmp/target" \
+        --env HOME=/tmp \
+        --env CARGO_HOME=/tmp/cargo \
+        --env CARGO_TARGET_DIR=/tmp/target \
+        "${INTEGRATION_OPTIONS[@]}" \
+        --workdir "${CRATE_DIRECTORY}" \
+        "${TEST_IMAGE}" \
+        bash -c "${CONTAINER_STEPS}" \
+        litebackup-rust-test \
+        "${COMMAND[@]}"
+done

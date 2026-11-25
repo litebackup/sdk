@@ -1,0 +1,108 @@
+#!/bin/bash
+# Install the gems scripts/build-gems made in clean Ruby images, slim
+# (glibc) and alpine (musl), and check what a user gets: RubyGems and
+# Bundler each choose this machine's platform gem, its bundled binary runs
+# and reports the gem's version, no litebackup wrapper is installed, and the
+# plain gem finds litebackup on PATH instead.
+#
+# Usage: scripts/check-gems [GEM-DIRECTORY]   (default: pkg/gems)
+#
+# Bundler reads the gems from a local index that rubygems-generate_index
+# writes, so the check downloads that gem; nothing is published.
+set -o errexit
+set -o nounset
+set -o pipefail
+
+GEM_ROOT="$(cd "$(dirname "${0}")/.." && pwd)"
+GEM_DIRECTORY="$(cd "${1:-${GEM_ROOT}/pkg/gems}" && pwd)"
+GEM_VERSION="$(sed --quiet 's/^  VERSION = "\(.*\)"$/\1/p' "${GEM_ROOT}/lib/litebackup/version.rb")"
+RUBY_VERSION=3.4.13
+GENERATE_INDEX_VERSION=1.2.0
+case "$(uname --machine)" in
+    x86_64) CPU=x86_64 ;;
+    aarch64 | arm64) CPU=aarch64 ;;
+    *)
+        echo "error: no platform gem for $(uname --machine)" >&2
+        exit 1
+        ;;
+esac
+
+# The check inside each image, in POSIX sh because alpine has no bash, with
+# the short options busybox accepts.
+read -r -d '' INSTALL_CHECK <<'SCRIPT' || true
+set -eu
+export GEM_HOME="${HOME}/gems" PATH="${HOME}/gems/bin:${PATH}"
+mkdir -p "${HOME}/local" "${HOME}/index/gems" "${HOME}/app" "${HOME}/plain"
+cd "${HOME}/local"
+
+# What require "litebackup" loaded: its gem's platform, and the bundled
+# binary's path and version.
+loaded_gem_report='spec = Gem.loaded_specs.fetch("litebackup")
+require "litebackup"
+binary = Litebackup::Binary.bundled_binary
+version = binary && IO.popen([binary, "version"], &:read).strip
+puts [spec.platform, binary.nil? ? "none" : version].join(" ")'
+
+# Both choose from a local index as they would from rubygems.org.
+gem install --no-document rubygems-generate_index --version "${GENERATE_INDEX_VERSION}" >/dev/null
+cp /gems/*.gem "${HOME}/index/gems/"
+gem generate_index --directory "${HOME}/index" >/dev/null
+GEM_HOME="${HOME}/installed" gem install \
+    --no-document \
+    --clear-sources \
+    --source "file://${HOME}/index" \
+    litebackup --version "${GEM_VERSION}" >/dev/null
+GEM_HOME="${HOME}/installed" ruby -e "gem 'litebackup'" -e "${loaded_gem_report}" > rubygems.txt
+if [ -e "${HOME}/installed/bin/litebackup" ]; then
+    echo "gem install wrote a litebackup command in ${HOME}/installed/bin" >&2
+    exit 1
+fi
+
+cd "${HOME}/app"
+printf 'source "file://%s/index"\ngem "litebackup", "%s"\n' "${HOME}" "${GEM_VERSION}" > Gemfile
+bundle lock --add-platform x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-linux-musl \
+    x86_64-darwin arm64-darwin >/dev/null
+bundle install --quiet
+bundle exec ruby -e "${loaded_gem_report}" > "${HOME}/local/bundler.txt"
+
+# The plain gem carries no binary and finds the command on PATH.
+cd "${HOME}/plain"
+GEM_HOME="${HOME}/plain-gems" gem install \
+    --local \
+    --no-document \
+    "/gems/litebackup-${GEM_VERSION}.gem" >/dev/null
+mkdir -p bin
+printf '#!/bin/sh\necho stand-in\n' > bin/litebackup
+chmod 755 bin/litebackup
+GEM_HOME="${HOME}/plain-gems" PATH="${HOME}/plain/bin:${PATH}" ruby -e 'require "litebackup"
+abort "the plain gem bundles a binary" unless Litebackup::Binary.bundled_binary.nil?
+puts Litebackup.binary' > "${HOME}/local/plain.txt"
+
+cat "${HOME}/local/rubygems.txt" "${HOME}/local/bundler.txt" "${HOME}/local/plain.txt"
+SCRIPT
+
+FAILED=0
+for IMAGE_AND_LIBC in slim:gnu alpine:musl; do
+    TEST_IMAGE="ruby:${RUBY_VERSION}-${IMAGE_AND_LIBC%%:*}"
+    PLATFORM="${CPU}-linux-${IMAGE_AND_LIBC##*:}"
+    INSTALL_REPORT="$(docker run --rm \
+        --user "$(id --user):$(id --group)" \
+        --volume "${GEM_DIRECTORY}:/gems:ro" \
+        --env HOME=/tmp/home \
+        --env "GEM_VERSION=${GEM_VERSION}" \
+        --env "GENERATE_INDEX_VERSION=${GENERATE_INDEX_VERSION}" \
+        "${TEST_IMAGE}" \
+        sh -c "${INSTALL_CHECK}")"
+    EXPECTED_REPORT="$(printf '%s %s\n%s %s\n%s' "${PLATFORM}" "${GEM_VERSION}" "${PLATFORM}" "${GEM_VERSION}" \
+        "/tmp/home/plain/bin/litebackup")"
+    if [ "${INSTALL_REPORT}" = "${EXPECTED_REPORT}" ]; then
+        echo "ok   ${TEST_IMAGE}: RubyGems and Bundler install ${PLATFORM}, whose binary reports ${GEM_VERSION}; the plain gem uses PATH"
+    else
+        echo "FAIL ${TEST_IMAGE}: want" >&2
+        echo "${EXPECTED_REPORT}" >&2
+        echo "got" >&2
+        echo "${INSTALL_REPORT}" >&2
+        FAILED=1
+    fi
+done
+exit "${FAILED}"

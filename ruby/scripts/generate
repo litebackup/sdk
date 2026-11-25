@@ -1,0 +1,126 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Writes lib/litebackup/generated/models.rb from the socket API spec,
+# ../client-openapi.yaml: a Data class with from_wire for each object schema,
+# and a module of constants for each string enum, all inside Litebackup::Models.
+# scripts/test generate runs it in the pinned Ruby image; CI checks that the
+# committed file is current.
+#
+# Usage: scripts/generate [output path]
+
+require "psych"
+
+SDK_ROOT = File.expand_path("..", __dir__)
+SPEC_PATH = File.join(SDK_ROOT, "..", "client-openapi.yaml")
+OUTPUT_PATH = ARGV.fetch(0, File.join(SDK_ROOT, "lib", "litebackup", "generated", "models.rb"))
+
+# Turns a wire value such as role_changed or download-started into ROLE_CHANGED.
+def constant_name(wire_value)
+  wire_value.gsub(/[^A-Za-z0-9]+/, "_").upcase
+end
+
+# The schema name a $ref points at.
+def reference_name(reference)
+  reference.delete_prefix("#/components/schemas/")
+end
+
+# The decoding of one field: :string, :integer, :float, :boolean, :time, :hash,
+# [:model, Name], or [:list, item].
+def field_decoding(property, schemas)
+  if property.key?("$ref")
+    name = reference_name(property["$ref"])
+    target = schemas.fetch(name)
+    return target["type"] == "object" ? [:model, name.to_sym] : field_decoding(target, schemas)
+  end
+  case property["type"]
+  when "string" then property["format"] == "date-time" ? :time : :string
+  when "integer" then :integer
+  when "number" then :float
+  when "boolean" then :boolean
+  when "array" then [:list, field_decoding(property.fetch("items"), schemas)]
+  when "object" then :hash
+  else raise "unsupported schema #{property.inspect}"
+  end
+end
+
+# The text as comment lines, wrapped to 100 columns at the indent.
+def comment_lines(text, indent)
+  return [] if text.nil? || text.empty?
+
+  # Every line is indented once more inside module Models.
+  width = 100 - indent.length - 4
+  lines = [""]
+  text.split.each do |word|
+    lines << "" if !lines.last.empty? && lines.last.length + word.length + 1 > width
+    lines[-1] = lines.last.empty? ? word : "#{lines.last} #{word}"
+  end
+  lines.map { |line| "#{indent}# #{line}" }
+end
+
+def enum_module(name, schema)
+  values = schema.fetch("enum")
+  names = values.map { |value| constant_name(value) }
+  lines = comment_lines(schema["description"], "  ")
+  lines << "  module #{name}"
+  values.zip(names).each { |value, constant| lines << "    #{constant} = #{value.inspect}" }
+  lines << "    ALL = ["
+  lines << names.map { |constant| "      #{constant}" }.join(",\n")
+  lines << "    ].freeze"
+  lines << "  end"
+  lines
+end
+
+def model_class(name, schema, schemas)
+  properties = schema.fetch("properties", {})
+  required = schema.fetch("required", [])
+  field_names = properties.keys.map { |field| ":#{field}" }
+  lines = comment_lines(schema["description"], "  ")
+  lines << if field_names.empty?
+             "  class #{name} < Data.define"
+           else
+             "  class #{name} < Data.define(#{field_names.join(", ")})"
+           end
+  lines << "    extend WireModel"
+  properties.each do |field, property|
+    next unless property["enum"]
+
+    property["enum"].each do |value|
+      lines << "    #{constant_name(field)}_#{constant_name(value)} = #{value.inspect}"
+    end
+  end
+  lines << "" if properties.any? { |_field, property| property["enum"] }
+  properties.each do |field, property|
+    lines.concat(comment_lines(property["description"] && "#{field}: #{property["description"]}", "    "))
+  end
+  fields = properties.map do |field, property|
+    "      #{field}: [#{field_decoding(property, schemas).inspect}, #{required.include?(field)}]"
+  end
+  if fields.empty?
+    lines << "    WIRE_FIELDS = {}.freeze"
+  else
+    lines << "    WIRE_FIELDS = {"
+    lines << fields.join(",\n")
+    lines << "    }.freeze"
+  end
+  lines << "  end"
+  lines
+end
+
+spec = Psych.safe_load_file(SPEC_PATH)
+schemas = spec.fetch("components").fetch("schemas")
+blocks = schemas.filter_map do |name, schema|
+  if schema["type"] == "object"
+    model_class(name, schema, schemas)
+  elsif schema["type"] == "string" && schema["enum"]
+    enum_module(name, schema)
+  end
+end
+text = +"# frozen_string_literal: true\n\n"
+text << "# Code generated from client-openapi.yaml by scripts/generate. DO NOT EDIT.\n\n"
+text << "module Litebackup\n"
+text << "  # The socket API's types; Litebackup exports the ones its methods return.\n"
+text << "  module Models\n"
+text << blocks.map { |lines| lines.join("\n").lines.map { |line| line == "\n" ? line : "  #{line}" }.join }.join("\n\n")
+text << "\n  end\nend\n"
+File.write(OUTPUT_PATH, text)

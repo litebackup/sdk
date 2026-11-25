@@ -1,0 +1,83 @@
+[package]
+name = "litebackup"
+version = "1.3.0"
+edition = "2024"
+rust-version = "1.94"
+description = "Back up, replicate, and restore SQLite databases with Litebackup"
+license = "MIT"
+homepage = "https://litebackup.com/sdk"
+repository = "https://github.com/litebackup/sdk"
+readme = "README.md"
+keywords = ["sqlite", "backup", "replication", "failover"]
+categories = ["database", "api-bindings"]
+# The library, its examples, and what a user reads; tests run in the SDK's
+# repository against its shared fixtures.
+include = ["/src/**/*.rs", "/examples/axum_tenants.rs", "/README.md", "/LICENSE"]
+
+[features]
+default = []
+# Verifying Litebackup's signed release metadata: release::find_release.
+release = ["dep:base64", "dep:ed25519-dalek"]
+# The pool adapter for rusqlite: integrations::rusqlite.
+rusqlite = ["dep:rusqlite"]
+# The pool adapter for sqlx's SQLite connections: integrations::sqlx.
+sqlx = ["dep:sqlx"]
+# Spans for connecting, leasing, releasing, and failovers, and events for
+# what the SDK does on its own, such as a watch's retried long-poll or a
+# pool dropped without close, through tracing.
+tracing = ["dep:tracing"]
+
+[dependencies]
+base64 = { version = "0.23", optional = true }
+bytes = "1.10"
+ed25519-dalek = { version = "3.0", optional = true }
+futures-core = "0.3.31"
+futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
+http-body-util = "0.1.3"
+hyper = { version = "1.6", features = ["client", "http1"] }
+hyper-util = { version = "0.1.14", default-features = false, features = ["tokio"] }
+# rusqlite and sqlx share libsqlite3-sys 0.40, which links one bundled SQLite,
+# 3.54 or later (RUSTSEC-2026-0459).
+rusqlite = { version = "0.43", features = ["bundled"], optional = true }
+sqlx = { version = "0.9.1", default-features = false, features = ["sqlite-bundled", "runtime-tokio"], optional = true }
+jiff = { version = "1.0", default-features = false, features = ["std", "serde"] }
+rustix = { version = "1.0", default-features = false, features = ["std", "fs", "process"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+tokio = { version = "1.45", features = ["fs", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
+tokio-util = { version = "0.7.15", default-features = false }
+tracing = { version = "0.1.41", default-features = false, features = ["std", "attributes"], optional = true }
+
+[dev-dependencies]
+axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "tokio"] }
+futures-util = { version = "0.3.31", default-features = false, features = ["std", "alloc"] }
+hyper = { version = "1.6", features = ["server"] }
+hyper-util = { version = "0.1.14", default-features = false, features = ["tokio"] }
+serde = { version = "1.0.219", features = ["derive"] }
+tempfile = "3.20"
+tokio = { version = "1.45", features = ["rt-multi-thread", "signal", "test-util"] }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "axum_tenants"
+required-features = ["rusqlite"]
+
+[[example]]
+name = "handoff_step"
+required-features = ["rusqlite"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[workspace]
+members = ["xtask"] # vocabulary:allow Cargo names a workspace's packages members
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"

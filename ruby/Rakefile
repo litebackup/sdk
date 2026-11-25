@@ -1,0 +1,12 @@
+# frozen_string_literal: true
+
+require "rake/testtask"
+
+# The unit and contract tests; integration_test.rb runs only with LITEBACKUP_INTEGRATION=1.
+Rake::TestTask.new(:test) do |task|
+  task.libs << "lib" << "test"
+  task.test_files = FileList["test/**/*_test.rb"]
+  task.warning = true
+end
+
+task default: :test

@@ -1,0 +1,5 @@
+# unwrap and expect stay out of the library; tests may assert with them.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+# Product names written as they are spelled, beside Clippy's own list.
+doc-valid-idents = ["SQLite", ".."]

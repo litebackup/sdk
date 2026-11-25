@@ -7,5 +7,8 @@
   },
   "error": {
     "code": "invalid_argument"
+  },
+  "skip": {
+    "rust": "Rust's std::time::Duration cannot be negative, so the type rules out what the SDK would refuse"
   }
 }

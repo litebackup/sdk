@@ -20,6 +20,9 @@ Start with the [README](../README.md), or pick a guide below.
 | Run backups as retried activities | [Temporal](sqlite-temporal.md) |
 | Integrate from Go | [Go examples](sqlite-go.md) |
 | Integrate from Python | [Python guide](../python/README.md) |
+| Integrate from Ruby or Rails | [Ruby guide](sqlite-ruby.md) |
+| Integrate from PHP, Laravel, or Symfony | [PHP guide](sqlite-php.md) |
+| Integrate from Rust | [Rust guide](sqlite-rust.md) |
 | Look up a method or error | [API](sdk-reference.md), [troubleshooting](sqlite-backup-errors.md) |
 | Check the cross-language contract | [SDK contract](sdk-contract.md) |
 

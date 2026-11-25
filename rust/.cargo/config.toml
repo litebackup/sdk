@@ -1,0 +1,3 @@
+[alias]
+# cargo xtask writes src/generated/models.rs from ../client-openapi.yaml.
+xtask = "run --quiet --package xtask --"

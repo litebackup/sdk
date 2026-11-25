@@ -8,3 +8,12 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+ruby/pkg/
+ruby/.bundle/
+ruby/vendor/bundle/
+ruby/*.gem
+ruby/lib/litebackup/bin/
+php/vendor/
+php/tests/frameworks/*/vendor/
+php/tests/frameworks/*/var/
+rust/target/

@@ -1,0 +1,15 @@
+#!/bin/bash
+# Install the bundler that Gemfile.lock names under BUNDLED WITH, into the
+# user's own gem directory, so every Ruby version resolves gems with it.
+set -o errexit
+set -o nounset
+set -o pipefail
+
+cd "$(dirname "${0}")/.."
+BUNDLER_VERSION="$(awk '/^BUNDLED WITH/ { getline; print $1 }' Gemfile.lock 2>/dev/null || true)"
+if [ -z "${BUNDLER_VERSION}" ]; then
+    exit 0
+fi
+if ! gem list --installed --exact bundler --version "${BUNDLER_VERSION}" >/dev/null; then
+    gem install --user-install --no-document bundler --version "${BUNDLER_VERSION}" >/dev/null
+fi

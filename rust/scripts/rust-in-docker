@@ -1,0 +1,49 @@
+#!/bin/bash
+# Run an example of the SDK in the pinned stable Rust test image, as the
+# calling user, for tests that run Rust steps from another language's suite
+# (LITEBACKUP_RUST in sdk/python/tests/test_integration.py).
+#
+# Usage: scripts/rust-in-docker EXAMPLE [ARGUMENT...]
+#
+# The container uses the host's network, so its daemon reaches a server on
+# localhost. It mounts the SDK, LITEBACKUP_PATH (a static litebackup binary
+# from scripts/build, whose daemon runs in the container), and the test's
+# temporary tree, the directory holding XDG_RUNTIME_DIR, at the same paths,
+# and receives the test's LITEBACKUP_ and XDG_ variables and HOME.
+set -o errexit
+set -o nounset
+set -o pipefail
+
+CRATE_DIRECTORY="$(cd "$(dirname "${0}")/.." && pwd)"
+SDK_DIRECTORY="$(dirname "${CRATE_DIRECTORY}")"
+RUST_VERSION=1.100.0
+RUST_CACHE="${HOME}/.cache/litebackup-rust/${RUST_VERSION}"
+: "${LITEBACKUP_PATH:?set LITEBACKUP_PATH to a static litebackup binary}"
+: "${XDG_RUNTIME_DIR:?set XDG_RUNTIME_DIR inside the temporary tree of the test}"
+TEST_DIRECTORY="$(dirname "${XDG_RUNTIME_DIR}")"
+EXAMPLE="${1:?name the example to run}"
+shift
+
+"${CRATE_DIRECTORY}/scripts/test" --rust "${RUST_VERSION}" -- true >/dev/null
+mkdir --parents "${RUST_CACHE}/cargo" "${RUST_CACHE}/target"
+FORWARDED_VARIABLES=()
+for VARIABLE in LITEBACKUP_API_KEY LITEBACKUP_SESSION LITEBACKUP_PATH XDG_RUNTIME_DIR XDG_STATE_HOME \
+    XDG_CONFIG_HOME HOME; do
+    if [ -n "${!VARIABLE+set}" ]; then
+        FORWARDED_VARIABLES+=(--env "${VARIABLE}")
+    fi
+done
+exec docker run --rm \
+    --network host \
+    --user "$(id --user):$(id --group)" \
+    --volume "${SDK_DIRECTORY}:${SDK_DIRECTORY}" \
+    --volume "${LITEBACKUP_PATH}:${LITEBACKUP_PATH}:ro" \
+    --volume "${TEST_DIRECTORY}:${TEST_DIRECTORY}" \
+    --volume "${RUST_CACHE}/cargo:/tmp/cargo" \
+    --volume "${RUST_CACHE}/target:/tmp/target" \
+    "${FORWARDED_VARIABLES[@]}" \
+    --env CARGO_HOME=/tmp/cargo \
+    --env CARGO_TARGET_DIR=/tmp/target \
+    --workdir "${CRATE_DIRECTORY}" \
+    "litebackup-rust-test:${RUST_VERSION}" \
+    cargo run --locked --quiet --features rusqlite --example "${EXAMPLE}" -- "${@}"

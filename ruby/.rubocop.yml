@@ -1,0 +1,40 @@
+AllCops:
+  TargetRubyVersion: 3.2
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - "lib/litebackup/generated/**/*"
+    - "vendor/**/*"
+    - "pkg/**/*"
+
+Layout/LineLength:
+  Max: 120
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+
+# The SDK's classes and methods mirror the Python and TypeScript SDKs, which
+# keep their operations together; the contract fixes their size.
+Metrics:
+  Enabled: false
+
+Style/Documentation:
+  Enabled: false
+
+# Defaults are compared with == 0, which nil passes, rather than zero?, which
+# nil does not.
+Style/NumericPredicate:
+  Enabled: false
+
+# A deadline's remaining time is clamped between bounds that may cross.
+Style/ComparableClamp:
+  Enabled: false
+
+Naming/PredicateMethod:
+  Enabled: false
+
+Naming/PredicatePrefix:
+  Enabled: false

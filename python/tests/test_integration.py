@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import shutil
 import socket
 import sqlite3
@@ -157,7 +158,9 @@ def test_backup_restore_and_idempotent_registration(server: DevelopmentServer) -
 
 
 def test_cross_language_handoff(server: DevelopmentServer) -> None:
-    """Python writes and releases, TypeScript acquires, reads, writes, and releases, then Go does the same."""
+    """Python writes and releases, TypeScript acquires, reads, writes, and releases, then Go does the same, then Ruby
+    when LITEBACKUP_RUBY names the command that runs it, then PHP when LITEBACKUP_PHP does, then Rust when
+    LITEBACKUP_RUST does."""
     name = "agents/42.sqlite"
     python_session, python_token = server.session("python")
     typescript_session, typescript_token = server.session("typescript")
@@ -195,10 +198,53 @@ def test_cross_language_handoff(server: DevelopmentServer) -> None:
         cwd=SDK_ROOT, env=environment, capture_output=True, text=True, timeout=300, check=False,
     )  # fmt: skip
     assert step.returncode == 0, step.stderr + step.stdout
+    expected_rows = 6
+
+    # Ruby runs in a container (LITEBACKUP_RUBY, such as sdk/ruby/scripts/ruby-in-docker), with its own daemon there.
+    ruby = os.environ.get("LITEBACKUP_RUBY")
+    if ruby:
+        ruby_session, ruby_token = server.session("ruby")
+        ruby_path = server.path("ruby", "42.sqlite")
+        environment = {**server.environment, "LITEBACKUP_SESSION": ruby_session, "LITEBACKUP_API_KEY": ruby_token}
+        step = subprocess.run(
+            [*shlex.split(ruby), str(SDK_ROOT / "ruby" / "test" / "handoff" / "ruby_step.rb"), name, ruby_path, str(expected_rows), "2"],
+            env=environment, capture_output=True, text=True, timeout=600, check=False,
+        )  # fmt: skip
+        assert step.returncode == 0, step.stderr + step.stdout
+        expected_rows += 2
+
+    # PHP runs in a container too (LITEBACKUP_PHP, such as sdk/php/scripts/php-in-docker), after Ruby when it ran.
+    php = os.environ.get("LITEBACKUP_PHP")
+    if php:
+        php_session, php_token = server.session("php")
+        php_path = server.path("php", "42.sqlite")
+        environment = {**server.environment, "LITEBACKUP_SESSION": php_session, "LITEBACKUP_API_KEY": php_token}
+        step = subprocess.run(
+            [*shlex.split(php), str(SDK_ROOT / "php" / "tests" / "handoff" / "php_step.php"), name, php_path, str(expected_rows), "2"],
+            env=environment, capture_output=True, text=True, timeout=600, check=False,
+        )  # fmt: skip
+        assert step.returncode == 0, step.stderr + step.stdout
+        expected_rows += 2
+
+    # Rust runs in a container too (LITEBACKUP_RUST, such as sdk/rust/scripts/rust-in-docker), after PHP when it ran.
+    rust = os.environ.get("LITEBACKUP_RUST")
+    if rust:
+        rust_session, rust_token = server.session("rust")
+        rust_path = server.path("rust", "42.sqlite")
+        environment = {**server.environment, "LITEBACKUP_SESSION": rust_session, "LITEBACKUP_API_KEY": rust_token}
+        step = subprocess.run(
+            [*shlex.split(rust), "handoff_step", name, rust_path, str(expected_rows), "2"],
+            env=environment, capture_output=True, text=True, timeout=900, check=False,
+        )  # fmt: skip
+        assert step.returncode == 0, step.stderr + step.stdout
+        assert "rust handoff ok" in step.stdout, step.stdout
+        expected_rows += 2
     with Litebackup(session=python_session, environment=server.environment) as litebackup:
+        # The last step released the database: no machine writes it.
+        assert not litebackup.databases.writer(name).active
         back = server.path("python-again", "42.sqlite")
         litebackup.databases.restore(name, path=back)
-        assert rows(back) == 6
+        assert rows(back) == expected_rows
 
 
 async def test_async_cancelled_lease_is_released_by_close(server: DevelopmentServer) -> None:

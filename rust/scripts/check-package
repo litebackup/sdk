@@ -1,0 +1,137 @@
+#!/bin/bash
+# Check the crate as a user gets it: cargo package, which builds the packaged
+# source on its own, then a clean consumer project in the minimum supported
+# Rust's image that depends on the packaged crate, with a fresh dependency
+# resolution. The consumer builds options with their setters from outside
+# the crate, checks the Litebackup-SDK-Version header its client sends, and
+# checks that connecting finds litebackup on PATH. Nothing is published.
+#
+# Usage: scripts/check-package
+set -o errexit
+set -o nounset
+set -o pipefail
+
+CRATE_DIRECTORY="$(cd "$(dirname "${0}")/.." && pwd)"
+RUST_VERSION=1.94.1
+CACHE_ROOT="${HOME}/.cache/litebackup-rust/${RUST_VERSION}"
+PACKAGE_VERSION="$(sed --quiet '0,/^version = /s/^version = "\(.*\)"$/\1/p' "${CRATE_DIRECTORY}/Cargo.toml")"
+WORK_DIRECTORY="$(mktemp --directory)"
+trap 'rm --recursive --force "${WORK_DIRECTORY}"' EXIT
+
+# The crate's files as git sees them, so build output never comes along.
+mkdir --parents "${WORK_DIRECTORY}/source" "${WORK_DIRECTORY}/consumer/src" "${WORK_DIRECTORY}/consumer/bin"
+git -C "${CRATE_DIRECTORY}" ls-files -z --cached --others --exclude-standard \
+    | tar --create --directory "${CRATE_DIRECTORY}" --null --files-from=- \
+    | tar --extract --directory "${WORK_DIRECTORY}/source"
+
+cat > "${WORK_DIRECTORY}/consumer/Cargo.toml" <<TOML
+[package]
+name = "litebackup-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.94"
+publish = false
+
+[dependencies]
+litebackup = { path = "/work/packaged/litebackup-${PACKAGE_VERSION}", features = ["release", "rusqlite", "sqlx", "tracing"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread"] }
+TOML
+
+cat > "${WORK_DIRECTORY}/consumer/src/main.rs" <<'RUST'
+//! A program outside the crate: it builds the advertised options, connects
+//! to a socket that records the request, and launches through PATH.
+
+use std::time::Duration;
+
+use litebackup::integrations::rusqlite::RusqliteAdapter;
+use litebackup::{AcquireOptions, Client, Durability, LeaseOptions, PoolOptions};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _acquire = AcquireOptions::default().path("data/a.sqlite").lock_timeout(Duration::from_secs(5)).umask(0o22);
+    let _lease = LeaseOptions::default().durability(Durability::CLOUD).offload(true);
+    let socket = "/work/consumer/daemon.sock";
+    let listener = tokio::net::UnixListener::bind(socket)?;
+    let answering = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.ok()?;
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let read = stream.read(&mut chunk).await.ok()?;
+            if read == 0 {
+                return None;
+            }
+            request.extend_from_slice(&chunk[..read]);
+        }
+        let body = r#"{"session":"default","databases":[]}"#;
+        let answer = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nlitebackup-client-version: {}\r\ncontent-length: {}\r\n\r\n{body}",
+            litebackup::VERSION,
+            body.len()
+        );
+        stream.write_all(answer.as_bytes()).await.ok()?;
+        let request = String::from_utf8_lossy(&request).to_lowercase();
+        request.lines().find_map(|line| line.strip_prefix("litebackup-sdk-version: ").map(str::to_owned))
+    });
+    let client = Client::builder().socket_path(socket).connect().await?;
+    let pool = client.databases().pool(RusqliteAdapter::default(), PoolOptions::default().idle_release(Duration::MAX))?;
+    pool.close().await?;
+    client.close();
+    println!("header {}", answering.await?.unwrap_or_default());
+    let launched = Client::builder()
+        .session("consumer")
+        .environment([
+            ("PATH", "/work/consumer/bin"),
+            ("HOME", "/work/consumer"),
+            ("XDG_RUNTIME_DIR", "/work/consumer/run"),
+        ])
+        .connect()
+        .await;
+    match launched {
+        Ok(_) => println!("launched nothing"),
+        Err(error) => println!("launch {}", error.message()),
+    }
+    Ok(())
+}
+RUST
+
+printf '#!/bin/sh\necho "{\\"code\\":\\"launch_failed\\",\\"message\\":\\"stand-in $0\\"}" >&2\nexit 1\n' \
+    > "${WORK_DIRECTORY}/consumer/bin/litebackup"
+chmod 755 "${WORK_DIRECTORY}/consumer/bin/litebackup"
+
+"${CRATE_DIRECTORY}/scripts/test" --rust "${RUST_VERSION}" -- true >/dev/null
+mkdir --parents "${CACHE_ROOT}/cargo"
+read -r -d '' PACKAGE_CHECK <<'SCRIPT' || true
+set -eu
+cd /work/source
+cargo package --locked --target-dir /work/target --quiet
+CRATE="/work/target/package/litebackup-${PACKAGE_VERSION}.crate"
+if tar --list --gzip --file "${CRATE}" | grep --quiet --extended-regexp '/(tests|xtask|scripts)/'; then
+    echo "the package carries tests, xtask, or scripts" >&2
+    exit 1
+fi
+mkdir --parents /work/packaged
+tar --extract --gzip --file "${CRATE}" --directory /work/packaged
+cd /work/consumer
+cargo run --quiet --target-dir /work/consumer-target
+SCRIPT
+REPORT="$(docker run --rm \
+    --user "$(id --user):$(id --group)" \
+    --volume "${WORK_DIRECTORY}:/work" \
+    --volume "${CACHE_ROOT}/cargo:/tmp/cargo" \
+    --env HOME=/tmp \
+    --env CARGO_HOME=/tmp/cargo \
+    --env "PACKAGE_VERSION=${PACKAGE_VERSION}" \
+    "litebackup-rust-test:${RUST_VERSION}" \
+    bash -c "${PACKAGE_CHECK}" 2>&1)" || { echo "FAIL the package check:" >&2; echo "${REPORT:-}" >&2; exit 1; }
+EXPECTED="header rust/${PACKAGE_VERSION}
+launch starting Litebackup failed: stand-in /work/consumer/bin/litebackup"
+if [ "${REPORT}" != "${EXPECTED}" ]; then
+    echo "FAIL rust:${RUST_VERSION}: want" >&2
+    echo "${EXPECTED}" >&2
+    echo "got" >&2
+    echo "${REPORT}" >&2
+    exit 1
+fi
+echo "ok   rust:${RUST_VERSION}: litebackup ${PACKAGE_VERSION} packages, builds in a clean consumer, sends rust/${PACKAGE_VERSION}, and uses litebackup on PATH"

@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Every package ships the repository's license
-        run: for copy in python/LICENSE typescript/LICENSE typescript/npm/*/LICENSE; do cmp LICENSE "$copy"; done
+        run: for copy in php/LICENSE python/LICENSE ruby/LICENSE rust/LICENSE typescript/LICENSE typescript/npm/*/LICENSE; do cmp LICENSE "$copy"; done
 
   go:
     runs-on: ubuntu-latest
@@ -90,3 +90,127 @@ jobs:
       - name: Build the source package and a wheel
         if: matrix.python == '3.11'
         run: uv build
+
+  ruby:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The patch releases ruby/scripts/test runs in Docker.
+        ruby: ["3.2.11", "3.3.14", "3.4.13"]
+    defaults:
+      run:
+        working-directory: ruby
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: ruby
+      - name: Test
+        run: bundle exec rake test
+      - name: Lint
+        run: bundle exec rubocop
+      - name: Generated models are current
+        if: matrix.ruby == '3.4.13'
+        run: |
+          ruby scripts/generate
+          git diff --exit-code lib/litebackup/generated
+      - name: Build the gem
+        if: matrix.ruby == '3.4.13'
+        run: gem build litebackup.gemspec
+
+  php:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The minors php/scripts/test runs in Docker, at their pinned patch
+        # releases (8.2.36, 8.3.37, 8.4.28, 8.5.13); setup-php takes the minor.
+        php: ["8.2", "8.3", "8.4", "8.5"]
+    defaults:
+      run:
+        working-directory: php
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, sqlite3, sodium, pcntl, zip
+          tools: composer:2.11.3
+          coverage: none
+      - name: Install
+        run: composer install --no-interaction --no-progress
+      - name: Test
+        run: vendor/bin/phpunit
+      - name: PHPStan
+        run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+      - name: PHP-CS-Fixer
+        run: vendor/bin/php-cs-fixer check --diff --show-progress=none
+      - name: Framework lanes
+        run: |
+          for lane in tests/frameworks/*/; do
+            lane="${lane%/}"
+            if [ -f "${lane}/php-versions" ] && grep --quiet --line-regexp --fixed-strings "${PHP_MINOR}" "${lane}/php-versions"; then
+              tests/frameworks/test-lane "$(basename "${lane}")"
+            fi
+          done
+        env:
+          PHP_MINOR: ${{ matrix.php }}
+      - name: Generated models are current
+        if: matrix.php == '8.2'
+        run: |
+          php scripts/generate
+          git diff --exit-code src/Generated src/*.php
+      - name: The package is valid
+        if: matrix.php == '8.2'
+        run: composer validate --strict
+
+  rust:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The minimum supported Rust and the stable release rust/scripts/test
+        # runs in Docker.
+        rust: ["1.94.1", "1.100.0"]
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: clippy, rustfmt
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: Clippy, every feature together
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Clippy, each feature alone and none
+        run: |
+          cargo clippy --locked --all-targets --no-default-features -- -D warnings
+          for feature in release rusqlite sqlx tracing; do
+            cargo clippy --locked --all-targets --no-default-features --features "${feature}" -- -D warnings
+          done
+      - name: Test
+        run: cargo test --locked --workspace --all-features
+      - name: Docs
+        run: cargo doc --locked --no-deps --all-features --package litebackup
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: Dependencies pass cargo-deny
+        if: matrix.rust == '1.100.0'
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: rust/Cargo.toml
+          command: check
+      - name: Generated models are current
+        if: matrix.rust == '1.100.0'
+        run: |
+          cargo xtask
+          git diff --exit-code src/generated
+      - name: The package builds on its own
+        if: matrix.rust == '1.94.1'
+        run: cargo package --locked

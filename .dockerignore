@@ -4,3 +4,10 @@
 **/*.tgz
 
 typescript/npm/*/bin/
+**/*.gem
+ruby/pkg
+ruby/.bundle
+ruby/vendor/bundle
+php/vendor
+php/tests/frameworks/*/vendor
+rust/target

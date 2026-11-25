@@ -1,5 +1,5 @@
 {
-  "description": "One name per operation and type in all three SDKs. An operation is group.method: TypeScript writes the method in camelCase, Python as it is here, and Go names it as go says: a method of Client, or a package function when go_function is set. Every type is exported under the same name by all three. Every operation a contract fixture runs is listed here.",
+  "description": "One name per operation and type in every SDK. An operation is group.method: TypeScript and PHP write the method in camelCase, Python and Ruby as it is here, and Go names it as go says: a method of Client, or a package function when go_function is set. Every type is exported under the same name by every SDK. Every operation a contract fixture runs is listed here.",
   "operations": [
     {
       "operation": "backups.start",

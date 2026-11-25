@@ -404,11 +404,19 @@ func (p *Pool[DB]) Lease(
 			Err:     ctx.Err(),
 		}
 	}
-	entry.lastCallFailed = workErr != nil
-	if workErr != nil || args.Durability == "" {
+	// The call counts as failed until its work and its durability wait both
+	// finished.
+	entry.lastCallFailed = true
+	if workErr != nil {
 		return workErr
 	}
-	return p.waitDurable(ctx, name, args.Durability)
+	if args.Durability != "" {
+		if err := p.waitDurable(ctx, name, args.Durability); err != nil {
+			return err
+		}
+	}
+	entry.lastCallFailed = false
+	return nil
 }
 
 // requireLease checks that this machine still holds a leased database's lock

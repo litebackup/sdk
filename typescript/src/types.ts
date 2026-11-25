@@ -58,7 +58,7 @@ export type DrainFailure = Camelize<Schemas["DrainFailure"]>;
 export type ShutdownResult = Camelize<Schemas["ShutdownResult"]>;
 
 /** The SDK version sent with every call. */
-export const sdkVersion = "1.2.0";
+export const sdkVersion = "1.3.0";
 
 /** The oldest daemon this SDK talks to; connecting to an older one fails with daemon_unsupported. */
 export const minimumDaemonVersion = "1.1.0";
