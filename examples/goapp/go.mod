@@ -3,7 +3,7 @@ module example.com/goapp
 go 1.26.0
 
 require (
-	github.com/litebackup/sdk v1.3.0
+	github.com/litebackup/sdk v1.4.0
 	modernc.org/sqlite v1.62.0
 )
 
