@@ -172,7 +172,7 @@ class _PoolEntry(Generic[DB]):
     """One database of a pool.
 
     turn serializes opening, bringing back, acquiring, lease calls, and releasing;
-    use calls share the open handle without it. users and last_used are guarded
+    use calls share the open handle without it. users and used are guarded
     by the pool's mutex.
     """
 
@@ -195,7 +195,7 @@ class _PoolEntry(Generic[DB]):
         while no process has it open, so the pool closes it as soon as the last use block exits."""
         self.users = 0
         """Calls between joining and leaving, bodies included."""
-        self.last_used: float | None = None
+        self.used: float | None = None
 
 
 def _create_empty_file(path: PathSource) -> None:
@@ -325,7 +325,7 @@ class _PoolCore(Generic[DB]):
         with self._mutex:
             entry.users -= 1
             self._active_calls -= 1
-            entry.last_used = time.monotonic()
+            entry.used = time.monotonic()
             if entry.users == 0 and not entry.opened and not entry.leased and self._entries.get(entry.name) is entry:
                 del self._entries[entry.name]
             if self._closing and self._active_calls == 0:
@@ -347,14 +347,14 @@ class _PoolCore(Generic[DB]):
 
     def _idle_entries(self) -> list[_PoolEntry[DB]]:
         with self._mutex:
-            return [entry for entry in self._entries.values() if entry.users == 0 and entry.last_used is not None]
+            return [entry for entry in self._entries.values() if entry.users == 0 and entry.used is not None]
 
     def _idle_seconds(self, entry: _PoolEntry[DB], now: float) -> float | None:
         """How long an entry has been unused, or None while a call uses it."""
         with self._mutex:
-            if entry.users > 0 or entry.last_used is None:
+            if entry.users > 0 or entry.used is None:
                 return None
-            return now - entry.last_used
+            return now - entry.used
 
     def _remove_unused_entry(self, entry: _PoolEntry[DB]) -> None:
         """Drops an entry with nothing open or leased once no call uses it."""

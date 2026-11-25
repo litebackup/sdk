@@ -151,6 +151,7 @@ const (
 	ErrorCodeNotDurable        ErrorCode = "not_durable"
 	ErrorCodeNotFound          ErrorCode = "not_found"
 	ErrorCodePlanLimit         ErrorCode = "plan_limit"
+	ErrorCodeRateLimited       ErrorCode = "rate_limited"
 	ErrorCodeRuleDatabase      ErrorCode = "rule_database"
 	ErrorCodeRuleExists        ErrorCode = "rule_exists"
 	ErrorCodeSDKUnsupported    ErrorCode = "sdk_unsupported"
@@ -205,6 +206,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeNotFound:
 		return true
 	case ErrorCodePlanLimit:
+		return true
+	case ErrorCodeRateLimited:
 		return true
 	case ErrorCodeRuleDatabase:
 		return true
@@ -448,50 +451,65 @@ type DatabaseStatus struct {
 	BackupRuleID string `json:"backup_rule_id,omitempty"`
 
 	// Draining set on a failover origin while this machine drains, and on one a drain released, which holds no write lock until it takes one again; a failover then reports its role as unknown, as after a draining event
-	Draining bool `json:"draining,omitempty"`
+	Draining bool      `json:"draining,omitempty"`
+	Error    string    `json:"error,omitempty"`
+	Failed   time.Time `json:"failed,omitempty"`
 
 	// Failover the database belongs to a failover and changes role when the origin does
-	Failover bool `json:"failover"`
-
-	// FirstUnsyncedChangeTime when the first change the server lacks was seen; absent when the server has every change seen. It survives restarts and may be earlier than the real first change, never later.
-	FirstUnsyncedChangeTime time.Time `json:"first_unsynced_change_time,omitempty"`
-	HintMisses              int64     `json:"hint_misses"`
+	Failover       bool   `json:"failover"`
+	FullScanReason string `json:"full_scan_reason,omitempty"`
+	HintMisses     int64  `json:"hint_misses"`
 
 	// JournalMode wal, rollback, or unknown before the first scan. A full scan of a rollback-journal database holds a read lock that blocks the app's writers until it ends, so it runs at full speed rather than at --scan-bytes-per-second, and the first scan past 256 MB records a rollback_scan event with its duration. Switch such a database to WAL mode (PRAGMA journal_mode = WAL), where scans never block writers; Litebackup never changes the journal mode itself.
-	JournalMode        string    `json:"journal_mode"`
-	LastError          string    `json:"last_error,omitempty"`
-	LastErrorTime      time.Time `json:"last_error_time,omitempty"`
-	LastFullScanReason string    `json:"last_full_scan_reason,omitempty"`
-	LocalChanged       bool      `json:"local_changed"`
+	JournalMode  string `json:"journal_mode"`
+	LocalChanged bool   `json:"local_changed"`
 
 	// MachineLabel the name this machine shows on the server and as the writer of its databases
 	MachineLabel string `json:"machine_label,omitempty"`
 	Maintenance  bool   `json:"maintenance,omitempty"`
 	Name         string `json:"name"`
 
-	// NextRetryTime when the next attempt of a failed sync runs; absent when none is scheduled
-	NextRetryTime time.Time `json:"next_retry_time,omitempty"`
+	// NextRetry when the next attempt of a failed sync runs; absent when none is scheduled
+	NextRetry time.Time `json:"next_retry,omitempty"`
 
 	// OffloadDurability how far a version must reach: server once the server holds it, cloud once the bucket holds it too
 	OffloadDurability Durability `json:"offload_durability,omitempty"`
 
 	// OffloadOnRelease the client deletes the released copy once offload_durability holds it
-	OffloadOnRelease bool   `json:"offload_on_release,omitempty"`
-	PageCount        int64  `json:"page_count"`
-	Path             string `json:"path"`
+	OffloadOnRelease bool `json:"offload_on_release,omitempty"`
+
+	// Offloaded when the local file was removed because the server or the bucket holds its version; absent once an acquire brings it back
+	Offloaded time.Time `json:"offloaded,omitempty"`
+	PageCount int64     `json:"page_count"`
+	Path      string    `json:"path"`
+
+	// Pending when a backup or failover origin was left without its write lock, by a start, a drain, or a dropped lock; absent once a sync takes the lock
+	Pending time.Time `json:"pending,omitempty"`
+
+	// Released when this machine last released the database
+	Released time.Time `json:"released,omitempty"`
+
+	// Retrying when the current run of failed syncs began, with the first failure after the last success; absent once a sync succeeds
+	Retrying time.Time `json:"retrying,omitempty"`
 
 	// Role origin when this machine writes the database and backs it up; replica for a live readonly copy
 	Role DatabaseStatusRole `json:"role"`
 
-	// State pending while a backup or failover origin holds no write lock, as after a start or a drain, until a sync takes it (a start takes back the lock of each backup a drain left pending while the head is still the version it last synced); syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced when the server holds every change: a backup or failover origin whose last sync landed with no change seen after it, until its next change, or a released database whose last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the server, or the bucket when the offload asked for it, holds its last version; stopped for a stopped replica; conflicted when this copy was refused and left as it is, because its file differs from the server head or its write lock was lost or broken; error with last_error
+	// State pending while a backup or failover origin holds no write lock, as after a start or a drain, until a sync takes it (a start takes back the lock of each backup a drain left pending while the head is still the version it last synced); syncing while changes stream; retrying while an origin's syncs fail, with error saying why and next_retry when the next attempt runs; synced when the server holds every change: a backup or failover origin whose last sync landed with no change seen after it, until its next change, or a released database whose last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the server, or the bucket when the offload asked for it, holds its last version; stopped for a stopped replica; conflicted when this copy was refused and left as it is, because its file differs from the server head or its write lock was lost or broken; error, with error saying why
 	State     DatabaseStatusState `json:"state"`
 	SyncCount int64               `json:"sync_count"`
+
+	// Synced when the newest sync landed, the time synced_server holds
+	Synced time.Time `json:"synced,omitempty"`
 
 	// SyncedCloud The newest version the server reported the primary bucket holds.
 	SyncedCloud ArchivedVersion `json:"synced_cloud"`
 
 	// SyncedServer A version the server acknowledged. Clients decide what durability is enough.
 	SyncedServer SyncedState `json:"synced_server"`
+
+	// Syncing when the first change the server lacks was seen; absent when the server has every change seen. It survives restarts and may be earlier than the real first change, never later.
+	Syncing time.Time `json:"syncing,omitempty"`
 
 	// WriterMachineLabel the machine label of the last writer this machine saw; empty once this machine released the database, drained it, or offloaded a copy whose write lock it held, as no writer is known then
 	WriterMachineLabel string `json:"writer_machine_label,omitempty"`
@@ -500,7 +518,7 @@ type DatabaseStatus struct {
 // DatabaseStatusRole origin when this machine writes the database and backs it up; replica for a live readonly copy
 type DatabaseStatusRole string
 
-// DatabaseStatusState pending while a backup or failover origin holds no write lock, as after a start or a drain, until a sync takes it (a start takes back the lock of each backup a drain left pending while the head is still the version it last synced); syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced when the server holds every change: a backup or failover origin whose last sync landed with no change seen after it, until its next change, or a released database whose last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the server, or the bucket when the offload asked for it, holds its last version; stopped for a stopped replica; conflicted when this copy was refused and left as it is, because its file differs from the server head or its write lock was lost or broken; error with last_error
+// DatabaseStatusState pending while a backup or failover origin holds no write lock, as after a start or a drain, until a sync takes it (a start takes back the lock of each backup a drain left pending while the head is still the version it last synced); syncing while changes stream; retrying while an origin's syncs fail, with error saying why and next_retry when the next attempt runs; synced when the server holds every change: a backup or failover origin whose last sync landed with no change seen after it, until its next change, or a released database whose last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the server, or the bucket when the offload asked for it, holds its last version; stopped for a stopped replica; conflicted when this copy was refused and left as it is, because its file differs from the server head or its write lock was lost or broken; error, with error saying why
 type DatabaseStatusState string
 
 // DatabaseStatusList defines model for DatabaseStatusList.
@@ -513,7 +531,7 @@ type DatabaseStatusList struct {
 
 // DrainFailure defines model for DrainFailure.
 type DrainFailure struct {
-	// Code What went wrong, in one word. The socket answers with file_exists (the file a restore or an acquire would write, or a -journal, -wal, or -shm beside it, already exists), rule_exists (a backup rule with other settings already covers the path, and the error carries that rule), lock_unavailable (another machine holds the write lock a command asks for, as an acquire, a revert, or a failover does), not_found, still_open, invalid_argument, timeout, cursor_expired (an events cursor older than the oldest event kept), changed (an offload or acquire refused because the local file changed under it: written after its last sync, never synced, or written while an acquire replaced it), rule_database (a release of a database a backup rule on this machine keeps, whose write lock the rule never gives up; stop its backup to hand it off), not_durable (an offload refused until the server, or the bucket when it waits for cloud, holds the synced version, or a cloud wait whose name now holds another server database), and the others by their names; busy (a foreground backup refused because another job, a continuous backup, or another machine writes the database), cancelled (a command interrupted before it finished), drain_required (a credential other than the one the client took its write locks with, refused until a drain released them), and launch_failed (the command could not start the client on this machine, or the client exited before it listened) come from the litebackup command alone, which also answers unauthenticated when this machine has not joined a server. A refusal from the server becomes client_unsupported (426: the server needs a newer litebackup on this machine) or, with 503, not_configured (the server waits for setup), wrong_server (the server this machine reached is not the one its session joined, or does not own the database), unauthenticated (the server no longer accepts this machine's key), forbidden (the key may not do this), plan_limit (the server's plan has no room for another database), or integrity (the version's bucket objects failed an integrity check). lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is unavailable. A client treats a code it does not know as a failure.
+	// Code What went wrong, in one word. The socket answers with file_exists (the file a restore or an acquire would write, or a -journal, -wal, or -shm beside it, already exists), rule_exists (a backup rule with other settings already covers the path, and the error carries that rule), lock_unavailable (another machine holds the write lock a command asks for, as an acquire, a revert, or a failover does), not_found, still_open, invalid_argument, timeout, cursor_expired (an events cursor older than the oldest event kept), changed (an offload or acquire refused because the local file changed under it: written after its last sync, never synced, or written while an acquire replaced it), rule_database (a release of a database a backup rule on this machine keeps, whose write lock the rule never gives up; stop its backup to hand it off), not_durable (an offload refused until the server, or the bucket when it waits for cloud, holds the synced version, or a cloud wait whose name now holds another server database), and the others by their names; busy (a foreground backup refused because another job, a continuous backup, or another machine writes the database), cancelled (a command interrupted before it finished), drain_required (a credential other than the one the client took its write locks with, refused until a drain released them), and launch_failed (the command could not start the client on this machine, or the client exited before it listened) come from the litebackup command alone, which also answers unauthenticated when this machine has not joined a server. A refusal from the server becomes client_unsupported (426: the server needs a newer litebackup on this machine) or, with 503, not_configured (the server waits for setup), wrong_server (the server this machine reached is not the one its session joined, or does not own the database), unauthenticated (the server no longer accepts this machine's key), forbidden (the key may not do this), plan_limit (the server's plan has no room for another database), rate_limited (the server sheds load and asks to be tried later: a restore retries it for about 30 seconds, as its Retry-After says, before it answers so), or integrity (the version's bucket objects failed an integrity check). A restore answers integrity too when every page of the version arrived intact but SQLite's quick_check finds the database damaged: the version itself is corrupt, so a retry gives the same file, and an earlier version is the way back. A transfer cut short stays unavailable. lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is unavailable. A client treats a code it does not know as a failure.
 	Code    ErrorCode `json:"code"`
 	Message string    `json:"message"`
 	Name    string    `json:"name"`
@@ -522,7 +540,7 @@ type DrainFailure struct {
 // Durability how far a version must reach: server once the server holds it, cloud once the bucket holds it too
 type Durability string
 
-// ErrorCode What went wrong, in one word. The socket answers with file_exists (the file a restore or an acquire would write, or a -journal, -wal, or -shm beside it, already exists), rule_exists (a backup rule with other settings already covers the path, and the error carries that rule), lock_unavailable (another machine holds the write lock a command asks for, as an acquire, a revert, or a failover does), not_found, still_open, invalid_argument, timeout, cursor_expired (an events cursor older than the oldest event kept), changed (an offload or acquire refused because the local file changed under it: written after its last sync, never synced, or written while an acquire replaced it), rule_database (a release of a database a backup rule on this machine keeps, whose write lock the rule never gives up; stop its backup to hand it off), not_durable (an offload refused until the server, or the bucket when it waits for cloud, holds the synced version, or a cloud wait whose name now holds another server database), and the others by their names; busy (a foreground backup refused because another job, a continuous backup, or another machine writes the database), cancelled (a command interrupted before it finished), drain_required (a credential other than the one the client took its write locks with, refused until a drain released them), and launch_failed (the command could not start the client on this machine, or the client exited before it listened) come from the litebackup command alone, which also answers unauthenticated when this machine has not joined a server. A refusal from the server becomes client_unsupported (426: the server needs a newer litebackup on this machine) or, with 503, not_configured (the server waits for setup), wrong_server (the server this machine reached is not the one its session joined, or does not own the database), unauthenticated (the server no longer accepts this machine's key), forbidden (the key may not do this), plan_limit (the server's plan has no room for another database), or integrity (the version's bucket objects failed an integrity check). lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is unavailable. A client treats a code it does not know as a failure.
+// ErrorCode What went wrong, in one word. The socket answers with file_exists (the file a restore or an acquire would write, or a -journal, -wal, or -shm beside it, already exists), rule_exists (a backup rule with other settings already covers the path, and the error carries that rule), lock_unavailable (another machine holds the write lock a command asks for, as an acquire, a revert, or a failover does), not_found, still_open, invalid_argument, timeout, cursor_expired (an events cursor older than the oldest event kept), changed (an offload or acquire refused because the local file changed under it: written after its last sync, never synced, or written while an acquire replaced it), rule_database (a release of a database a backup rule on this machine keeps, whose write lock the rule never gives up; stop its backup to hand it off), not_durable (an offload refused until the server, or the bucket when it waits for cloud, holds the synced version, or a cloud wait whose name now holds another server database), and the others by their names; busy (a foreground backup refused because another job, a continuous backup, or another machine writes the database), cancelled (a command interrupted before it finished), drain_required (a credential other than the one the client took its write locks with, refused until a drain released them), and launch_failed (the command could not start the client on this machine, or the client exited before it listened) come from the litebackup command alone, which also answers unauthenticated when this machine has not joined a server. A refusal from the server becomes client_unsupported (426: the server needs a newer litebackup on this machine) or, with 503, not_configured (the server waits for setup), wrong_server (the server this machine reached is not the one its session joined, or does not own the database), unauthenticated (the server no longer accepts this machine's key), forbidden (the key may not do this), plan_limit (the server's plan has no room for another database), rate_limited (the server sheds load and asks to be tried later: a restore retries it for about 30 seconds, as its Retry-After says, before it answers so), or integrity (the version's bucket objects failed an integrity check). A restore answers integrity too when every page of the version arrived intact but SQLite's quick_check finds the database damaged: the version itself is corrupt, so a retry gives the same file, and an earlier version is the way back. A transfer cut short stays unavailable. lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is unavailable. A client treats a code it does not know as a failure.
 type ErrorCode string
 
 // Event defines model for Event.
@@ -609,8 +627,10 @@ type ReleaseRequest struct {
 type ReleaseResult struct {
 	Checkpointed bool           `json:"checkpointed"`
 	Database     DatabaseStatus `json:"database"`
-	Offloaded    bool           `json:"offloaded"`
-	Vacuumed     bool           `json:"vacuumed"`
+
+	// Offloaded when the release removed the local file; absent when it kept the file
+	Offloaded time.Time `json:"offloaded,omitempty"`
+	Vacuumed  bool      `json:"vacuumed"`
 }
 
 // ReplicaList defines model for ReplicaList.
@@ -721,11 +741,11 @@ type ShutdownRequestDurability string
 
 // ShutdownResult defines model for ShutdownResult.
 type ShutdownResult struct {
-	// Failed every database the drain could not sync, wait for, or release, each keeping any write lock it holds, and every conflicted copy whose writes are not on the server, with conflict; empty only when the drain released every database it covers, which is the one case the daemon stops
-	Failed []DrainFailure `json:"failed"`
+	// Failures every database the drain could not sync, wait for, or release, each keeping any write lock it holds, and every conflicted copy whose writes are not on the server, with conflict; empty only when the drain released every database it covers, which is the one case the daemon stops
+	Failures []DrainFailure `json:"failures"`
 
-	// Released how many databases the drain synced as asked and released
-	Released int64 `json:"released"`
+	// ReleasedCount how many databases the drain synced as asked and released
+	ReleasedCount int64 `json:"released_count"`
 }
 
 // Status defines model for Status.
@@ -785,9 +805,6 @@ type VersionList struct {
 
 // Writer defines model for Writer.
 type Writer struct {
-	// AcquiredTime when the writer took the lock
-	AcquiredTime time.Time `json:"acquired_time,omitempty"`
-
 	// Active whether some machine holds the write lock and its lease still runs
 	Active bool `json:"active"`
 
@@ -798,8 +815,11 @@ type Writer struct {
 	LeaseExpires time.Time `json:"lease_expires,omitempty"`
 
 	// LeaseRemainingMillis how long the lease still runs, negative once it ran out
-	LeaseRemainingMillis int64  `json:"lease_remaining_millis,omitempty"`
-	Name                 string `json:"name"`
+	LeaseRemainingMillis int64 `json:"lease_remaining_millis,omitempty"`
+
+	// LockAcquired when the writer took the lock
+	LockAcquired time.Time `json:"lock_acquired,omitempty"`
+	Name         string    `json:"name"`
 
 	// ThisMachine whether this machine's session holds the write lock
 	ThisMachine bool `json:"this_machine"`

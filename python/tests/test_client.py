@@ -62,7 +62,7 @@ def test_keep_alive_reuses_one_connection() -> None:
         with Litebackup(socket_path=daemon.socket_path) as client:
             for _ in range(5):
                 assert client.rules.list() == []
-            assert client.client_version == "1.1.0"
+            assert client.client_version == "1.5.0"
         assert len(connections) == 1
     finally:
         daemon.close()

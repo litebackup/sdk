@@ -137,7 +137,7 @@ class Litebackup:
             raise _closed_error()
 
     def connect(self) -> None:
-        """Connects, starting the daemon when needed; fails with daemon_unsupported for a daemon older than 1.1.0."""
+        """Connects, starting the daemon when needed; fails with daemon_unsupported for a daemon older than 1.5.0."""
         self._ensure_open()
         with self._connect_lock:
             if self._connected:
@@ -515,8 +515,8 @@ class Session(_Group):
         """Final-syncs every database, releases every write lock, and stops the daemon.
 
         A backup another machine writes holds no lock and stays waiting. Each database
-        it could not sync or release is in failed, with its code, and keeps any write lock it holds;
-        the session and the daemon then stay. An empty failed is the only complete
+        it could not sync or release is in failures, with its code, and keeps any write lock it holds;
+        the session and the daemon then stay. An empty failures is the only complete
         shutdown. close() never does this.
         """
         return self._client._call(_wire.shutdown(durability=durability, timeout=timeout))
@@ -611,7 +611,7 @@ class AsyncLitebackup:
             raise _closed_error()
 
     async def connect(self) -> None:
-        """Connects, starting the daemon when needed; fails with daemon_unsupported for a daemon older than 1.1.0."""
+        """Connects, starting the daemon when needed; fails with daemon_unsupported for a daemon older than 1.5.0."""
         self._ensure_open()
         if self._connect_lock is None:
             self._connect_lock = asyncio.Lock()

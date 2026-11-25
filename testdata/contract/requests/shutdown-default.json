@@ -9,7 +9,7 @@
     "body": {}
   },
   "response": {
-    "released": 0,
-    "failed": []
+    "released_count": 0,
+    "failures": []
   }
 }

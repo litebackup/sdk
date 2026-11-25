@@ -139,7 +139,7 @@ Every call sends `Litebackup-SDK-Version: <language>/<version>`, such as
 
 Connecting sends `GET /v1/status/show?limit=1`. When the answer's
 `Litebackup-Client-Version` is missing or older than the SDK's minimum
-daemon version (1.1.0), the connect fails with `daemon_unsupported`. The
+daemon version (1.5.0), the connect fails with `daemon_unsupported`. The
 message names both versions and how to replace the daemon: `litebackup drain
 --session <session>` stops it after a final sync, and the next call starts the
 new binary. A service that `litebackup install service` set up is restarted

@@ -6,7 +6,7 @@ Add the crate `litebackup` from crates.io, with the features you need:
 
 ```toml
 [dependencies]
-litebackup = { version = "1.4.0", features = ["rusqlite"] }
+litebackup = { version = "1.5.0", features = ["rusqlite"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

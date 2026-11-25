@@ -27,8 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.close();
     stepped?;
     let shutdown = shutdown?;
-    if !shutdown.failed.is_empty() {
-        let names: Vec<&str> = shutdown.failed.iter().map(|failure| failure.name.as_str()).collect();
+    if !shutdown.failures.is_empty() {
+        let names: Vec<&str> = shutdown.failures.iter().map(|failure| failure.name.as_str()).collect();
         eprintln!("the session kept {}", names.join(", "));
     }
     println!("rust handoff ok");

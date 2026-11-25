@@ -1,1 +1,1 @@
-litebackup[django]==1.4.0
+litebackup[django]==1.5.0

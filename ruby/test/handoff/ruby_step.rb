@@ -32,7 +32,7 @@ begin
 ensure
   begin
     shutdown = client.session.shutdown(durability: "server")
-    warn("the session kept #{shutdown.failed.map(&:name).join(", ")}") unless shutdown.failed.empty?
+    warn("the session kept #{shutdown.failures.map(&:name).join(", ")}") unless shutdown.failures.empty?
   ensure
     client.close
   end

@@ -246,7 +246,7 @@ struct Usage {
     /// The calls running or waiting for the turn.
     users: usize,
     /// When the last call ended.
-    last_used: Option<Instant>,
+    used: Option<Instant>,
 }
 
 /// An entry's database, guarded by its turn.
@@ -391,7 +391,7 @@ impl<A: Adapter> Drop for PoolCall<A> {
         {
             let mut usage = lock(&self.entry.usage);
             usage.users -= 1;
-            usage.last_used = Some(Instant::now());
+            usage.used = Some(Instant::now());
         }
         if self.close_pending
             && let Ok(runtime) = tokio::runtime::Handle::try_current()
@@ -1177,8 +1177,8 @@ async fn check_idle_databases<A: Adapter>(pool_reference: Weak<PoolShared<A>>, s
             .values()
             .filter_map(|entry| {
                 let usage = lock(&entry.usage);
-                let last_used = usage.last_used.filter(|_| usage.users == 0)?;
-                Some((Arc::clone(entry), now.saturating_duration_since(last_used)))
+                let used = usage.used.filter(|_| usage.users == 0)?;
+                Some((Arc::clone(entry), now.saturating_duration_since(used)))
             })
             .collect();
         for (entry, idle_time) in idle {

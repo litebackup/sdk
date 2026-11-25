@@ -159,14 +159,13 @@ impl fmt::Display for Role {
 /// Pending while a backup or failover origin holds no write lock, as after a start or a drain,
 /// until a sync takes it (a start takes back the lock of each backup a drain left pending while the
 /// head is still the version it last synced); syncing while changes stream; retrying while an
-/// origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs;
-/// synced when the server holds every change: a backup or failover origin whose last sync landed
-/// with no change seen after it, until its next change, or a released database whose last version
-/// is on the server; waiting while another machine is the origin; offloaded when the local file was
-/// removed because the server, or the bucket when the offload asked for it, holds its last version;
-/// stopped for a stopped replica; conflicted when this copy was refused and left as it is, because
-/// its file differs from the server head or its write lock was lost or broken; error with
-/// last_error.
+/// origin's syncs fail, with error saying why and next_retry when the next attempt runs; synced
+/// when the server holds every change: a backup or failover origin whose last sync landed with no
+/// change seen after it, until its next change, or a released database whose last version is on the
+/// server; waiting while another machine is the origin; offloaded when the local file was removed
+/// because the server, or the bucket when the offload asked for it, holds its last version; stopped
+/// for a stopped replica; conflicted when this copy was refused and left as it is, because its file
+/// differs from the server head or its write lock was lost or broken; error, with error saying why.
 ///
 /// Values this SDK does not know are kept as they are, so compare with `==`
 /// against the constants or read [`as_str`](Self::as_str).
@@ -366,14 +365,14 @@ pub struct DatabaseStatus {
     /// Pending while a backup or failover origin holds no write lock, as after a start or a drain,
     /// until a sync takes it (a start takes back the lock of each backup a drain left pending while
     /// the head is still the version it last synced); syncing while changes stream; retrying while
-    /// an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt
-    /// runs; synced when the server holds every change: a backup or failover origin whose last sync
+    /// an origin's syncs fail, with error saying why and next_retry when the next attempt runs;
+    /// synced when the server holds every change: a backup or failover origin whose last sync
     /// landed with no change seen after it, until its next change, or a released database whose
     /// last version is on the server; waiting while another machine is the origin; offloaded when
     /// the local file was removed because the server, or the bucket when the offload asked for it,
     /// holds its last version; stopped for a stopped replica; conflicted when this copy was refused
     /// and left as it is, because its file differs from the server head or its write lock was lost
-    /// or broken; error with last_error.
+    /// or broken; error, with error saying why.
     #[serde(deserialize_with = "null_as_default")]
     pub state: DatabaseState,
     /// The database is acquired and released by a worker rather than backed up continuously.
@@ -412,27 +411,45 @@ pub struct DatabaseStatus {
     /// The daemon's `hint_misses`.
     #[serde(deserialize_with = "null_as_default")]
     pub hint_misses: i64,
-    /// The daemon's `last_full_scan_reason`.
+    /// The daemon's `full_scan_reason`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_full_scan_reason: Option<String>,
+    pub full_scan_reason: Option<String>,
     /// The machine label of the last writer this machine saw; empty once this machine released the
     /// database, drained it, or offloaded a copy whose write lock it held, as no writer is known
     /// then.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub writer_machine_label: Option<String>,
-    /// The daemon's `last_error`.
+    /// The daemon's `error`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_error: Option<String>,
-    /// The daemon's `last_error_time`.
+    pub error: Option<String>,
+    /// The daemon's `failed`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_error_time: Option<jiff::Timestamp>,
+    pub failed: Option<jiff::Timestamp>,
     /// When the first change the server lacks was seen; absent when the server has every change
     /// seen. It survives restarts and may be earlier than the real first change, never later.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub first_unsynced_change_time: Option<jiff::Timestamp>,
+    pub syncing: Option<jiff::Timestamp>,
+    /// When the current run of failed syncs began, with the first failure after the last success;
+    /// absent once a sync succeeds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retrying: Option<jiff::Timestamp>,
+    /// When the newest sync landed, the time synced_server holds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub synced: Option<jiff::Timestamp>,
+    /// When a backup or failover origin was left without its write lock, by a start, a drain, or a
+    /// dropped lock; absent once a sync takes the lock.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<jiff::Timestamp>,
+    /// When this machine last released the database.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub released: Option<jiff::Timestamp>,
+    /// When the local file was removed because the server or the bucket holds its version; absent
+    /// once an acquire brings it back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offloaded: Option<jiff::Timestamp>,
     /// When the next attempt of a failed sync runs; absent when none is scheduled.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_retry_time: Option<jiff::Timestamp>,
+    pub next_retry: Option<jiff::Timestamp>,
     /// Set on a failover origin while this machine drains, and on one a drain released, which holds
     /// no write lock until it takes one again; a failover then reports its role as unknown, as
     /// after a draining event.
@@ -645,9 +662,9 @@ pub struct ReleaseResult {
     /// The daemon's `vacuumed`.
     #[serde(deserialize_with = "null_as_default")]
     pub vacuumed: bool,
-    /// The daemon's `offloaded`.
-    #[serde(deserialize_with = "null_as_default")]
-    pub offloaded: bool,
+    /// When the release removed the local file; absent when it kept the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offloaded: Option<jiff::Timestamp>,
 }
 
 /// A `Writer` the daemon answers with.
@@ -669,7 +686,7 @@ pub struct Writer {
     pub writer_machine_label: String,
     /// When the writer took the lock.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub acquired_time: Option<jiff::Timestamp>,
+    pub lock_acquired: Option<jiff::Timestamp>,
     /// On the server's clock.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lease_expires: Option<jiff::Timestamp>,
@@ -814,10 +831,15 @@ pub struct DrainFailure {
     /// server waits for setup), wrong_server (the server this machine reached is not the one its
     /// session joined, or does not own the database), unauthenticated (the server no longer accepts
     /// this machine's key), forbidden (the key may not do this), plan_limit (the server's plan has
-    /// no room for another database), or integrity (the version's bucket objects failed an
-    /// integrity check). lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep
-    /// their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is
-    /// unavailable. A client treats a code it does not know as a failure.
+    /// no room for another database), rate_limited (the server sheds load and asks to be tried
+    /// later: a restore retries it for about 30 seconds, as its Retry-After says, before it answers
+    /// so), or integrity (the version's bucket objects failed an integrity check). A restore
+    /// answers integrity too when every page of the version arrived intact but SQLite's quick_check
+    /// finds the database damaged: the version itself is corrupt, so a retry gives the same file,
+    /// and an earlier version is the way back. A transfer cut short stays unavailable.
+    /// lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep their meaning,
+    /// and any other refusal (a busy server, one short of disk, one unreachable) is unavailable. A
+    /// client treats a code it does not know as a failure.
     #[serde(deserialize_with = "null_as_default")]
     pub code: String,
     /// The daemon's `message`.
@@ -832,11 +854,11 @@ pub struct DrainFailure {
 pub struct ShutdownResult {
     /// How many databases the drain synced as asked and released.
     #[serde(deserialize_with = "null_as_default")]
-    pub released: i64,
+    pub released_count: i64,
     /// Every database the drain could not sync, wait for, or release, each keeping any write lock
     /// it holds, and every conflicted copy whose writes are not on the server, with conflict; empty
     /// only when the drain released every database it covers, which is the one case the daemon
     /// stops.
     #[serde(deserialize_with = "null_as_default")]
-    pub failed: Vec<DrainFailure>,
+    pub failures: Vec<DrainFailure>,
 }

@@ -100,7 +100,7 @@ module Litebackup
       ].freeze
     end
 
-    class DatabaseStatus < Data.define(:name, :path, :role, :state, :acquired, :failover, :backup_rule_id, :local_changed, :synced_server, :synced_cloud, :journal_mode, :page_count, :sync_count, :hint_misses, :last_full_scan_reason, :writer_machine_label, :last_error, :last_error_time, :first_unsynced_change_time, :next_retry_time, :draining, :machine_label, :maintenance, :offload_on_release, :offload_durability)
+    class DatabaseStatus < Data.define(:name, :path, :role, :state, :acquired, :failover, :backup_rule_id, :local_changed, :synced_server, :synced_cloud, :journal_mode, :page_count, :sync_count, :hint_misses, :full_scan_reason, :writer_machine_label, :error, :failed, :syncing, :retrying, :synced, :pending, :released, :offloaded, :next_retry, :draining, :machine_label, :maintenance, :offload_on_release, :offload_durability)
       extend WireModel
       ROLE_ORIGIN = "origin"
       ROLE_REPLICA = "replica"
@@ -119,14 +119,14 @@ module Litebackup
       # state: pending while a backup or failover origin holds no write lock, as after a start or a
       # drain, until a sync takes it (a start takes back the lock of each backup a drain left
       # pending while the head is still the version it last synced); syncing while changes stream;
-      # retrying while an origin's syncs fail, with last_error saying why and next_retry_time when
-      # the next attempt runs; synced when the server holds every change: a backup or failover
-      # origin whose last sync landed with no change seen after it, until its next change, or a
-      # released database whose last version is on the server; waiting while another machine is the
-      # origin; offloaded when the local file was removed because the server, or the bucket when the
-      # offload asked for it, holds its last version; stopped for a stopped replica; conflicted when
-      # this copy was refused and left as it is, because its file differs from the server head or
-      # its write lock was lost or broken; error with last_error
+      # retrying while an origin's syncs fail, with error saying why and next_retry when the next
+      # attempt runs; synced when the server holds every change: a backup or failover origin whose
+      # last sync landed with no change seen after it, until its next change, or a released database
+      # whose last version is on the server; waiting while another machine is the origin; offloaded
+      # when the local file was removed because the server, or the bucket when the offload asked for
+      # it, holds its last version; stopped for a stopped replica; conflicted when this copy was
+      # refused and left as it is, because its file differs from the server head or its write lock
+      # was lost or broken; error, with error saying why
       # acquired: the database is acquired and released by a worker rather than backed up
       # continuously
       # failover: the database belongs to a failover and changes role when the origin does
@@ -141,10 +141,18 @@ module Litebackup
       # writer_machine_label: the machine label of the last writer this machine saw; empty once this
       # machine released the database, drained it, or offloaded a copy whose write lock it held, as
       # no writer is known then
-      # first_unsynced_change_time: when the first change the server lacks was seen; absent when the
-      # server has every change seen. It survives restarts and may be earlier than the real first
-      # change, never later.
-      # next_retry_time: when the next attempt of a failed sync runs; absent when none is scheduled
+      # syncing: when the first change the server lacks was seen; absent when the server has every
+      # change seen. It survives restarts and may be earlier than the real first change, never
+      # later.
+      # retrying: when the current run of failed syncs began, with the first failure after the last
+      # success; absent once a sync succeeds
+      # synced: when the newest sync landed, the time synced_server holds
+      # pending: when a backup or failover origin was left without its write lock, by a start, a
+      # drain, or a dropped lock; absent once a sync takes the lock
+      # released: when this machine last released the database
+      # offloaded: when the local file was removed because the server or the bucket holds its
+      # version; absent once an acquire brings it back
+      # next_retry: when the next attempt of a failed sync runs; absent when none is scheduled
       # draining: set on a failover origin while this machine drains, and on one a drain released,
       # which holds no write lock until it takes one again; a failover then reports its role as
       # unknown, as after a draining event
@@ -169,12 +177,17 @@ module Litebackup
         page_count: [:integer, true],
         sync_count: [:integer, true],
         hint_misses: [:integer, true],
-        last_full_scan_reason: [:string, false],
+        full_scan_reason: [:string, false],
         writer_machine_label: [:string, false],
-        last_error: [:string, false],
-        last_error_time: [:time, false],
-        first_unsynced_change_time: [:time, false],
-        next_retry_time: [:time, false],
+        error: [:string, false],
+        failed: [:time, false],
+        syncing: [:time, false],
+        retrying: [:time, false],
+        synced: [:time, false],
+        pending: [:time, false],
+        released: [:time, false],
+        offloaded: [:time, false],
+        next_retry: [:time, false],
         draining: [:boolean, false],
         machine_label: [:string, false],
         maintenance: [:boolean, false],
@@ -225,11 +238,15 @@ module Litebackup
     # on this machine) or, with 503, not_configured (the server waits for setup), wrong_server (the
     # server this machine reached is not the one its session joined, or does not own the database),
     # unauthenticated (the server no longer accepts this machine's key), forbidden (the key may not
-    # do this), plan_limit (the server's plan has no room for another database), or integrity (the
-    # version's bucket objects failed an integrity check). lock_unavailable, lock_lost, not_found,
-    # invalid_argument, and timeout keep their meaning, and any other refusal (a busy server, one
-    # short of disk, one unreachable) is unavailable. A client treats a code it does not know as a
-    # failure.
+    # do this), plan_limit (the server's plan has no room for another database), rate_limited (the
+    # server sheds load and asks to be tried later: a restore retries it for about 30 seconds, as
+    # its Retry-After says, before it answers so), or integrity (the version's bucket objects failed
+    # an integrity check). A restore answers integrity too when every page of the version arrived
+    # intact but SQLite's quick_check finds the database damaged: the version itself is corrupt, so
+    # a retry gives the same file, and an earlier version is the way back. A transfer cut short
+    # stays unavailable. lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep
+    # their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is
+    # unavailable. A client treats a code it does not know as a failure.
     module ErrorCode
       BUSY = "busy"
       CANCELLED = "cancelled"
@@ -252,6 +269,7 @@ module Litebackup
       NOT_DURABLE = "not_durable"
       NOT_FOUND = "not_found"
       PLAN_LIMIT = "plan_limit"
+      RATE_LIMITED = "rate_limited"
       RULE_DATABASE = "rule_database"
       RULE_EXISTS = "rule_exists"
       SDK_UNSUPPORTED = "sdk_unsupported"
@@ -282,6 +300,7 @@ module Litebackup
         NOT_DURABLE,
         NOT_FOUND,
         PLAN_LIMIT,
+        RATE_LIMITED,
         RULE_DATABASE,
         RULE_EXISTS,
         SDK_UNSUPPORTED,
@@ -485,11 +504,12 @@ module Litebackup
 
     class ReleaseResult < Data.define(:database, :checkpointed, :vacuumed, :offloaded)
       extend WireModel
+      # offloaded: when the release removed the local file; absent when it kept the file
       WIRE_FIELDS = {
         database: [[:model, :DatabaseStatus], true],
         checkpointed: [:boolean, true],
         vacuumed: [:boolean, true],
-        offloaded: [:boolean, true]
+        offloaded: [:time, false]
       }.freeze
     end
 
@@ -504,12 +524,12 @@ module Litebackup
       }.freeze
     end
 
-    class Writer < Data.define(:name, :active, :this_machine, :writer_machine_label, :acquired_time, :lease_expires, :lease_remaining_millis, :lapsed)
+    class Writer < Data.define(:name, :active, :this_machine, :writer_machine_label, :lock_acquired, :lease_expires, :lease_remaining_millis, :lapsed)
       extend WireModel
       # active: whether some machine holds the write lock and its lease still runs
       # this_machine: whether this machine's session holds the write lock
       # writer_machine_label: the machine label of the writer, or empty when nobody holds the lock
-      # acquired_time: when the writer took the lock
+      # lock_acquired: when the writer took the lock
       # lease_expires: on the server's clock
       # lease_remaining_millis: how long the lease still runs, negative once it ran out
       # lapsed: the writer's lease ran out, so another machine may take over
@@ -518,7 +538,7 @@ module Litebackup
         active: [:boolean, true],
         this_machine: [:boolean, true],
         writer_machine_label: [:string, true],
-        acquired_time: [:time, false],
+        lock_acquired: [:time, false],
         lease_expires: [:time, false],
         lease_remaining_millis: [:integer, false],
         lapsed: [:boolean, true]
@@ -708,16 +728,16 @@ module Litebackup
       }.freeze
     end
 
-    class ShutdownResult < Data.define(:released, :failed)
+    class ShutdownResult < Data.define(:released_count, :failures)
       extend WireModel
-      # released: how many databases the drain synced as asked and released
-      # failed: every database the drain could not sync, wait for, or release, each keeping any
+      # released_count: how many databases the drain synced as asked and released
+      # failures: every database the drain could not sync, wait for, or release, each keeping any
       # write lock it holds, and every conflicted copy whose writes are not on the server, with
       # conflict; empty only when the drain released every database it covers, which is the one case
       # the daemon stops
       WIRE_FIELDS = {
-        released: [:integer, true],
-        failed: [[:list, [:model, :DrainFailure]], true]
+        released_count: [:integer, true],
+        failures: [[:list, [:model, :DrainFailure]], true]
       }.freeze
     end
   end

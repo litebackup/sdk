@@ -26,6 +26,7 @@ module Litebackup
     NOT_DURABLE = "not_durable"
     NOT_FOUND = "not_found"
     PLAN_LIMIT = "plan_limit"
+    RATE_LIMITED = "rate_limited"
     RULE_DATABASE = "rule_database"
     RULE_EXISTS = "rule_exists"
     SDK_UNSUPPORTED = "sdk_unsupported"

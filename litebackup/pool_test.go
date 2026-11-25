@@ -35,7 +35,7 @@ type leaseDaemon struct {
 func newLeaseDaemon(t *testing.T, status map[string]any) *leaseDaemon {
 	t.Helper()
 	daemon := &leaseDaemon{steps: &scopeSteps{}, status: status}
-	version := "1.1.0"
+	version := "1.5.0"
 	daemon.contractDaemon = newContractDaemon(t, &version, daemon.answer)
 	return daemon
 }

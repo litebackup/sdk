@@ -31,11 +31,11 @@ import (
 
 // SDKVersion is the version sent with every call. Daemons refuse SDKs older
 // than their minimum with sdk_unsupported.
-const SDKVersion = "1.4.0"
+const SDKVersion = "1.5.0"
 
 // MinimumDaemonVersion is the oldest daemon this SDK talks to. Connect
 // refuses an older one with daemon_unsupported.
-const MinimumDaemonVersion = "1.1.0"
+const MinimumDaemonVersion = "1.5.0"
 
 const (
 	sdkVersionHeader    = "Litebackup-SDK-Version"
@@ -1058,8 +1058,8 @@ type ShutdownArgs struct {
 // Shutdown syncs every database a final time, releases every write lock,
 // ends the session, and stops the daemon. A backup another machine writes
 // holds no lock and stays waiting. Each database it could not sync or
-// release is in Failed, with its code, and keeps any write lock it holds; the session and
-// the daemon then stay. An empty Failed is the only complete shutdown.
+// release is in Failures, with its code, and keeps any write lock it holds; the session and
+// the daemon then stay. An empty Failures is the only complete shutdown.
 // Close never does this.
 func (c *Client) Shutdown(ctx context.Context, args *ShutdownArgs) (*ShutdownResult, error) {
 	if args == nil {

@@ -25,6 +25,7 @@ const (
 	specCodeNotDurable        = "not_durable"
 	specCodeNotFound          = "not_found"
 	specCodePlanLimit         = "plan_limit"
+	specCodeRateLimited       = "rate_limited"
 	specCodeRuleDatabase      = "rule_database"
 	specCodeRuleExists        = "rule_exists"
 	specCodeSDKUnsupported    = "sdk_unsupported"

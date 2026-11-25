@@ -82,7 +82,7 @@ bundles, then `litebackup` on `PATH`, then `~/.local/bin/litebackup`. Go,
 PHP, and Rust bundle none.
 
 Connecting fails with `daemon_unsupported` when the daemon is older than
-1.1.0, and the message says how to replace it: `litebackup drain --session
+1.5.0, and the message says how to replace it: `litebackup drain --session
 NAME` stops it after a final sync, and the next call starts the new binary.
 `close()` closes connections and stops watches; it never stops the daemon,
 its failovers, or its acquired databases.
@@ -131,7 +131,7 @@ a `Stream`.
 | `events.watch(options?)` | `events.watch(...)` | `events.watch(...)` | `events->watch(...)` | `WatchEvents(ctx, args)` | `events().watch(options)` | Events as they happen; failed long-polls are retried, and `cursor_expired` ends the watch |
 | `events.page(options?)` | `events.page(...)` | `events.page(...)` | `events->page(...)` | `Events(ctx, args)` | `events().page(options)` | One page of events |
 | `session.status(options?)` | `session.status(...)` | `session.status(...)` | `session->status(...)` | `Status(ctx)` / `StatusPage` | `session().status(options)` | The session, its server, and a page of databases |
-| `session.shutdown(options?)` | `session.shutdown(...)` | `session.shutdown(...)` | `session->shutdown(...)` | `Shutdown(ctx, args)` | `session().shutdown(options)` | Every database final-synced and released, and the daemon stopped; each one that could not be is in `failed`, as is an acquired copy whose file holds writes the server lacks or is open again (`changed`, `still_open`) unless `durability` is `none`, and the daemon then runs on |
+| `session.shutdown(options?)` | `session.shutdown(...)` | `session.shutdown(...)` | `session->shutdown(...)` | `Shutdown(ctx, args)` | `session().shutdown(options)` | Every database final-synced and released, and the daemon stopped; each one that could not be is in `failures`, as is an acquired copy whose file holds writes the server lacks or is open again (`changed`, `still_open`) unless `durability` is `none`, and the daemon then runs on |
 
 Every TypeScript operation takes `signal`, and Go takes `ctx`. Cancelling stops
 the local wait only: the daemon may still finish the operation, and the error
@@ -220,16 +220,22 @@ requests. Replica options are `path`, `writeProtection` (`lock`, `detect`, or
 `DatabaseStatus` has `role` (`origin` or `replica`), `state`, the versions the
 server and bucket hold (`syncedServer`, with the `time` the server took it,
 and `syncedCloud`, with the time it was `archived`), `localChanged`,
-`acquired`, and diagnostics such as `lastError`. States are `pending`,
+`acquired`, and diagnostics such as `error`. States are `pending`,
 `syncing`, `retrying`, `synced`, `waiting`, `offloaded`, `stopped`,
 `conflicted`, and `error`. A backup or failover origin is `pending` while it
-holds no write lock, as after a start or a drain, until a sync takes it. A `retrying` origin's `lastError` says why and `nextRetryTime` when
-the next attempt runs. A backup or failover origin is `synced` while the
+holds no write lock, as after a start or a drain, until a sync takes it. A
+`retrying` origin's `error` says why and `nextRetry` when the next attempt
+runs. A backup or failover origin is `synced` while the
 server holds every change seen, and `syncing` again from its next change; an
 acquired database is `syncing` until it is released, then `synced`.
-`firstUnsyncedChangeTime` is when the first change the server lacks was seen;
-it is absent when the server has every change seen and may be earlier than the
-real first change, never later.
+Five states have a timestamp of the same name: `syncing`, when the first
+change the server lacks was seen; `retrying`, when the current run of failed
+syncs began; `pending`, when the origin was left without its write lock;
+`synced`, when the newest sync landed; and `offloaded`, when the local file was
+removed. The `syncing` timestamp is not when the `syncing` state began: an
+acquired database can be `syncing` without it. It is absent when the server
+has every change seen, and may be earlier than the real first change, never
+later. `released` is when this machine last released the database.
 
 Every failure is one error type with `code`, `message`, `status` (the HTTP
 status, or 0 for errors the SDK raised), and `details`: `LitebackupError` in
@@ -266,7 +272,7 @@ try {
 | `launch_failed` | SDK | `litebackup launch` failed |
 | `drain_required` | SDK | `litebackup launch` refused another credential while the client holds write locks; shut down with the current one first |
 | `connection_failed` | SDK | The socket refused or dropped the connection |
-| `daemon_unsupported` | SDK | The daemon is older than 1.1.0 |
+| `daemon_unsupported` | SDK | The daemon is older than 1.5.0 |
 | `cancelled` | SDK | The caller cancelled; the daemon may still finish |
 | `timeout` | SDK or daemon | The operation's timeout ran out |
 | `closed` | SDK | The client was closed |
@@ -333,9 +339,9 @@ unless `discardLocal` asked for the head in its place.
 
 ## Release compatibility
 
-The SDKs and the litebackup client share one release version, 1.4.0. An SDK
-refuses a client older than 1.1.0 with `daemon_unsupported`, and the client
-answers an SDK older than 1.1.0 with 426 `sdk_unsupported`. A server that needs
+The SDKs and the litebackup client share one release version, 1.5.0. An SDK
+refuses a client older than 1.5.0 with `daemon_unsupported`, and the client
+answers an SDK older than 1.5.0 with 426 `sdk_unsupported`. A server that needs
 a newer client on the machine is refused with `client_unsupported`. Keep the
 npm package, wheel, gem, or Composer package, the Go module, the Rust
 crate's tag, and the client binary at the same version.

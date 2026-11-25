@@ -80,7 +80,7 @@ fn answers(fixture: &Map<String, Value>, name: &str, failing: &[String]) -> Vec<
         (
             "release",
             json!({"database": {"name": name, "path": "/x", "role": "origin", "state": "synced"},
-                   "checkpointed": false, "vacuumed": false, "offloaded": false}),
+                   "checkpointed": false, "vacuumed": false}),
         ),
     ];
     bodies

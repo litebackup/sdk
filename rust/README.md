@@ -9,7 +9,7 @@ Add the crate `litebackup` from crates.io, at the version of the
 
 ```toml
 [dependencies]
-litebackup = "1.4.0"
+litebackup = "1.5.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -60,7 +60,7 @@ this machine, so no other machine writes it, and keeps the lock until the
 pool releases it. With the `rusqlite` feature:
 
 ```toml
-litebackup = { version = "1.4.0", features = ["rusqlite"] }
+litebackup = { version = "1.5.0", features = ["rusqlite"] }
 ```
 
 ```rust

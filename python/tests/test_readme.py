@@ -31,7 +31,7 @@ def reply(received: Received) -> Reply:
         answer = {"name": body["name"], "path": "/x", "role": "origin", "state": "synced", "synced_server": synced, "synced_cloud": synced}
     elif received.path == "/v1/databases/release":
         database = {"name": body["name"], "path": "/x", "role": "origin", "state": "synced"}
-        answer = {"database": database, "checkpointed": False, "vacuumed": False, "offloaded": False}
+        answer = {"database": database, "checkpointed": False, "vacuumed": False}
     else:
         return 404, "application/json", json.dumps({"code": "not_found", "message": received.path}).encode()
     return 200, "application/json", json.dumps(answer).encode()

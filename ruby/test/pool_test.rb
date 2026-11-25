@@ -57,7 +57,7 @@ class LeaseDaemon
         @status["state"] = "syncing"
         json_answer("database" => @status, "decision" => "downloaded")
       when "release"
-        json_answer("database" => @status, "checkpointed" => false, "vacuumed" => false, "offloaded" => false)
+        json_answer("database" => @status, "checkpointed" => false, "vacuumed" => false)
       else json_answer(@status)
       end
     end

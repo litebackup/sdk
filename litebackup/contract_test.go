@@ -114,7 +114,7 @@ func (d *contractDaemon) ServeHTTP(writer http.ResponseWriter, request *http.Req
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write(
 			[]byte(
-				`{"session":"contract","server":"http://example","client_version":"1.1.0","session_id":"s","watch":"inotify","databases":[]}`,
+				`{"session":"contract","server":"http://example","client_version":"1.5.0","session_id":"s","watch":"inotify","databases":[]}`,
 			),
 		)
 		return
@@ -511,7 +511,7 @@ func TestContractRequests(t *testing.T) {
 			cwd := contractDirectory(t)
 			t.Chdir(cwd)
 			fixture := contractFixtures[requestFixture](t, "requests", cwd)[name]
-			version := "1.1.0"
+			version := "1.5.0"
 			daemon := newContractDaemon(t, &version, func(receivedRequest) (int, string, []byte) {
 				return http.StatusOK, "application/json", fixture.Response
 			})
@@ -556,7 +556,7 @@ func TestContractErrors(t *testing.T) {
 	}
 	for name, fixture := range contractFixtures[errorFixture](t, "errors", "/") {
 		t.Run(name, func(t *testing.T) {
-			version := "1.1.0"
+			version := "1.5.0"
 			daemon := newContractDaemon(t, &version, func(receivedRequest) (int, string, []byte) {
 				return fixture.Response.Status, fixture.Response.ContentType, []byte(
 					fixture.Response.Body,
@@ -624,7 +624,7 @@ func exchangeDaemon(t *testing.T, exchanges []contractExchange) *contractDaemon 
 	t.Helper()
 	var mutex sync.Mutex
 	next := 0
-	version := "1.1.0"
+	version := "1.5.0"
 	return newContractDaemon(t, &version, func(received receivedRequest) (int, string, []byte) {
 		mutex.Lock()
 		defer mutex.Unlock()
@@ -826,7 +826,7 @@ func TestContractLifecycle(t *testing.T) {
 				failing[step] = true
 			}
 			steps := &scopeSteps{}
-			version := "1.1.0"
+			version := "1.5.0"
 			daemon := newContractDaemon(
 				t,
 				&version,
@@ -852,7 +852,7 @@ func TestContractLifecycle(t *testing.T) {
 						)
 					}
 					return http.StatusOK, "application/json", []byte(
-						`{"database":{"name":"agents/42.sqlite","path":"/x","role":"origin","state":"synced"},"checkpointed":false,"vacuumed":false,"offloaded":false}`,
+						`{"database":{"name":"agents/42.sqlite","path":"/x","role":"origin","state":"synced"},"checkpointed":false,"vacuumed":false}`,
 					)
 				},
 			)
@@ -1050,6 +1050,67 @@ func TestContractStatusTimes(t *testing.T) {
 	}
 }
 
+// TestContractStateTimes decodes each state's timestamp: the databases-offload
+// fixture's offloaded database, the databases-sync one's retrying origin, and
+// the databases-get-pending one's pending origin.
+func TestContractStateTimes(t *testing.T) {
+	type answerFixture struct {
+		Response json.RawMessage `json:"response"`
+	}
+	fixtures := contractFixtures[answerFixture](t, "requests", "/")
+	fixtureTime := func(minute, second int) time.Time {
+		return time.Date(2026, 11, 15, 9, minute, second, 0, time.UTC)
+	}
+	var offloaded DatabaseStatus
+	if err := json.Unmarshal(fixtures["databases-offload"].Response, &offloaded); err != nil {
+		t.Fatal(err)
+	}
+	if !offloaded.Offloaded.Equal(fixtureTime(32, 0)) || !offloaded.Synced.Equal(fixtureTime(31, 0)) ||
+		!offloaded.Released.Equal(fixtureTime(31, 30)) {
+		t.Fatalf("offloaded %v, synced %v, released %v", offloaded.Offloaded, offloaded.Synced, offloaded.Released)
+	}
+	var retrying DatabaseStatus
+	if err := json.Unmarshal(fixtures["databases-sync"].Response, &retrying); err != nil {
+		t.Fatal(err)
+	}
+	if retrying.State != "retrying" || !retrying.Retrying.Equal(fixtureTime(25, 0)) ||
+		!retrying.Failed.Equal(fixtureTime(29, 0)) || !retrying.Syncing.Equal(fixtureTime(20, 0)) ||
+		retrying.Error != "unavailable: the server did not answer" {
+		t.Fatalf("retrying status %+v", retrying)
+	}
+	var pending DatabaseStatus
+	if err := json.Unmarshal(fixtures["databases-get-pending"].Response, &pending); err != nil {
+		t.Fatal(err)
+	}
+	if pending.State != "pending" || !pending.Pending.Equal(fixtureTime(33, 0)) || !pending.Syncing.IsZero() {
+		t.Fatalf("pending status %+v", pending)
+	}
+}
+
+// TestContractReleaseOffloaded decodes the release-all fixture's answer, a
+// release that offloaded, with when it removed the file, and the
+// release-no-offload one, which kept it and has none.
+func TestContractReleaseOffloaded(t *testing.T) {
+	type answerFixture struct {
+		Response json.RawMessage `json:"response"`
+	}
+	fixtures := contractFixtures[answerFixture](t, "requests", "/")
+	var offloaded ReleaseResult
+	if err := json.Unmarshal(fixtures["release-all"].Response, &offloaded); err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 11, 15, 9, 32, 0, 0, time.UTC); !offloaded.Offloaded.Equal(want) {
+		t.Fatalf("offloaded %v, want %v", offloaded.Offloaded, want)
+	}
+	var noOffload ReleaseResult
+	if err := json.Unmarshal(fixtures["release-no-offload"].Response, &noOffload); err != nil {
+		t.Fatal(err)
+	}
+	if !noOffload.Offloaded.IsZero() {
+		t.Fatalf("offloaded %v after a release that kept the file", noOffload.Offloaded)
+	}
+}
+
 // TestContractShutdownFailed decodes the shutdown-all fixture's answer, a
 // database the drain could not drain with its code and message, and the
 // shutdown-default one, an empty list.
@@ -1074,11 +1135,11 @@ func TestContractShutdownFailed(t *testing.T) {
 		Code:    CodeLockUnavailable,
 		Message: "another machine writes the database (worker-3)",
 	}}
-	if shutdown.Released != 2 || !reflect.DeepEqual(shutdown.Failed, failed) {
-		t.Fatalf("released %d, failed %+v, want 2 and %+v", shutdown.Released, shutdown.Failed, failed)
+	if shutdown.ReleasedCount != 2 || !reflect.DeepEqual(shutdown.Failures, failed) {
+		t.Fatalf("released %d, failed %+v, want 2 and %+v", shutdown.ReleasedCount, shutdown.Failures, failed)
 	}
-	if defaultShutdown.Failed == nil || len(defaultShutdown.Failed) != 0 {
-		t.Fatalf("failed %#v after a drain that released everything", defaultShutdown.Failed)
+	if defaultShutdown.Failures == nil || len(defaultShutdown.Failures) != 0 {
+		t.Fatalf("failed %#v after a drain that released everything", defaultShutdown.Failures)
 	}
 }
 

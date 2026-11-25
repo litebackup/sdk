@@ -24,6 +24,7 @@ pub(crate) const NOT_CONFIGURED: &str = "not_configured";
 pub(crate) const NOT_DURABLE: &str = "not_durable";
 pub(crate) const NOT_FOUND: &str = "not_found";
 pub(crate) const PLAN_LIMIT: &str = "plan_limit";
+pub(crate) const RATE_LIMITED: &str = "rate_limited";
 pub(crate) const RULE_DATABASE: &str = "rule_database";
 pub(crate) const RULE_EXISTS: &str = "rule_exists";
 pub(crate) const SDK_UNSUPPORTED: &str = "sdk_unsupported";

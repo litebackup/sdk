@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.0
+
+The SDKs work with the litebackup client 1.5.0 and refuse an older one with
+`daemon_unsupported`. A database's status names its timestamps for their
+events (`synced`, `archived`, `failed`, `syncing`) and adds `retrying`,
+`pending`, `released`, and `offloaded`; its error is `error`. A release's
+`offloaded` is the time the file was removed, absent when it was kept. A
+shutdown reports `released_count` and `failures`. A writer's lock time is
+`lock_acquired`, and `rate_limited` is a new error code.
+
 ## 1.4.0
 
 No changes to the SDKs. They are published at 1.4.0 with the litebackup client

@@ -45,7 +45,7 @@ function readFixture<T>(fixtureDirectory: string, name: string, cwd = "/"): T {
 }
 
 /** A daemon on a unix socket that answers the connect probe itself and hands every other request to reply. */
-async function contractDaemon(t: TestContext, reply: (request: Received) => Reply | Promise<Reply>, clientVersion: string | null = "1.1.0") {
+async function contractDaemon(t: TestContext, reply: (request: Received) => Reply | Promise<Reply>, clientVersion: string | null = "1.5.0") {
   const directory = await mkdtemp(join(tmpdir(), "lbc-"));
   const socketPath = join(directory, "client.sock");
   const received: Received[] = [];
@@ -59,7 +59,7 @@ async function contractDaemon(t: TestContext, reply: (request: Received) => Repl
       if (clientVersion !== null) res.setHeader("litebackup-client-version", clientVersion);
       if (request.method === "GET" && request.path === "/v1/status/show" && JSON.stringify(request.query) === JSON.stringify({ limit: "1" })) {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ session: "contract", server: "http://example", client_version: "1.1.0", session_id: "s", watch: "inotify", databases: [] }));
+        res.end(JSON.stringify({ session: "contract", server: "http://example", client_version: "1.5.0", session_id: "s", watch: "inotify", databases: [] }));
         return;
       }
       received.push(request);
@@ -362,7 +362,7 @@ for (const name of fixtureNames("lifecycle")) {
         if (failing.has(step)) return [503, "application/json", JSON.stringify({ code: "unavailable", message: `${step} failed` })];
         if (step === "acquire") return [200, "application/json", JSON.stringify(fixture.acquire_response)];
         if (step === "sync") return [200, "application/json", JSON.stringify({ name: fixture.lease.name, path: "/x", role: "origin", state: "synced", acquired: true })];
-        return [200, "application/json", JSON.stringify({ database: { name: fixture.lease.name, path: "/x", role: "origin", state: "synced" }, checkpointed: false, vacuumed: false, offloaded: false })];
+        return [200, "application/json", JSON.stringify({ database: { name: fixture.lease.name, path: "/x", role: "origin", state: "synced" }, checkpointed: false, vacuumed: false })];
       });
       await daemon.client.connect();
       const openError = new Error("open failed");
@@ -481,19 +481,48 @@ test("contract status times: synced_server.time and synced_cloud.archived", asyn
   assert.equal(status.syncedCloud.archived, "2026-11-15T09:30:00Z");
 });
 
+test("contract state times: an offloaded, a retrying, and a pending database", async (t) => {
+  const offloadedDaemon = await contractDaemon(t, () => [200, "application/json", JSON.stringify(readFixture<RequestFixture>("requests", "databases-offload").response)]);
+  const offloaded = await offloadedDaemon.client.databases.offload("main.sqlite");
+  assert.equal(offloaded.offloaded, "2026-11-15T09:32:00Z");
+  assert.equal(offloaded.synced, "2026-11-15T09:31:00Z");
+  assert.equal(offloaded.released, "2026-11-15T09:31:30Z");
+  const retryingDaemon = await contractDaemon(t, () => [200, "application/json", JSON.stringify(readFixture<RequestFixture>("requests", "databases-sync").response)]);
+  const retrying = await retryingDaemon.client.databases.sync("main.sqlite");
+  assert.equal(retrying.state, "retrying");
+  assert.equal(retrying.retrying, "2026-11-15T09:25:00Z");
+  assert.equal(retrying.failed, "2026-11-15T09:29:00Z");
+  assert.equal(retrying.error, "unavailable: the server did not answer");
+  assert.equal(retrying.syncing, "2026-11-15T09:20:00Z");
+  const pendingDaemon = await contractDaemon(t, () => [200, "application/json", JSON.stringify(readFixture<RequestFixture>("requests", "databases-get-pending").response)]);
+  const pending = await pendingDaemon.client.databases.get("main.sqlite");
+  assert.equal(pending.state, "pending");
+  assert.equal(pending.pending, "2026-11-15T09:33:00Z");
+  assert.equal(pending.syncing, undefined);
+});
+
+test("contract release offloaded: when an offloading release removed the file, and none when it kept it", async (t) => {
+  const offloadedDaemon = await contractDaemon(t, () => [200, "application/json", JSON.stringify(readFixture<RequestFixture>("requests", "release-all").response)]);
+  const offloaded = await offloadedDaemon.client.databases.release("agents/42.sqlite", { offload: true });
+  assert.equal(offloaded.offloaded, "2026-11-15T09:32:00Z");
+  const noOffloadDaemon = await contractDaemon(t, () => [200, "application/json", JSON.stringify(readFixture<RequestFixture>("requests", "release-no-offload").response)]);
+  const noOffload = await noOffloadDaemon.client.databases.release("agents/42.sqlite");
+  assert.equal(noOffload.offloaded, undefined);
+});
+
 test("contract shutdown: a database the drain could not drain, with its code", async (t) => {
   const fixture = readFixture<RequestFixture>("requests", "shutdown-all");
   const daemon = await contractDaemon(t, () => [200, "application/json", JSON.stringify(fixture.response)]);
   const shutdown = await daemon.client.session.shutdown();
-  assert.equal(shutdown.released, 2);
-  assert.deepEqual(shutdown.failed, [{ name: "orders.sqlite", code: ErrorCode.lockUnavailable, message: "another machine writes the database (worker-3)" }]);
+  assert.equal(shutdown.releasedCount, 2);
+  assert.deepEqual(shutdown.failures, [{ name: "orders.sqlite", code: ErrorCode.lockUnavailable, message: "another machine writes the database (worker-3)" }]);
 });
 
 test("contract shutdown: a drain that released everything has no failures", async (t) => {
   const fixture = readFixture<RequestFixture>("requests", "shutdown-default");
   const daemon = await contractDaemon(t, () => [200, "application/json", JSON.stringify(fixture.response)]);
   const shutdown = await daemon.client.session.shutdown();
-  assert.deepEqual(shutdown.failed, []);
+  assert.deepEqual(shutdown.failures, []);
 });
 
 test("contract status offload_durability: an acquired database's, and none for one not acquired", async (t) => {

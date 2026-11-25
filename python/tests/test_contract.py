@@ -26,6 +26,7 @@ from litebackup import (
     LeaseCleanupError,
     Litebackup,
     LitebackupError,
+    ReleaseResult,
     ShutdownResult,
 )
 from litebackup._binary import litebackup_binary
@@ -184,7 +185,7 @@ def daemons() -> Iterator[list[ContractDaemon]]:
         daemon.close()
 
 
-def start_daemon(daemons: list[ContractDaemon], reply: Callable[[Received], Reply], client_version: str | None = "1.1.0") -> ContractDaemon:
+def start_daemon(daemons: list[ContractDaemon], reply: Callable[[Received], Reply], client_version: str | None = "1.5.0") -> ContractDaemon:
     daemon = ContractDaemon(reply, client_version)
     daemons.append(daemon)
     return daemon
@@ -408,7 +409,6 @@ def lifecycle_daemon(daemons: list[ContractDaemon], fixture: dict[str, Any], ste
             "database": {"name": name, "path": "/x", "role": "origin", "state": "synced"},
             "checkpointed": False,
             "vacuumed": False,
-            "offloaded": False,
         }
         return 200, "application/json", json.dumps(released).encode()
 
@@ -578,6 +578,31 @@ def test_status_times() -> None:
     assert status.synced_cloud.archived == datetime.fromisoformat("2026-11-15T09:30:00Z")
 
 
+def test_state_times() -> None:
+    """Each state's timestamp decodes: an offloaded database's, a retrying origin's, and a pending origin's."""
+    offloaded = decode(DatabaseStatus, read_fixture("requests", "databases-offload")["response"])
+    assert offloaded.offloaded == datetime.fromisoformat("2026-11-15T09:32:00Z")
+    assert offloaded.synced == datetime.fromisoformat("2026-11-15T09:31:00Z")
+    assert offloaded.released == datetime.fromisoformat("2026-11-15T09:31:30Z")
+    retrying = decode(DatabaseStatus, read_fixture("requests", "databases-sync")["response"])
+    assert retrying.state == "retrying"
+    assert retrying.retrying == datetime.fromisoformat("2026-11-15T09:25:00Z")
+    assert retrying.failed == datetime.fromisoformat("2026-11-15T09:29:00Z")
+    assert retrying.error == "unavailable: the server did not answer"
+    assert retrying.syncing == datetime.fromisoformat("2026-11-15T09:20:00Z")
+    pending = decode(DatabaseStatus, read_fixture("requests", "databases-get-pending")["response"])
+    assert pending.state == "pending"
+    assert pending.pending == datetime.fromisoformat("2026-11-15T09:33:00Z")
+    assert pending.syncing is None
+
+
+def test_release_offloaded() -> None:
+    """A release that offloaded says when it removed the file, and one that kept it has no offloaded."""
+    offloaded = decode(ReleaseResult, read_fixture("requests", "release-all")["response"])
+    assert offloaded.offloaded == datetime.fromisoformat("2026-11-15T09:32:00Z")
+    assert decode(ReleaseResult, read_fixture("requests", "release-no-offload")["response"]).offloaded is None
+
+
 def test_status_offload_durability() -> None:
     """An acquired database's answer carries offload_durability, and one not acquired has none."""
     acquired = decode(AcquireResult, read_fixture("requests", "acquire-all")["response"])
@@ -588,11 +613,11 @@ def test_status_offload_durability() -> None:
 def test_shutdown_failed() -> None:
     """The shutdown-all answer carries a database the drain could not drain, with its code and message."""
     shutdown = decode(ShutdownResult, read_fixture("requests", "shutdown-all")["response"])
-    assert shutdown.released == 2
-    assert [(failure.name, failure.code, failure.message) for failure in shutdown.failed] == [
+    assert shutdown.released_count == 2
+    assert [(failure.name, failure.code, failure.message) for failure in shutdown.failures] == [
         ("orders.sqlite", ErrorCode.LOCK_UNAVAILABLE, "another machine writes the database (worker-3)")
     ]
-    assert decode(ShutdownResult, read_fixture("requests", "shutdown-default")["response"]).failed == []
+    assert decode(ShutdownResult, read_fixture("requests", "shutdown-default")["response"]).failures == []
 
 
 @pytest.mark.parametrize("override", json.loads((CONTRACT_ROOT / "binary" / "override-missing.json").read_text())["overrides"])

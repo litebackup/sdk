@@ -23,6 +23,7 @@ export const specErrorCodes = {
   notDurable: "not_durable",
   notFound: "not_found",
   planLimit: "plan_limit",
+  rateLimited: "rate_limited",
   ruleDatabase: "rule_database",
   ruleExists: "rule_exists",
   sdkUnsupported: "sdk_unsupported",

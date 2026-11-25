@@ -14,9 +14,9 @@ use std::path::PathBuf;
 
 use futures_util::StreamExt as _;
 use litebackup::{
-    AcquireOptions, BackupOptions, Client, Durability, Error, EventsOptions, OffloadOptions, PageOptions,
-    PrefixReplicaOptions, ReleaseOptions, ReplicaOptions, RestoreOptions, RevertOptions, ShutdownOptions,
-    VersionsOptions, WatchOptions, WriteProtection,
+    AcquireOptions, BackupOptions, Client, DatabaseStatus, Durability, Error, EventsOptions, OffloadOptions,
+    PageOptions, PrefixReplicaOptions, ReleaseOptions, ReleaseResult, ReplicaOptions, RestoreOptions, RevertOptions,
+    ShutdownOptions, VersionsOptions, WatchOptions, WriteProtection,
 };
 use serde_json::{Map, Value, json};
 use support::{Answer, FakeDaemon, client_to, duration, fixture_names, read_fixture, skip_reason};
@@ -377,4 +377,40 @@ async fn pagination_fixtures_follow_the_cursor() {
 #[tokio::test]
 async fn event_fixtures_follow_the_log() {
     check_exchange_fixtures("events").await;
+}
+
+/// A fixture's answer decoded as the model the operation returns.
+fn answer<T: serde::de::DeserializeOwned>(name: &str) -> T {
+    let fixture = read_fixture("requests", name);
+    serde_json::from_value(fixture["response"].clone()).unwrap_or_else(|error| panic!("requests/{name}: {error}"))
+}
+
+fn fixture_time(time: &str) -> jiff::Timestamp {
+    time.parse().expect("an RFC 3339 time")
+}
+
+#[test]
+fn state_times_decode() {
+    let offloaded: DatabaseStatus = answer("databases-offload");
+    assert_eq!(offloaded.offloaded, Some(fixture_time("2026-11-15T09:32:00Z")));
+    assert_eq!(offloaded.synced, Some(fixture_time("2026-11-15T09:31:00Z")));
+    assert_eq!(offloaded.released, Some(fixture_time("2026-11-15T09:31:30Z")));
+    let retrying: DatabaseStatus = answer("databases-sync");
+    assert_eq!(retrying.state.as_str(), "retrying");
+    assert_eq!(retrying.retrying, Some(fixture_time("2026-11-15T09:25:00Z")));
+    assert_eq!(retrying.failed, Some(fixture_time("2026-11-15T09:29:00Z")));
+    assert_eq!(retrying.error.as_deref(), Some("unavailable: the server did not answer"));
+    assert_eq!(retrying.syncing, Some(fixture_time("2026-11-15T09:20:00Z")));
+    let pending: DatabaseStatus = answer("databases-get-pending");
+    assert_eq!(pending.state.as_str(), "pending");
+    assert_eq!(pending.pending, Some(fixture_time("2026-11-15T09:33:00Z")));
+    assert_eq!(pending.syncing, None);
+}
+
+#[test]
+fn release_offloaded_says_when_it_removed_the_file() {
+    let offloaded: ReleaseResult = answer("release-all");
+    assert_eq!(offloaded.offloaded, Some(fixture_time("2026-11-15T09:32:00Z")));
+    let no_offload: ReleaseResult = answer("release-no-offload");
+    assert_eq!(no_offload.offloaded, None);
 }

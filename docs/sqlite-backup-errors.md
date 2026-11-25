@@ -37,15 +37,15 @@ and `sudo journalctl -u litebackup -f`. On macOS, the service logs to
 | `file_exists` on restore or acquire | The file already exists; choose a new file in an existing directory |
 | `rule_exists` on backup start | The path already has a backup rule with other settings, and `details.rule` is that rule; stop it by its ID, then start the backup again with the new settings |
 | `rule_database` on release | A backup rule on this machine keeps the database and its write lock, so there is nothing to release; stop its backup to hand it to another machine |
-| `retrying` state | An origin's syncs fail and run again at `nextRetryTime`; `lastError` says why |
+| `retrying` state | An origin's syncs fail and run again at `nextRetry`; `error` says why |
 | `conflicted` | The file was refused and left as it is: it differs from the server head, or its write lock was lost, taken by another machine or broken by an admin. Restore the head to another path to compare, then acquire with `discardLocal` to take the head, or back the file up under another name |
 | `SQLITE_BUSY` writing a replica | Use a readonly connection or route the write to the origin |
 | `sdk_unsupported` | Upgrade the SDK to match the client/server; update the server before installed clients |
-| Cloud wait times out | Check server archive delay, bucket health, network, disk space, and per-database `lastError` |
+| Cloud wait times out | Check server archive delay, bucket health, network, disk space, and per-database `error` |
 
 Awaiting `backups.start` reports registration errors. It does not monitor
-future sync failures. Log `lastError` and `lastErrorTime`, compare server and
-cloud versions, and alert when `firstUnsyncedChangeTime` is older than you can
+future sync failures. Log `error` and `failed`, compare server and
+cloud versions, and alert when the `syncing` timestamp is older than you can
 afford to lose. A new empty file can remain at version zero until data is written.
 
 ## Avoid silent scheduled failures

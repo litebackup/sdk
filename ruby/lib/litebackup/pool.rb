@@ -128,7 +128,7 @@ module Litebackup
 
     # One database of a pool. turn serializes opening, bringing back,
     # acquiring, lease calls, and releasing; use calls share the open handle
-    # without it. users and last_used are guarded by the pool's mutex.
+    # without it. users and used are guarded by the pool's mutex.
     class Entry
       attr_reader :name, :turn
       # handle is open while opened is set; leased is set while this pool
@@ -140,7 +140,7 @@ module Litebackup
       # the last use block exits; users counts calls between joining and
       # leaving, blocks included.
       attr_accessor :handle, :path, :opened, :leased, :lease_settings, :last_call_failed, :idle_close,
-                    :close_after_use, :users, :last_used
+                    :close_after_use, :users, :used
 
       def initialize(name)
         @name = name
@@ -154,7 +154,7 @@ module Litebackup
         @idle_close = nil
         @close_after_use = false
         @users = 0
-        @last_used = nil
+        @used = nil
       end
     end
 
@@ -389,7 +389,7 @@ module Litebackup
       @mutex.synchronize do
         entry.users -= 1
         @active_calls -= 1
-        entry.last_used = monotonic
+        entry.used = monotonic
         if entry.users.zero? && !entry.opened && !entry.leased && @entries[entry.name].equal?(entry)
           @entries.delete(entry.name)
         end
@@ -412,13 +412,13 @@ module Litebackup
     end
 
     def idle_entries
-      @mutex.synchronize { @entries.values.select { |entry| entry.users.zero? && !entry.last_used.nil? } }
+      @mutex.synchronize { @entries.values.select { |entry| entry.users.zero? && !entry.used.nil? } }
     end
 
     # How long an entry has been unused, or nil while a call uses it.
     def idle_seconds(entry, now)
       @mutex.synchronize do
-        entry.users.positive? || entry.last_used.nil? ? nil : now - entry.last_used
+        entry.users.positive? || entry.used.nil? ? nil : now - entry.used
       end
     end
 

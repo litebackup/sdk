@@ -24,12 +24,12 @@ test("sends the SDK version, converts answers to camelCase, and maps errors", as
   daemon.route("POST /v1/databases/offload", () => [426, "not json"]);
   const litebackup = new Litebackup({ socketPath: daemon.socketPath });
   await litebackup.connect();
-  assert.equal(litebackup.clientVersion, "1.1.0");
+  assert.equal(litebackup.clientVersion, "1.5.0");
 
   const status = await litebackup.databases.get("app/main.db");
   assert.equal(status.syncedServer.version, 3);
   assert.equal(status.syncedCloud.version, 2);
-  assert.equal(status.lastFullScanReason, "first");
+  assert.equal(status.fullScanReason, "first");
   assert.equal(status.localChanged, false);
   assert.equal((status as unknown as Record<string, unknown>).synced_server, undefined);
 
@@ -44,7 +44,7 @@ test("sends the SDK version, converts answers to camelCase, and maps errors", as
   for (const request of daemon.requests) {
     assert.equal(request.headers["litebackup-sdk-version"], `typescript/${sdkVersion}`);
   }
-  assert.equal(sdkVersion, "1.4.0");
+  assert.equal(sdkVersion, "1.5.0");
 });
 
 test("startBackup awaits the local rule and stop reports a pending lease", async (t) => {

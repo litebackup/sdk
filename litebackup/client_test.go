@@ -66,7 +66,7 @@ func newFakeDaemon(t *testing.T) *fakeDaemon {
 		return http.StatusOK, map[string]any{
 			"session":        "unit",
 			"server":         "http://example",
-			"client_version": "1.1.0",
+			"client_version": "1.5.0",
 			"session_id":     "s",
 			"watch":          "inotify",
 			"databases":      []any{},
@@ -142,7 +142,7 @@ func (d *fakeDaemon) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	d.requests = append(d.requests, seen)
 	answer := d.routes[request.Method+" "+request.URL.Path]
 	d.mutex.Unlock()
-	writer.Header().Set("Litebackup-Client-Version", "1.1.0")
+	writer.Header().Set("Litebackup-Client-Version", "1.5.0")
 	writer.Header().Set("Content-Type", "application/json")
 	if answer == nil {
 		writer.WriteHeader(http.StatusNotFound)
@@ -220,7 +220,7 @@ func TestVersionHeaderAndErrors(t *testing.T) {
 		}
 	})
 	client := daemon.connect(t)
-	if client.ClientVersion() != "1.1.0" {
+	if client.ClientVersion() != "1.5.0" {
 		t.Fatalf("client version %q", client.ClientVersion())
 	}
 	_, err := client.StartBackup(t.Context(), "/var/lib/app/main.db", nil)

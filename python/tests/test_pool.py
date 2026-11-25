@@ -78,7 +78,7 @@ class LeaseDaemon:
                 self.status["state"] = "syncing"
                 return self.encode({"database": self.status, "decision": "downloaded"})
             if step == "release":
-                return self.encode({"database": self.status, "checkpointed": False, "vacuumed": False, "offloaded": False})
+                return self.encode({"database": self.status, "checkpointed": False, "vacuumed": False})
             return self.encode(self.status)
 
     @staticmethod

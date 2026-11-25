@@ -12,7 +12,7 @@ export LITEBACKUP_API_KEY='JOIN_TOKEN@your-instance.litebackup.cloud'
 The SDK starts the local client when needed. It uses `ConnectArgs.BinaryPath`,
 then `LITEBACKUP_PATH`, then `litebackup` on `PATH`, then
 `~/.local/bin/litebackup`, where the installer puts it for a user other than
-root. It refuses a client older than 1.1.0 with `daemon_unsupported`. Your
+root. It refuses a client older than 1.5.0 with `daemon_unsupported`. Your
 application can use any SQLite driver.
 
 ## Continuous backup

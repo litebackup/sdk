@@ -17,12 +17,12 @@ class ContractDaemon
     end
   end
 
-  STATUS_BODY = '{"session":"contract","server":"http://example","client_version":"1.1.0",' \
+  STATUS_BODY = '{"session":"contract","server":"http://example","client_version":"1.5.0",' \
                 '"session_id":"s","watch":"inotify","databases":[]}'
 
   attr_reader :socket_path, :received, :sdk_versions, :directory
 
-  def initialize(client_version: "1.1.0", &reply)
+  def initialize(client_version: "1.5.0", &reply)
     @reply = reply
     @client_version = client_version
     @directory = Dir.mktmpdir("lbr-")

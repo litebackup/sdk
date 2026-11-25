@@ -30,7 +30,7 @@ sqlite3 /tmp/main-restored.sqlite 'PRAGMA integrity_check'
 
 The destination directory must exist. The file must not exist. Litebackup
 runs SQLite's `quick_check` before returning; a manual integrity check can be
-part of a more extensive restore drill.
+part of a more extensive restore test.
 
 ## Select a time or version
 
@@ -61,7 +61,7 @@ using the scheduled prefix, use `scheduled/main.sqlite`.
 ## Check before replacing app data
 
 Query application tables in the restored file, validate expected records, and
-measure how long the drill took. Keep the existing app file while deciding
+measure how long the restore test took. Keep the existing app file while deciding
 whether to roll back. A restored file is a copy: it is not the origin of the
 database's name.
 

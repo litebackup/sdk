@@ -1,5 +1,5 @@
 {
-  "description": "Sync posts the name.",
+  "description": "Sync posts the name; an origin whose syncs keep failing answers retrying.",
   "operation": "databases.sync",
   "args": {
     "name": "main.sqlite"
@@ -16,7 +16,11 @@
     "name": "main.sqlite",
     "path": "/var/lib/app/main.sqlite",
     "role": "origin",
-    "state": "syncing",
+    "state": "retrying",
+    "syncing": "2026-11-15T09:20:00Z",
+    "retrying": "2026-11-15T09:25:00Z",
+    "failed": "2026-11-15T09:29:00Z",
+    "error": "unavailable: the server did not answer",
     "acquired": false,
     "failover": false,
     "local_changed": false,

@@ -179,8 +179,8 @@ impl<'c> Session<'c> {
 
     /// Syncs every database a final time, releases every write lock, ends the
     /// session, and stops the daemon. Each database it could not sync or
-    /// release is in `failed`, with its code, and keeps any write lock it
-    /// holds; the session and the daemon then stay. An empty `failed` is the
+    /// release is in `failures`, with its code, and keeps any write lock it
+    /// holds; the session and the daemon then stay. An empty `failures` is the
     /// only complete shutdown. [`Client::close`] never does this.
     ///
     /// # Errors

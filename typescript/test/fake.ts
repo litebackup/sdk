@@ -41,7 +41,7 @@ export class FakeDaemon {
         const text = Buffer.concat(chunks).toString("utf8");
         const request: FakeRequest = { method: req.method ?? "", path: url.pathname, query: url.searchParams, body: text ? JSON.parse(text) : undefined, headers: req.headers };
         daemon!.requests.push(request);
-        res.setHeader("litebackup-client-version", "1.1.0");
+        res.setHeader("litebackup-client-version", "1.5.0");
         res.setHeader("content-type", "application/json");
         const route = daemon!.routes.get(`${request.method} ${request.path}`);
         if (!route) {
@@ -55,7 +55,7 @@ export class FakeDaemon {
       });
     });
     daemon = new FakeDaemon(directory, socketPath, server);
-    daemon.route("GET /v1/status/show", () => [200, { session, server: "http://example", client_version: "1.1.0", session_id: "s", watch: "inotify", databases: [] }]);
+    daemon.route("GET /v1/status/show", () => [200, { session, server: "http://example", client_version: "1.5.0", session_id: "s", watch: "inotify", databases: [] }]);
     await daemon.serve();
     t.after(async () => {
       await daemon!.stop();
@@ -104,6 +104,6 @@ export function databaseStatus(name: string, role: string, state: string, server
     page_count: 2,
     sync_count: 1,
     hint_misses: 0,
-    last_full_scan_reason: "first",
+    full_scan_reason: "first",
   };
 }

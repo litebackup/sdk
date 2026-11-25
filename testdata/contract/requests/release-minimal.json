@@ -33,7 +33,6 @@
       "hint_misses": 0
     },
     "checkpointed": false,
-    "vacuumed": false,
-    "offloaded": false
+    "vacuumed": false
   }
 }

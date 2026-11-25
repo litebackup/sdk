@@ -66,7 +66,7 @@ end
 STATUS_ANSWER = ContractDaemon::STATUS_BODY
 
 def write_answer(connection, body, headers = {})
-  head = ["HTTP/1.1 200 OK", "Litebackup-Client-Version: 1.2.0", "Content-Type: application/json"]
+  head = ["HTTP/1.1 200 OK", "Litebackup-Client-Version: 1.5.0", "Content-Type: application/json"]
   head += headers.map { |name, value| "#{name}: #{value}" }
   head << "Content-Length: #{body.bytesize}" unless headers.key?("Transfer-Encoding")
   connection.write("#{head.join("\r\n")}\r\n\r\n#{body}")

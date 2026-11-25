@@ -7,7 +7,7 @@
 //! # fn example(metadata: &str) -> Result<(), litebackup::release::ReleaseError> {
 //! use litebackup::release::{ReleaseSearch, find_release};
 //!
-//! let release = find_release(metadata, &ReleaseSearch::default().version("1.4.0"))?;
+//! let release = find_release(metadata, &ReleaseSearch::default().version("1.5.0"))?;
 //! if let Some(file) = release.file("litebackup-linux-amd64") {
 //!     println!("{} {} {}", file.url, file.sha256, file.size);
 //! }

@@ -144,11 +144,11 @@ Use `release()` for databases obtained with `acquire()`. Close every SQLite conn
 when your process owns that session; another app can be sharing it. A backup
 another machine writes holds no lock to release, so the drain leaves it
 waiting, and the next start waits for the lock again. A database the drain
-cannot sync or release is listed in `failed` with its code and message, and
+cannot sync or release is listed in `failures` with its code and message, and
 keeps any write lock it holds, and so is a conflicted copy whose writes
 are not on the server, with `conflict` and a message naming its file; then
 the session and the daemon stay, so
-check `failed`: it is empty only when every database was synced as asked
+check `failures`: it is empty only when every database was synced as asked
 and released.
 A service install handles daemon restarts and reboot startup through systemd or launchd.
 

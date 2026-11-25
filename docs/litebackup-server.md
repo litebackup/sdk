@@ -111,7 +111,7 @@ machine's [client session](litebackup-client.md).
 
 Confirm the database appears in the console. Check both the server and cloud
 versions: registration alone does not mean an upload has completed. Run a
-[restore drill](sqlite-restore.md) into a new file before relying on the backup.
+[restore test](sqlite-restore.md) into a new file before relying on the backup.
 
 ## Operate the server
 

@@ -130,7 +130,7 @@ module ContractDaemons
     super
   end
 
-  def start_daemon(client_version: "1.1.0", &reply)
+  def start_daemon(client_version: "1.5.0", &reply)
     daemon = ContractDaemon.new(client_version: client_version, &reply)
     @daemons << daemon
     daemon
@@ -346,7 +346,7 @@ class LifecycleContractTest < Minitest::Test
                  "synced_server" => { "version" => 3 }, "synced_cloud" => { "version" => 3 } }
              else
                { "database" => { "name" => name, "path" => "/x", "role" => "origin", "state" => "synced" },
-                 "checkpointed" => false, "vacuumed" => false, "offloaded" => false }
+                 "checkpointed" => false, "vacuumed" => false }
              end
       [200, "application/json", JSON.generate(body)]
     end
@@ -558,6 +558,34 @@ class ModelContractTest < Minitest::Test
     assert_equal(Time.iso8601("2026-11-15T09:30:00Z"), status.synced_cloud.archived)
   end
 
+  # Each state's timestamp decodes: an offloaded database's, a retrying origin's, and a pending origin's.
+  def test_state_times
+    offloaded = Litebackup::DatabaseStatus.from_wire(ContractFixtures.read("requests", "databases-offload")["response"])
+    assert_equal(Time.iso8601("2026-11-15T09:32:00Z"), offloaded.offloaded)
+    assert_equal(Time.iso8601("2026-11-15T09:31:00Z"), offloaded.synced)
+    assert_equal(Time.iso8601("2026-11-15T09:31:30Z"), offloaded.released)
+    retrying = Litebackup::DatabaseStatus.from_wire(ContractFixtures.read("requests", "databases-sync")["response"])
+    assert_equal("retrying", retrying.state)
+    assert_equal(Time.iso8601("2026-11-15T09:25:00Z"), retrying.retrying)
+    assert_equal(Time.iso8601("2026-11-15T09:29:00Z"), retrying.failed)
+    assert_equal("unavailable: the server did not answer", retrying.error)
+    assert_equal(Time.iso8601("2026-11-15T09:20:00Z"), retrying.syncing)
+    pending_answer = ContractFixtures.read("requests", "databases-get-pending")["response"]
+    pending = Litebackup::DatabaseStatus.from_wire(pending_answer)
+    assert_equal("pending", pending.state)
+    assert_equal(Time.iso8601("2026-11-15T09:33:00Z"), pending.pending)
+    assert_nil(pending.syncing)
+  end
+
+  # A release that offloaded says when it removed the file, and one that kept it has no offloaded.
+  def test_release_offloaded
+    offloaded = Litebackup::ReleaseResult.from_wire(ContractFixtures.read("requests", "release-all")["response"])
+    assert_equal(Time.iso8601("2026-11-15T09:32:00Z"), offloaded.offloaded)
+    no_offload_answer = ContractFixtures.read("requests", "release-no-offload")["response"]
+    no_offload = Litebackup::ReleaseResult.from_wire(no_offload_answer)
+    assert_nil(no_offload.offloaded)
+  end
+
   # An acquired database's answer carries offload_durability, and one not acquired has none.
   def test_status_offload_durability
     acquired = Litebackup::AcquireResult.from_wire(ContractFixtures.read("requests", "acquire-all")["response"])
@@ -569,11 +597,11 @@ class ModelContractTest < Minitest::Test
   # The shutdown-all answer carries a database the drain did not drain, with its code and message.
   def test_shutdown_failed
     shutdown = Litebackup::ShutdownResult.from_wire(ContractFixtures.read("requests", "shutdown-all")["response"])
-    assert_equal(2, shutdown.released)
+    assert_equal(2, shutdown.released_count)
     assert_equal([["orders.sqlite", Litebackup::ErrorCode::LOCK_UNAVAILABLE,
                    "another machine writes the database (worker-3)"]],
-                 shutdown.failed.map { |failure| [failure.name, failure.code, failure.message] })
+                 shutdown.failures.map { |failure| [failure.name, failure.code, failure.message] })
     assert_empty(Litebackup::ShutdownResult.from_wire(ContractFixtures.read("requests",
-                                                                            "shutdown-default")["response"]).failed)
+                                                                            "shutdown-default")["response"]).failures)
   end
 end

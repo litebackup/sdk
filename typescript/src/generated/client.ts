@@ -353,7 +353,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Final-sync every database this machine writes, wait for the requested durability, release its write lock, end the session, and stop the daemon. It covers every origin that is not conflicted, offloaded, or waiting; a backup another machine writes (waiting) holds no lock, stays waiting, and is not listed. Each covered database it cannot sync, wait for, or release is listed in failed with its code and keeps any write lock it holds; unless wait is none, so is a released acquired copy whose file holds writes the server lacks (changed), and an acquired copy whose file is open again (still_open) or changes during every final sync (changed); then the session stays and the daemon keeps running. Any other failure, such as the timeout ending before the drain could begin, is an error answer. */
+        /** @description Final-sync every database this machine writes, wait for the requested durability, release its write lock, end the session, and stop the daemon. It covers every origin that is not conflicted, offloaded, or waiting; a backup another machine writes (waiting) holds no lock, stays waiting, and is not listed. Each covered database it cannot sync, wait for, or release is listed in failures with its code and keeps any write lock it holds; unless wait is none, so is a released acquired copy whose file holds writes the server lacks (changed), and an acquired copy whose file is open again (still_open) or changes during every final sync (changed); then the session stays and the daemon keeps running. Any other failure, such as the timeout ending before the drain could begin, is an error answer. */
         post: operations["shutdownSession"];
         delete?: never;
         options?: never;
@@ -414,7 +414,7 @@ export interface components {
              */
             role: "origin" | "replica";
             /**
-             * @description pending while a backup or failover origin holds no write lock, as after a start or a drain, until a sync takes it (a start takes back the lock of each backup a drain left pending while the head is still the version it last synced); syncing while changes stream; retrying while an origin's syncs fail, with last_error saying why and next_retry_time when the next attempt runs; synced when the server holds every change: a backup or failover origin whose last sync landed with no change seen after it, until its next change, or a released database whose last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the server, or the bucket when the offload asked for it, holds its last version; stopped for a stopped replica; conflicted when this copy was refused and left as it is, because its file differs from the server head or its write lock was lost or broken; error with last_error
+             * @description pending while a backup or failover origin holds no write lock, as after a start or a drain, until a sync takes it (a start takes back the lock of each backup a drain left pending while the head is still the version it last synced); syncing while changes stream; retrying while an origin's syncs fail, with error saying why and next_retry when the next attempt runs; synced when the server holds every change: a backup or failover origin whose last sync landed with no change seen after it, until its next change, or a released database whose last version is on the server; waiting while another machine is the origin; offloaded when the local file was removed because the server, or the bucket when the offload asked for it, holds its last version; stopped for a stopped replica; conflicted when this copy was refused and left as it is, because its file differs from the server head or its write lock was lost or broken; error, with error saying why
              * @enum {string}
              */
             state: "pending" | "syncing" | "retrying" | "synced" | "waiting" | "offloaded" | "stopped" | "conflicted" | "error";
@@ -435,22 +435,47 @@ export interface components {
             sync_count: number;
             /** Format: int64 */
             hint_misses: number;
-            last_full_scan_reason?: string;
+            full_scan_reason?: string;
             /** @description the machine label of the last writer this machine saw; empty once this machine released the database, drained it, or offloaded a copy whose write lock it held, as no writer is known then */
             writer_machine_label?: string;
-            last_error?: string;
+            error?: string;
             /** Format: date-time */
-            last_error_time?: string;
+            failed?: string;
             /**
              * Format: date-time
              * @description when the first change the server lacks was seen; absent when the server has every change seen. It survives restarts and may be earlier than the real first change, never later.
              */
-            first_unsynced_change_time?: string;
+            syncing?: string;
+            /**
+             * Format: date-time
+             * @description when the current run of failed syncs began, with the first failure after the last success; absent once a sync succeeds
+             */
+            retrying?: string;
+            /**
+             * Format: date-time
+             * @description when the newest sync landed, the time synced_server holds
+             */
+            synced?: string;
+            /**
+             * Format: date-time
+             * @description when a backup or failover origin was left without its write lock, by a start, a drain, or a dropped lock; absent once a sync takes the lock
+             */
+            pending?: string;
+            /**
+             * Format: date-time
+             * @description when this machine last released the database
+             */
+            released?: string;
+            /**
+             * Format: date-time
+             * @description when the local file was removed because the server or the bucket holds its version; absent once an acquire brings it back
+             */
+            offloaded?: string;
             /**
              * Format: date-time
              * @description when the next attempt of a failed sync runs; absent when none is scheduled
              */
-            next_retry_time?: string;
+            next_retry?: string;
             /** @description set on a failover origin while this machine drains, and on one a drain released, which holds no write lock until it takes one again; a failover then reports its role as unknown, as after a draining event */
             draining?: boolean;
             /** @description the name this machine shows on the server and as the writer of its databases */
@@ -481,10 +506,10 @@ export interface components {
             databases: components["schemas"]["DatabaseStatus"][];
         };
         /**
-         * @description What went wrong, in one word. The socket answers with file_exists (the file a restore or an acquire would write, or a -journal, -wal, or -shm beside it, already exists), rule_exists (a backup rule with other settings already covers the path, and the error carries that rule), lock_unavailable (another machine holds the write lock a command asks for, as an acquire, a revert, or a failover does), not_found, still_open, invalid_argument, timeout, cursor_expired (an events cursor older than the oldest event kept), changed (an offload or acquire refused because the local file changed under it: written after its last sync, never synced, or written while an acquire replaced it), rule_database (a release of a database a backup rule on this machine keeps, whose write lock the rule never gives up; stop its backup to hand it off), not_durable (an offload refused until the server, or the bucket when it waits for cloud, holds the synced version, or a cloud wait whose name now holds another server database), and the others by their names; busy (a foreground backup refused because another job, a continuous backup, or another machine writes the database), cancelled (a command interrupted before it finished), drain_required (a credential other than the one the client took its write locks with, refused until a drain released them), and launch_failed (the command could not start the client on this machine, or the client exited before it listened) come from the litebackup command alone, which also answers unauthenticated when this machine has not joined a server. A refusal from the server becomes client_unsupported (426: the server needs a newer litebackup on this machine) or, with 503, not_configured (the server waits for setup), wrong_server (the server this machine reached is not the one its session joined, or does not own the database), unauthenticated (the server no longer accepts this machine's key), forbidden (the key may not do this), plan_limit (the server's plan has no room for another database), or integrity (the version's bucket objects failed an integrity check). lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is unavailable. A client treats a code it does not know as a failure.
+         * @description What went wrong, in one word. The socket answers with file_exists (the file a restore or an acquire would write, or a -journal, -wal, or -shm beside it, already exists), rule_exists (a backup rule with other settings already covers the path, and the error carries that rule), lock_unavailable (another machine holds the write lock a command asks for, as an acquire, a revert, or a failover does), not_found, still_open, invalid_argument, timeout, cursor_expired (an events cursor older than the oldest event kept), changed (an offload or acquire refused because the local file changed under it: written after its last sync, never synced, or written while an acquire replaced it), rule_database (a release of a database a backup rule on this machine keeps, whose write lock the rule never gives up; stop its backup to hand it off), not_durable (an offload refused until the server, or the bucket when it waits for cloud, holds the synced version, or a cloud wait whose name now holds another server database), and the others by their names; busy (a foreground backup refused because another job, a continuous backup, or another machine writes the database), cancelled (a command interrupted before it finished), drain_required (a credential other than the one the client took its write locks with, refused until a drain released them), and launch_failed (the command could not start the client on this machine, or the client exited before it listened) come from the litebackup command alone, which also answers unauthenticated when this machine has not joined a server. A refusal from the server becomes client_unsupported (426: the server needs a newer litebackup on this machine) or, with 503, not_configured (the server waits for setup), wrong_server (the server this machine reached is not the one its session joined, or does not own the database), unauthenticated (the server no longer accepts this machine's key), forbidden (the key may not do this), plan_limit (the server's plan has no room for another database), rate_limited (the server sheds load and asks to be tried later: a restore retries it for about 30 seconds, as its Retry-After says, before it answers so), or integrity (the version's bucket objects failed an integrity check). A restore answers integrity too when every page of the version arrived intact but SQLite's quick_check finds the database damaged: the version itself is corrupt, so a retry gives the same file, and an earlier version is the way back. A transfer cut short stays unavailable. lock_unavailable, lock_lost, not_found, invalid_argument, and timeout keep their meaning, and any other refusal (a busy server, one short of disk, one unreachable) is unavailable. A client treats a code it does not know as a failure.
          * @enum {string}
          */
-        ErrorCode: "busy" | "cancelled" | "changed" | "client_unsupported" | "conflict" | "cursor_expired" | "drain_required" | "file_exists" | "forbidden" | "integrity" | "internal" | "invalid_argument" | "launch_failed" | "limit_exceeded" | "lock_lost" | "lock_unavailable" | "method_not_allowed" | "not_configured" | "not_durable" | "not_found" | "plan_limit" | "rule_database" | "rule_exists" | "sdk_unsupported" | "still_open" | "timeout" | "unauthenticated" | "unavailable" | "wrong_server";
+        ErrorCode: "busy" | "cancelled" | "changed" | "client_unsupported" | "conflict" | "cursor_expired" | "drain_required" | "file_exists" | "forbidden" | "integrity" | "internal" | "invalid_argument" | "launch_failed" | "limit_exceeded" | "lock_lost" | "lock_unavailable" | "method_not_allowed" | "not_configured" | "not_durable" | "not_found" | "plan_limit" | "rate_limited" | "rule_database" | "rule_exists" | "sdk_unsupported" | "still_open" | "timeout" | "unauthenticated" | "unavailable" | "wrong_server";
         BackupRule: {
             id: string;
             /** @description the path or glob */
@@ -650,7 +675,11 @@ export interface components {
             database: components["schemas"]["DatabaseStatus"];
             checkpointed: boolean;
             vacuumed: boolean;
-            offloaded: boolean;
+            /**
+             * Format: date-time
+             * @description when the release removed the local file; absent when it kept the file
+             */
+            offloaded?: string;
         };
         OffloadRequest: {
             name: string;
@@ -669,7 +698,7 @@ export interface components {
              * Format: date-time
              * @description when the writer took the lock
              */
-            acquired_time?: string;
+            lock_acquired?: string;
             /**
              * Format: date-time
              * @description on the server's clock
@@ -808,9 +837,9 @@ export interface components {
              * Format: int64
              * @description how many databases the drain synced as asked and released
              */
-            released: number;
+            released_count: number;
             /** @description every database the drain could not sync, wait for, or release, each keeping any write lock it holds, and every conflicted copy whose writes are not on the server, with conflict; empty only when the drain released every database it covers, which is the one case the daemon stops */
-            failed: components["schemas"]["DrainFailure"][];
+            failures: components["schemas"]["DrainFailure"][];
         };
     };
     responses: never;

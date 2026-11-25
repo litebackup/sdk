@@ -92,7 +92,7 @@ class LeaseDaemonStandIn < ContractDaemon
     super() do |received|
       case received.path
       when "/v1/databases/acquire" then json_answer("database" => status, "decision" => "created")
-      when "/v1/databases/release" then json_answer("database" => status, "offloaded" => false)
+      when "/v1/databases/release" then json_answer("database" => status)
       else json_answer(status)
       end
     end

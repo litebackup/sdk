@@ -748,7 +748,7 @@ export class Litebackup {
     }
   }
 
-  /** Syncs every database a final time, releases every write lock, ends the session, and stops the daemon. A backup another machine writes holds no lock and stays waiting. Each database it could not sync or release is in failed, with its code, and keeps any write lock it holds; the session and the daemon then stay. An empty failed is the only complete shutdown. close() never does this. */
+  /** Syncs every database a final time, releases every write lock, ends the session, and stops the daemon. A backup another machine writes holds no lock and stays waiting. Each database it could not sync or release is in failures, with its code, and keeps any write lock it holds; the session and the daemon then stay. An empty failures is the only complete shutdown. close() never does this. */
   async #shutdown(options: ShutdownOptions = {}): Promise<ShutdownResult> {
     const body: Schemas["ShutdownRequest"] = {};
     if (options.durability) body.durability = options.durability;

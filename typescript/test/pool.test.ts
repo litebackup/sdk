@@ -20,7 +20,7 @@ async function leaseDaemon(t: TestContext, status: Record<string, unknown>) {
     return [200, answer(request)];
   };
   daemon.route("POST /v1/databases/acquire", step("acquire", () => ({ database: { ...status, state: "syncing" }, decision: "downloaded" })));
-  daemon.route("POST /v1/databases/release", step("release", () => ({ database: status, checkpointed: false, vacuumed: false, offloaded: false })));
+  daemon.route("POST /v1/databases/release", step("release", () => ({ database: status, checkpointed: false, vacuumed: false })));
   daemon.route("POST /v1/databases/sync", step("sync", () => status));
   daemon.route("GET /v1/databases/status", step("status", () => status));
   daemon.route("GET /v1/backup-rules/list", step("rules", () => ({ rules: [] })));
@@ -149,7 +149,7 @@ test("a lease whose release failed after its close reopens the handle at its pat
   await assert.rejects(pool.release("agents/7.sqlite"), (error: unknown) => error instanceof LeaseCleanupError && error.step === "release");
   lease.daemon.route("POST /v1/databases/release", () => {
     lease.steps.push("release");
-    return [200, { database: lease.status, checkpointed: false, vacuumed: false, offloaded: false }];
+    return [200, { database: lease.status, checkpointed: false, vacuumed: false }];
   });
   assert.equal(await pool.lease("agents/7.sqlite", { path }, (db) => db), "db 2");
   assert.deepEqual(opened, [path, path]);
@@ -269,7 +269,7 @@ test("idleRelease releases an unused lease, and a failed release goes to onRelea
   await eventually(5000, () => reported.length > 0, () => "no failed release was reported");
   assert.equal(reported[0]!.step, "release");
   assert.equal(reported[0]!.details.durability, "server");
-  lease.daemon.route("POST /v1/databases/release", () => [200, { database: lease.status, checkpointed: false, vacuumed: false, offloaded: false }]);
+  lease.daemon.route("POST /v1/databases/release", () => [200, { database: lease.status, checkpointed: false, vacuumed: false }]);
   await pool.close();
 });
 

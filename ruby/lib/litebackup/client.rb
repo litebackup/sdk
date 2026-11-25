@@ -117,7 +117,7 @@ module Litebackup
     end
 
     # Connects, starting the daemon when needed; fails with daemon_unsupported
-    # for a daemon older than 1.1.0.
+    # for a daemon older than 1.5.0.
     def connect
       ensure_open
       @connect_lock.synchronize do
@@ -487,9 +487,9 @@ module Litebackup
 
     # Final-syncs every database, releases every write lock, and stops the
     # daemon. A backup another machine writes has no lock and stays waiting.
-    # Each database it could not sync or release is in failed, with its code,
+    # Each database it could not sync or release is in failures, with its code,
     # and keeps any write lock it has; the session and the daemon then stay.
-    # An empty failed is the only complete shutdown. close never does this.
+    # An empty failures is the only complete shutdown. close never does this.
     def shutdown(durability: nil, timeout: nil)
       @client.call(Wire.shutdown(durability: durability, timeout: timeout))
     end

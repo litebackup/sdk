@@ -15,8 +15,8 @@
     }
   },
   "response": {
-    "released": 2,
-    "failed": [
+    "released_count": 2,
+    "failures": [
       {
         "name": "orders.sqlite",
         "code": "lock_unavailable",
