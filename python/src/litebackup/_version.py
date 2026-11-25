@@ -1,6 +1,6 @@
 """The SDK version and the oldest daemon it talks to."""
 
-SDK_VERSION = "1.3.0"
+SDK_VERSION = "1.4.0"
 """Sent with every call. Daemons refuse SDKs older than their minimum with sdk_unsupported."""
 
 MINIMUM_DAEMON_VERSION = "1.1.0"

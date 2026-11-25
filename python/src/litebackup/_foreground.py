@@ -200,9 +200,9 @@ async def await_job_async(process: asyncio.subprocess.Process, deadline_seconds:
         if stream is None:
             return
         while chunk := await stream.read(_STDERR_PART):
-            room = _STDERR_PART - len(head)
-            head.extend(chunk[:room])
-            tail.extend(chunk[room:])
+            head_remaining = _STDERR_PART - len(head)
+            head.extend(chunk[:head_remaining])
+            tail.extend(chunk[head_remaining:])
             del tail[:-_STDERR_PART]
             pending.extend(chunk)
             *lines, rest = bytes(pending).split(b"\n")

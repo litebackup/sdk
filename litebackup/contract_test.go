@@ -1147,17 +1147,17 @@ func TestContractMissingOverride(t *testing.T) {
 	for _, override := range fixture.Overrides {
 		t.Run(override, func(t *testing.T) {
 			missing := filepath.Join(t.TempDir(), filepath.FromSlash(fixture.MissingFile))
-			option := ""
+			binaryPathArgument := ""
 			switch override {
 			case "option":
 				t.Setenv(BinaryPathEnvironment, "")
-				option = missing
+				binaryPathArgument = missing
 			case "environment":
 				t.Setenv(BinaryPathEnvironment, missing)
 			default:
 				t.Fatalf("unknown override %q", override)
 			}
-			binary, err := resolveBinary(option)
+			binary, err := resolveBinary(binaryPathArgument)
 			var sdkError *Error
 			if !errors.As(err, &sdkError) || sdkError.Code != fixture.Code ||
 				!strings.Contains(sdkError.Message, fixture.MessageContains) ||

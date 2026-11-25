@@ -208,9 +208,9 @@ func TestSQLAdapterNeverCreates(t *testing.T) {
 	}
 }
 
-// TestSQLAdapterDSNOptions opens with the driver options a DSN function sets.
-func TestSQLAdapterDSNOptions(t *testing.T) {
-	for _, driver := range []struct{ name, option string }{
+// TestSQLAdapterDSNParameters opens with the driver parameters a DSN function sets.
+func TestSQLAdapterDSNParameters(t *testing.T) {
+	for _, driver := range []struct{ name, dsnParameter string }{
 		{"sqlite", "_pragma=busy_timeout(4321)"},
 		{"sqlite3", "_busy_timeout=4321"},
 	} {
@@ -221,7 +221,7 @@ func TestSQLAdapterDSNOptions(t *testing.T) {
 				t.Fatal(err)
 			}
 			adapter := litebackup.SQLAdapter(driver.name, &litebackup.SQLAdapterArgs{
-				DSN: func(path string) string { return "file:" + path + "?" + driver.option },
+				DSN: func(path string) string { return "file:" + path + "?" + driver.dsnParameter },
 			})
 			db, err := adapter.Open(ctx, path)
 			if err != nil {

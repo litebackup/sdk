@@ -68,12 +68,12 @@ for RUBY_VERSION in "${SELECTED_RUBY_VERSIONS[@]}"; do
     TEST_IMAGE="$(build_test_image "${RUBY_VERSION}")"
     RUBY_CACHE="${CACHE_ROOT}/${RUBY_VERSION}"
     mkdir --parents "${RUBY_CACHE}/bundle" "${RUBY_CACHE}/home"
-    MOUNT_OPTIONS=(
+    DOCKER_MOUNTS=(
         --volume "${SDK_DIRECTORY}:${SDK_DIRECTORY}"
         --volume "${RUBY_CACHE}/bundle:/bundle"
         --volume "${RUBY_CACHE}/home:/tmp/home"
     )
-    ENVIRONMENT_OPTIONS=(
+    DOCKER_ENVIRONMENT=(
         --env HOME=/tmp/home
         --env BUNDLE_PATH=/bundle
         --env BUNDLE_APP_CONFIG=/tmp/home/.bundle
@@ -81,15 +81,15 @@ for RUBY_VERSION in "${SELECTED_RUBY_VERSIONS[@]}"; do
     # The RubyGems key a release's gem push uses, passed by name only, so
     # its value never appears in a command line.
     if [ -n "${GEM_HOST_API_KEY:-}" ]; then
-        ENVIRONMENT_OPTIONS+=(--env GEM_HOST_API_KEY)
+        DOCKER_ENVIRONMENT+=(--env GEM_HOST_API_KEY)
     fi
     if [ "${INTEGRATION}" = 1 ]; then
         if [ -z "${LITEBACKUP_PATH:-}" ]; then
             echo "--integration needs LITEBACKUP_PATH, a static litebackup binary from scripts/build" >&2
             exit 2
         fi
-        MOUNT_OPTIONS+=(--volume "${LITEBACKUP_PATH}:${LITEBACKUP_PATH}:ro")
-        ENVIRONMENT_OPTIONS+=(
+        DOCKER_MOUNTS+=(--volume "${LITEBACKUP_PATH}:${LITEBACKUP_PATH}:ro")
+        DOCKER_ENVIRONMENT+=(
             --env "LITEBACKUP_PATH=${LITEBACKUP_PATH}"
             --env LITEBACKUP_INTEGRATION=1
         )
@@ -103,8 +103,8 @@ for RUBY_VERSION in "${SELECTED_RUBY_VERSIONS[@]}"; do
     # The bundler the lockfile names is installed first, so every image uses it.
     docker run --rm \
         --user "$(id --user):$(id --group)" \
-        "${MOUNT_OPTIONS[@]}" \
-        "${ENVIRONMENT_OPTIONS[@]}" \
+        "${DOCKER_MOUNTS[@]}" \
+        "${DOCKER_ENVIRONMENT[@]}" \
         --workdir "${GEM_DIRECTORY}" \
         "${TEST_IMAGE}" \
         bash -c "scripts/install-bundler && ${CONTAINER_STEPS}" \

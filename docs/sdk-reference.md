@@ -333,7 +333,7 @@ unless `discardLocal` asked for the head in its place.
 
 ## Release compatibility
 
-The SDKs and the litebackup client share one release version, 1.3.0. An SDK
+The SDKs and the litebackup client share one release version, 1.4.0. An SDK
 refuses a client older than 1.1.0 with `daemon_unsupported`, and the client
 answers an SDK older than 1.1.0 with 426 `sdk_unsupported`. A server that needs
 a newer client on the machine is refused with `client_unsupported`. Keep the

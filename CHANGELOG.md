@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0
+
+No changes to the SDKs. They are published at 1.4.0 with the litebackup client
+1.4.0, and keep working with a 1.1.0 client.
+
 ## 1.3.0
 
 The Ruby, PHP, and Rust SDKs join TypeScript, Python, and Go, at 1.3.0 with

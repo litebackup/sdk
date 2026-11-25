@@ -77,21 +77,21 @@ func TestConnectPassesTheCredential(t *testing.T) {
 		apiKey    = "litebackup_examplekeyvalue@backups.example.com"
 	)
 	connects := []struct {
-		environment string
-		option      string
-		launched    string
+		environment    string
+		apiKeyArgument string
+		launched       string
 	}{
-		{environment: "", option: joinToken, launched: "launch " + joinToken},
-		{environment: joinToken, option: apiKey, launched: "launch " + apiKey},
-		{environment: apiKey, option: "", launched: "launch " + apiKey},
-		{environment: joinToken, option: "", launched: "launch " + joinToken},
+		{environment: "", apiKeyArgument: joinToken, launched: "launch " + joinToken},
+		{environment: joinToken, apiKeyArgument: apiKey, launched: "launch " + apiKey},
+		{environment: apiKey, apiKeyArgument: "", launched: "launch " + apiKey},
+		{environment: joinToken, apiKeyArgument: "", launched: "launch " + joinToken},
 	}
 	for _, connect := range connects {
 		binary, calls := credentialStandIn(t)
 		t.Setenv(APIKeyEnvironment, connect.environment)
 		_, err := Connect(
 			t.Context(),
-			&ConnectArgs{Session: "unit", BinaryPath: binary, APIKey: connect.option},
+			&ConnectArgs{Session: "unit", BinaryPath: binary, APIKey: connect.apiKeyArgument},
 		)
 		if err == nil {
 			t.Fatal("Connect succeeded without a daemon")

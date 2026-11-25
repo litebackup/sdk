@@ -162,9 +162,9 @@ export async function foregroundBackup(
     child.stdout.resume();
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
       failureLines.add(chunk);
-      const room = stderrPart - head.length;
-      head += chunk.slice(0, room);
-      tail = (tail + chunk.slice(Math.max(room, 0))).slice(-stderrPart);
+      const headRemaining = stderrPart - head.length;
+      head += chunk.slice(0, headRemaining);
+      tail = (tail + chunk.slice(Math.max(headRemaining, 0))).slice(-stderrPart);
     });
     let killTimer: NodeJS.Timeout | undefined;
     let stopping = false;
