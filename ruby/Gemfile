@@ -6,6 +6,9 @@ gemspec
 
 group :development do
   gem "minitest", "6.1.0"
+  # RuboCop's parser; built from source, because its precompiled Linux gems
+  # need Ruby 3.3 and the SDK supports 3.2.
+  gem "prism", "2.1.0", force_ruby_platform: true
   gem "rails", "8.1.4.1"
   gem "rake", "13.4.2"
   gem "rubocop", "1.92.3"

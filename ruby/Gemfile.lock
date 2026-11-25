@@ -153,14 +153,6 @@ GEM
       prettyprint
     prettyprint (0.2.1)
     prism (2.1.0)
-    prism (2.1.0-aarch64-linux-gnu)
-    prism (2.1.0-aarch64-linux-musl)
-    prism (2.1.0-arm-linux-gnu)
-    prism (2.1.0-arm-linux-musl)
-    prism (2.1.0-arm64-darwin)
-    prism (2.1.0-x86_64-darwin)
-    prism (2.1.0-x86_64-linux-gnu)
-    prism (2.1.0-x86_64-linux-musl)
     racc (1.8.1)
     rack (3.2.9)
     rack-session (2.1.2)
@@ -269,6 +261,7 @@ PLATFORMS
 DEPENDENCIES
   litebackup!
   minitest (= 6.1.0)
+  prism (= 2.1.0)
   rails (= 8.1.4.1)
   rake (= 13.4.2)
   rubocop (= 1.92.3)

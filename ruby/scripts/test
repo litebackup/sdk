@@ -77,6 +77,7 @@ for RUBY_VERSION in "${SELECTED_RUBY_VERSIONS[@]}"; do
         --env HOME=/tmp/home
         --env BUNDLE_PATH=/bundle
         --env BUNDLE_APP_CONFIG=/tmp/home/.bundle
+        --env "BUNDLE_FROZEN=${BUNDLE_FROZEN:-true}"
     )
     # The RubyGems key a release's gem push uses, passed by name only, so
     # its value never appears in a command line.
