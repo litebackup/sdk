@@ -13,8 +13,7 @@ case "${server}" in
   [Hh][Tt][Tt][Pp]://* | [Hh][Tt][Tt][Pp][Ss]://*) ;;
   *) server="https://${server}" ;;
 esac
-curl --fail --silent --show-error \
-  --header "Authorization: Bearer ${LITEBACKUP_API_KEY%@*}" \
+curl -fsS -H "Authorization: Bearer ${LITEBACKUP_API_KEY%@*}" \
   "${server%/}/v1/settings/show"
 ```
 
